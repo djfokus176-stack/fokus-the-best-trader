@@ -33,19 +33,32 @@ def secret(name,default=''):
 with st.sidebar:
     st.header('⚙️ NOWE USTAWIENIA')
     instrument=st.text_input('Instrument / EPIC Capital.com',value=secret('CAPITAL_EPIC','US500'))
+    preferred_env = secret('CAPITAL_ENV','DEMO').upper().strip()
+    if preferred_env not in ('DEMO','LIVE'):
+        preferred_env = 'DEMO'
+    capital_env = st.radio('Środowisko API Capital.com', ['DEMO','LIVE'],
+        index=0 if preferred_env=='DEMO' else 1,
+        help='LIVE oznacza tylko odczyt cen z konta rzeczywistego. Program NIE składa zleceń.',
+        horizontal=True)
+    if st.session_state.get('_prev_capital_env', capital_env) != capital_env:
+        for k in ('_capital_client','market_snap','ai_context','source_override',
+                  'initial_scan_attempted','last_feed_error','epic_matches'):
+            st.session_state.pop(k, None)
+    st.session_state['_prev_capital_env'] = capital_env
     tf=st.selectbox('Interwał',['MINUTE','MINUTE_5','MINUTE_15','HOUR'],format_func=lambda x:{'MINUTE':'M1','MINUTE_5':'M5','MINUTE_15':'M15','HOUR':'H1'}[x])
     strategy=st.radio('Strategia',['DRUGA FALA','EMA TREND'])
     max_spread=st.slider('Maksymalny spread (pkt)',.2,5.0,2.0,.1)
     st.markdown('---')
     st.write('🔐 Klucze API: tylko Streamlit Secrets / ENV. Nie są zapisywane do historii, ZIP ani GitHuba.')
-    has_cap=all(secret(n) for n in ['CAPITAL_API_KEY','CAPITAL_IDENTIFIER','CAPITAL_PASSWORD'])
+    cap_identifier = secret('CAPITAL_IDENTIFIER') or secret('CAPITAL_LOGIN')
+    has_cap=bool(secret('CAPITAL_API_KEY') and cap_identifier and secret('CAPITAL_PASSWORD'))
     if has_cap:
         st.success('✅ Capital.com skonfigurowany (obecność kluczy; połączenie wymaga testu)')
-        if st.button('🔎 SPRAWDŹ EPIC NA KONCIE DEMO',use_container_width=True):
+        if st.button(f'🔎 SPRAWDŹ EPIC NA KONCIE {capital_env}',use_container_width=True):
             try:
                 if '_capital_client' not in st.session_state:
                     st.session_state['_capital_client']=CapitalReadOnly(secret('CAPITAL_API_KEY'),
-                        secret('CAPITAL_IDENTIFIER'),secret('CAPITAL_PASSWORD'))
+                        cap_identifier,secret('CAPITAL_PASSWORD'),environment=capital_env)
                 st.session_state['epic_matches']=st.session_state['_capital_client'].search_markets(instrument)
                 if not st.session_state['epic_matches']:
                     st.warning('Nie znaleziono tego symbolu. Spróbuj hasła S&P lub SP500.')
@@ -85,7 +98,7 @@ with market_tab:
     auto_scan = bool(has_cap and csv is None and not st.session_state.get('initial_scan_attempted') and st.session_state.get('market_snap') is None)
     if auto_scan:
         st.session_state['initial_scan_attempted'] = True
-        st.info('🔄 Pierwsza próba pobrania świec z Capital.com DEMO...')
+        st.info(f'🔄 Pierwsza próba pobrania świec z Capital.com {capital_env}...')
     if load or auto_scan:
         try:
             st.session_state.pop('last_feed_error', None)
@@ -96,10 +109,10 @@ with market_tab:
             elif has_cap:
                 if '_capital_client' not in st.session_state:
                     st.session_state['_capital_client']=CapitalReadOnly(secret('CAPITAL_API_KEY'),
-                        secret('CAPITAL_IDENTIFIER'),secret('CAPITAL_PASSWORD'))
+                        cap_identifier,secret('CAPITAL_PASSWORD'),environment=capital_env)
                 st.session_state['market_snap']=st.session_state['_capital_client'].candles(
                     instrument,tf,count=350,max_spread=max_spread)
-                st.session_state['source_override']='Capital.com DEMO REST'
+                st.session_state['source_override']=f'Capital.com {capital_env} REST'
             else:
                 st.error('Brak Capital.com API lub CSV. NIE generuję sztucznych cen.')
         except (FeedError,ValueError) as ex:
@@ -148,7 +161,7 @@ with market_tab:
                 st.success(snap.reason)
             else:
                 st.error('WAIT / FEED: '+snap.reason)
-            ready=snap.good and src=='Capital.com DEMO REST'
+            ready=snap.good and src in ('Capital.com DEMO REST','Capital.com LIVE REST')
             if src.startswith('CSV'):
                 st.warning('CSV: wyłącznie symulacja edukacyjna. Nie ma sygnału do egzekucji live.')
             if snap.frame is not None and len(snap.frame)>=70:
