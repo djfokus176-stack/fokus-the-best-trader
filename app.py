@@ -103,9 +103,13 @@ with market_tab:
             else:
                 st.error('Brak Capital.com API lub CSV. NIE generuję sztucznych cen.')
         except (FeedError,ValueError) as ex:
+            st.session_state.pop('market_snap', None)
+            st.session_state.pop('ai_context', None)
             st.session_state['last_feed_error'] = str(ex)
             st.error('❌ Nie udało się pobrać świec: '+str(ex))
         except Exception as ex:
+            st.session_state.pop('market_snap', None)
+            st.session_state.pop('ai_context', None)
             st.session_state['last_feed_error'] = f'Błąd aplikacji: {type(ex).__name__}'
             st.error('❌ Błąd pobierania danych: '+type(ex).__name__)
     elif st.session_state.get('last_feed_error'):
