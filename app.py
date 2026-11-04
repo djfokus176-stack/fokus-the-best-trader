@@ -40,7 +40,20 @@ with st.sidebar:
     st.write('🔐 Klucze API: tylko Streamlit Secrets / ENV. Nie są zapisywane do historii, ZIP ani GitHuba.')
     has_cap=all(secret(n) for n in ['CAPITAL_API_KEY','CAPITAL_IDENTIFIER','CAPITAL_PASSWORD'])
     if has_cap:
-        st.success('✅ Capital.com skonfigurowany')
+        st.success('✅ Capital.com skonfigurowany (obecność kluczy; połączenie wymaga testu)')
+        if st.button('🔎 SPRAWDŹ EPIC NA KONCIE DEMO',use_container_width=True):
+            try:
+                if '_capital_client' not in st.session_state:
+                    st.session_state['_capital_client']=CapitalReadOnly(secret('CAPITAL_API_KEY'),
+                        secret('CAPITAL_IDENTIFIER'),secret('CAPITAL_PASSWORD'))
+                st.session_state['epic_matches']=st.session_state['_capital_client'].search_markets(instrument)
+                if not st.session_state['epic_matches']:
+                    st.warning('Nie znaleziono tego symbolu. Spróbuj hasła S&P lub SP500.')
+            except FeedError as ex:
+                st.error(str(ex))
+        if st.session_state.get('epic_matches'):
+            st.caption('Wyniki z Capital.com — wpisz poprawny EPIC w polu wyżej.')
+            st.dataframe(st.session_state['epic_matches'],hide_index=True,use_container_width=True)
     else:
         st.warning('⚠️ Brak API Capital.com. Możesz analizować własny CSV.')
     st.info('Streamlit Cloud nie gwarantuje skanera działającego 24/7. Do tego potrzebny osobny worker na stale działającym hoście.')
@@ -81,8 +94,11 @@ with market_tab:
                 st.session_state['market_snap']=evaluate_snapshot(raw,instrument,tf,max_spread=max_spread)
                 st.session_state['source_override']='CSV NAUKA (NIE LIVE)'
             elif has_cap:
-                client=CapitalReadOnly(secret('CAPITAL_API_KEY'),secret('CAPITAL_IDENTIFIER'),secret('CAPITAL_PASSWORD'))
-                st.session_state['market_snap']=client.candles(instrument,tf,count=350,max_spread=max_spread)
+                if '_capital_client' not in st.session_state:
+                    st.session_state['_capital_client']=CapitalReadOnly(secret('CAPITAL_API_KEY'),
+                        secret('CAPITAL_IDENTIFIER'),secret('CAPITAL_PASSWORD'))
+                st.session_state['market_snap']=st.session_state['_capital_client'].candles(
+                    instrument,tf,count=350,max_spread=max_spread)
                 st.session_state['source_override']='Capital.com DEMO REST'
             else:
                 st.error('Brak Capital.com API lub CSV. NIE generuję sztucznych cen.')
