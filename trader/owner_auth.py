@@ -36,3 +36,13 @@ def google_identity_matches(user, required_email: str) -> bool:
         is_logged_in and given == required_email.strip().lower() and
         (verified is True or str(verified).strip().lower() == "true")
     )
+
+
+def google_oidc_ready(settings) -> bool:
+    """Check presence only; actual OIDC token exchange is tested in Streamlit."""
+    required = ('redirect_uri','cookie_secret','client_id',
+                'client_secret','server_metadata_url')
+    try:
+        return all(bool(str(settings.get(key, '')).strip()) for key in required)
+    except (TypeError, AttributeError):
+        return False
