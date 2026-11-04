@@ -14,5 +14,6 @@ jobs:
         with:
           python-version: '3.11'
       - run: python -m pip install -r requirements.txt pytest
+      - run: python -m pip freeze | grep -E '^(streamlit|pandas|numpy|plotly|requests|openai)=='
       - run: PYTHONPATH=. pytest -q
       - run: python -m compileall -q trader app.py healthcheck.py tests
