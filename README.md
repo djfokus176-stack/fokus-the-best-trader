@@ -1,5 +1,57 @@
 # 🚀 FOKU$ THE BEST TRADER — v0.2
 
+## Wygodne logowanie bez wpisywania hasła co chwilę
+
+**Nowy tryb Google (zalecany):** natywne Streamlit `st.login()` z OIDC.
+Po **jednorazowym** ustawieniu konta Google, Streamlit przechowuje własną
+tożsamość w ciasteczku nawet do **30 dni** (nie jest to gwarancja, że
+Google nigdy ponownie nie poprosi o uwierzytelnienie). W tym trybie
+własne `APP_ACCESS_PASSWORD` nie jest wymagane podczas każdej wizyty.
+
+**Co ustawić jednorazowo:**
+
+1. W konsoli Google Cloud utwórz klienta OAuth typu **Web application**, a
+   jako autoryzowany redirect URI dodaj dokładnie
+   `https://fokus-the-best-trader.streamlit.app/oauth2callback`.
+   Zapisz otrzymane identyfikatory klienta **wyłącznie w Streamlit Secrets**.
+2. W Streamlit Cloud → My apps → Settings → Secrets dodaj lub popraw:
+   ```toml
+   APP_AUTH_MODE = "google"
+   OWNER_EMAIL = "twoj_adres_google@example.com"
+   AUTO_SCAN_DEFAULT = true
+
+   [auth]
+   redirect_uri = "https://fokus-the-best-trader.streamlit.app/oauth2callback"
+   cookie_secret = "TWOJ_DLUGI_LOSOWY_SEKRET"
+   client_id = "GOOGLE_CLIENT_ID"
+   client_secret = "GOOGLE_CLIENT_SECRET"
+   server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
+   ```
+   Zamień WSZYSTKIE przykładowe wartości. `OWNER_EMAIL` jest **wyłącznie jednym**
+   zweryfikowanym adresem Google (żaden inny użytkownik Google nie wejdzie).
+   `cookie_secret` musi być mocnym, losowym sekretem, innym niż hasło dostępu i klucze API.
+3. Kliknij **Save / Reboot app**, a następnie **Wejdź przez Google**.
+   Po zalogowaniu przy następnych wejściach aplikacja powinna rozpoznać
+   właściciela automatycznie. **Wyloguj** usuwa ciasteczko.
+4. Jeśli nie skonfigurowałeś Google, pozostaw `APP_AUTH_MODE = "password"`
+   i istniejące `APP_ACCESS_PASSWORD`. Ten tryb zachowuje dostęp jedynie w
+   aktualnej sesji, co może wymagać ponownego wpisania po zamknięciu przeglądarki.
+
+**Ograniczenia:** utworzenie klienta Google OAuth i wpisanie jego danych
+w Secrets to ręczny jednorazowy etap właściciela — ChatGPT nie posiada
+jego identyfikatorów ani nie może ich bezpiecznie odgadnąć. Google OIDC
+nie zostało przetestowane na prywatnym koncie właściciela. Tożsamość
+przywracana jest w oparciu o Streamlit OIDC i może zostać wylogowana
+wcześniej przez dostawcę lub przeglądarkę. Aplikacja nie przechowuje
+kluczy API w ciasteczkach.
+
+**Udogodnienia:** pola API są zwinięte; Secretów nie trzeba wpisywać
+ponownie. `AUTO_SCAN_DEFAULT=true` włącza skanowanie po zalogowaniu
+przy otwartej stronie, bez automatycznych płatnych zapytań do OpenAI.
+To **nie** włącza działania 24/7 przy zamkniętej stronie.
+
+---
+
 ## Aktualizacja 2026-11-04: właściciel + MARKET DNA (v0.2)
 
 **Prywatność:** jeżeli kliknięto `Discard` w ustawieniach Sharing, zmiany dostępu NIE zostały zapisane. Aplikacja mogła pozostać publiczna. Aby korzystać z tego projektu, trzeba teraz **najpierw ustawić hasło do panelu** w Streamlit → My apps → Settings → Secrets:
