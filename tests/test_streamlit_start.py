@@ -1,11 +1,32 @@
-"""Cloud smoke tests, using real Streamlit runtime but no user API credentials."""
+"""Cloud smoke tests with the owner access gate."""
 from pathlib import Path
 
-def test_main_app_renders_without_api_keys():
+APP = str(Path(__file__).resolve().parents[1] / 'app.py')
+
+
+def test_main_app_is_locked_without_password(monkeypatch):
     from streamlit.testing.v1 import AppTest
-    a = AppTest.from_file(str(Path(__file__).resolve().parents[1] / 'app.py'), default_timeout=30).run()
+    monkeypatch.delenv('APP_ACCESS_PASSWORD',raising=False)
+    a = AppTest.from_file(APP, default_timeout=30).run()
     assert not a.exception, [str(x.message) for x in a.exception]
-    assert len(a.tabs) == 4
+    assert len(a.tabs) == 0
+
+
+def test_main_app_renders_after_owner_login(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    password='test-owner-only-password-2026'
+    monkeypatch.setenv('APP_ACCESS_PASSWORD',password)
+    a=AppTest.from_file(APP,default_timeout=30).run()
+    assert not a.exception, [str(x.message) for x in a.exception]
+    assert len(a.tabs) == 0
+    assert len(a.text_input)>0
+    assert len(a.button)>0
+    a.text_input[0].set_value(password)
+    a.button[0].click()
+    a.run()
+    assert not a.exception, [str(x.message) for x in a.exception]
+    assert len(a.tabs) == 5
+
 
 def test_independent_healthcheck_renders():
     from streamlit.testing.v1 import AppTest
