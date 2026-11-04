@@ -7,7 +7,10 @@ import requests
 import pandas as pd
 
 PERIOD = {'MINUTE': 60, 'MINUTE_5': 300, 'MINUTE_15': 900, 'HOUR': 3600}
-BASE = 'https://demo-api-capital.backend-capital.com'
+API_BASE = {
+    'DEMO': 'https://demo-api-capital.backend-capital.com',
+    'LIVE': 'https://api-capital.backend-capital.com',
+}
 
 class FeedError(RuntimeError):
     pass
@@ -68,14 +71,15 @@ def parse_prices(payload: dict) -> pd.DataFrame:
     return df
 
 def evaluate_snapshot(raw: pd.DataFrame, epic: str, resolution: str,
-                      now: datetime | None = None, max_spread: float = 2.0) -> Snapshot:
+                      now: datetime | None = None, max_spread: float = 2.0,
+                      source: str = 'Capital.com DEMO REST') -> Snapshot:
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None:
         raise ValueError('now musi mieć strefę czasową')
     if resolution not in PERIOD:
         raise ValueError('Nieznany interwał')
     if raw.empty or len(raw) < 70:
-        return Snapshot(raw.iloc[0:0], 'Capital.com DEMO REST', epic, resolution, 0, None, None, False,
+        return Snapshot(raw.iloc[0:0], source, epic, resolution, 0, None, None, False,
                         'Za mało świec (wymagane minimum 70)')
     # The newest candle could still be forming; use the preceding closed candle.
     confirmed = raw.iloc[:-1].copy()
@@ -97,14 +101,18 @@ def evaluate_snapshot(raw: pd.DataFrame, epic: str, resolution: str,
         reason = 'Wykryto duże luki w świecach'
     else:
         reason = 'OK: poprzednia świeca ma nowszego następcę (nie potwierdza ticków ani jakości feedu)'
-    return Snapshot(confirmed, 'Capital.com DEMO REST', epic, resolution,
+    return Snapshot(confirmed, source, epic, resolution,
                     spread, confirmed_time, age, reason.startswith('OK:'), reason)
 
 class CapitalReadOnly:
-    def __init__(self, api_key: str, identifier: str, password: str):
+    def __init__(self, api_key: str, identifier: str, password: str, environment: str = 'DEMO'):
         if not (api_key and identifier and password):
             raise FeedError('Brak kluczy CAPITAL_API_KEY / CAPITAL_IDENTIFIER / CAPITAL_PASSWORD')
-        self.api_key, self.identifier, self.password = api_key, identifier, password
+        self.environment = str(environment).upper().strip()
+        if self.environment not in API_BASE:
+            raise FeedError('Nieznane środowisko API: wybierz DEMO albo LIVE.')
+        self.base_url = API_BASE[self.environment]
+        self.api_key, self.identifier, self.password = api_key.strip(), identifier.strip(), password
         self.session = requests.Session()
         self.cst = self.token = None
         self.session_started = 0
@@ -113,7 +121,7 @@ class CapitalReadOnly:
         if not self.cst or time.time() - self.session_started >= 480:
             # POST below is session authentication only, NEVER a trading order.
             try:
-                r = self.session.post(f'{BASE}/api/v1/session',
+                r = self.session.post(f'{self.base_url}/api/v1/session',
                     headers={'X-CAP-API-KEY':self.api_key, 'Content-Type':'application/json'},
                     json={'identifier':self.identifier, 'password':self.password,
                           'encryptedPassword':False}, timeout=10)
@@ -124,7 +132,7 @@ class CapitalReadOnly:
                     raise FeedError('Brak tokenów sesji')
                 self.session_started = time.time()
             except requests.RequestException as ex:
-                raise FeedError(http_error_message(ex,'Logowanie Capital.com')) from ex
+                raise FeedError(http_error_message(ex, f'Logowanie Capital.com {self.environment}')) from ex
         return {'X-CAP-API-KEY': self.api_key, 'CST': self.cst,
                 'X-SECURITY-TOKEN': self.token}
 
@@ -134,20 +142,21 @@ class CapitalReadOnly:
         if not epic.replace('_','').isalnum():
             raise FeedError('Niepoprawny EPIC')
         try:
-            r = self.session.get(f'{BASE}/api/v1/prices/{epic}',
+            r = self.session.get(f'{self.base_url}/api/v1/prices/{epic}',
                 params={'resolution':resolution, 'max':min(int(count), 1000)},
                 headers=self.headers(), timeout=12)
             r.raise_for_status()
-            return evaluate_snapshot(parse_prices(r.json()), epic, resolution, max_spread=max_spread)
+            return evaluate_snapshot(parse_prices(r.json()), epic, resolution, max_spread=max_spread,
+                                     source=f'Capital.com {self.environment} REST')
         except requests.RequestException as ex:
             raise FeedError(http_error_message(ex,'Pobieranie świec',epic=epic)) from ex
         except ValueError as ex:
             raise FeedError(f'Niepoprawny JSON API: {ex}') from ex
 
     def search_markets(self, term='US500'):
-        """Find the actual EPIC in an authenticated DEMO account (READ-ONLY GET)."""
+        """Find the actual EPIC in the selected account (READ-ONLY GET)."""
         try:
-            r = self.session.get(f'{BASE}/api/v1/markets',
+            r = self.session.get(f'{self.base_url}/api/v1/markets',
                 params={'searchTerm':str(term).strip()[:60]},headers=self.headers(),timeout=12)
             r.raise_for_status()
             markets = r.json().get('markets',[])
