@@ -49,3 +49,12 @@ def test_auto_scan_toggle_does_not_crash_without_live_api(monkeypatch):
     a.toggle[0].set_value(True)
     a.run()
     assert not a.exception, [str(x.message) for x in a.exception]
+
+
+def test_google_mode_without_oauth_secrets_is_locked(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    monkeypatch.setenv('APP_AUTH_MODE','google')
+    monkeypatch.setenv('OWNER_EMAIL','owner@example.com')
+    app=AppTest.from_file(APP,default_timeout=30).run()
+    assert not app.exception, [str(x.message) for x in app.exception]
+    assert len(app.tabs)==0
