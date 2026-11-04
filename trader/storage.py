@@ -49,7 +49,7 @@ def archive(con, event_id, candle_utc, epic, source, timeframe, result):
 
 def recent(con,limit=100):
     con.row_factory=sqlite3.Row
-    return [dict(r) for r in con.execute('SELECT * FROM signals WHERE action IN ('LONG','SHORT') ORDER BY recorded_utc DESC LIMIT ?',(limit,))]
+    return [dict(r) for r in con.execute("SELECT * FROM signals WHERE action IN ('LONG','SHORT') ORDER BY recorded_utc DESC LIMIT ?",(limit,))]
 
 def recent_scan_decisions(con,limit=100):
     """Separate WAIT/decision audit, never presented as completed trades."""
