@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from trader.market import parse_prices, evaluate_snapshot
 from trader.strategy import Decision, decide, simulate_outcome, indicators
-from trader.storage import connect, archive, recent
+from trader.storage import connect, archive, recent, recent_scan_decisions
 
 def data(n=120,trending=1):
     idx=pd.date_range('2026-11-04 12:00',periods=n,freq='min',tz='UTC')
@@ -51,7 +51,8 @@ def test_idempotent_archive(tmp_path):
     args=(con,'event1','2026-11-04T12:00:00+00:00','US500','Capital DEMO','MINUTE',d)
     assert archive(*args)
     assert not archive(*args)
-    assert len(recent(con))==1
+    assert len(recent(con))==0
+    assert len(recent_scan_decisions(con))==1
 
 def test_forward_audit_when_new_candles_arrive(tmp_path):
     from trader.storage import audit_prior_paper_signals,paper_report
