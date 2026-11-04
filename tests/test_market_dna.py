@@ -14,8 +14,8 @@ def bars(n=100):
 def test_waits_for_two_closed_confirmation_bars():
     df=bars(15)
     df.iloc[8,df.columns.get_loc('High')]=200
-    assert 8 not in [i for i,_ in confirmed_pivots(df.iloc[:10])]
-    assert 8 in [i for i,_ in confirmed_pivots(df.iloc[:11])]
+    assert 8 not in [i for i,_ in confirmed_pivots(df.iloc[:10])[0]]
+    assert 8 in [i for i,_ in confirmed_pivots(df.iloc[:11])[0]]
 
 
 def test_mutating_current_bar_does_not_rewrite_confirmed_levels():
@@ -38,7 +38,7 @@ def test_no_false_probability_and_decision():
 
 def test_sweep_high_detects_rejection_of_confirmed_high():
     df=bars(100)
-    historical_high=max(v for _,v in confirmed_pivots(df.iloc[:-1])[0])
+    historical_high=confirmed_pivots(df.iloc[:-1])[0][-1][1]
     # The last bar tests prior resistance with wick above but close below.
     df.loc[df.index[-1],'High']=historical_high+3
     df.loc[df.index[-1],'Close']=historical_high-.3
