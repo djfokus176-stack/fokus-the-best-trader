@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from trader.market import CapitalReadOnly, FeedError, evaluate_snapshot, PERIOD
 from trader.strategy import indicators, decide, backtest
-from trader.storage import connect, archive, recent, recent_scan_decisions, audit_prior_paper_signals, paper_report
+from trader.storage import connect, archive, recent, recent_scan_decisions, audit_prior_paper_signals, paper_report, legacy_outcomes_count
 from trader.assistant import numeric_context, answer_ai
 from trader.visuals import historical_marks
 from trader.runtime import current_feed_status, scan_delay_seconds
@@ -407,7 +407,7 @@ with market_tab:
                     key=hashlib.sha256(f'{instrument}|{tf}|{strategy}|{snap.confirmed_utc.isoformat()}|{decision.action}'.encode()).hexdigest()
                     try:
                         db=connect()
-                        new=archive(db,key,snap.confirmed_utc.isoformat(),instrument,src,tf,decision)
+                        new=archive(db,key,snap.confirmed_utc.isoformat(),instrument,src,tf,decision,spread=snap.spread)
                         reviewed=audit_prior_paper_signals(db,snap.frame,instrument,src,tf,snap.spread)
                         if new:
                             st.caption('Zapisano kandydata PAPER LONG/SHORT.' if decision.action in ('LONG','SHORT') else 'Zapisano WAIT w oddzielnym dzienniku skanów (nie w transakcjach).')
@@ -485,7 +485,9 @@ with lab_tab:
             st.caption('Konserwatywnie: gdy SL i TP naruszone w jednej świecy, SL wygrywa; wejście po następnej świecy, z kosztem spreadu i poślizgu.')
     st.markdown('#### Nauka bota — kontrola jakości')
     try:
-        report=paper_report(connect())
+        db_for_report=connect()
+        report=paper_report(db_for_report)
+        legacy_count=legacy_outcomes_count(db_for_report)
     except (OSError, sqlite3.Error) as ex:
         st.warning('Baza PAPER niedostępna: '+type(ex).__name__)
         report=[]
@@ -496,7 +498,9 @@ with lab_tab:
         if not active.empty:
             st.metric('Łączne pkt forward PAPER, po kosztach',f'{active.pnl_pts.sum():.2f}')
         st.dataframe(resolved,use_container_width=True,hide_index=True)
-    else:st.info('Brak rozliczonych forward PAPER. Audyt działa przy kolejnym skanowaniu świec.')
+    else:st.info('Brak NOWYCH rozliczeń forward PAPER v2. Audyt ruszy przy kolejnych świecach.')
+    if 'legacy_count' in locals() and legacy_count:
+        st.warning(f'Stare rozliczenia PAPER (wersja 1): {legacy_count} — zachowane, ale WYŁĄCZONE z nowych statystyk. Nie przeliczam ich bez oryginalnych danych.')
     st.write('Tryb v0.2 zapisuje decyzje i rozlicza je po pojawieniu się kolejnych zamkniętych świec. **Nie optymalizuje automatycznie parametrów po 2–3 stratach**, bo to grozi przeuczeniem. Następny etap: walk-forward OOS i audyt niezależnych transakcji PAPER.')
 
 with archive_tab:
