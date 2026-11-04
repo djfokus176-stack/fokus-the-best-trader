@@ -5,6 +5,7 @@ native Google sign-in and its persistent, HTTP-only identity cookie.
 Do NOT make the dashboard anonymously accessible merely to avoid re-login.
 """
 from __future__ import annotations
+import re
 
 def auth_mode(raw: str | None) -> str:
     mode = str(raw or "password").strip().lower()
@@ -16,7 +17,7 @@ def auth_mode(raw: str | None) -> str:
 def owner_email_configured(email: str) -> bool:
     value = str(email or "").strip()
     return bool(value and value == value.lower() and
-                "@" in value and len(value.split("@", 1)[1]) >= 3)
+                re.fullmatch(r"[a-z0-9][a-z0-9._%+\-]*@[a-z0-9][a-z0-9.\-]*\.[a-z]{2,63}", value))
 
 
 def google_identity_matches(user, required_email: str) -> bool:
