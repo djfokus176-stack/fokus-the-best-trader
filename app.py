@@ -14,6 +14,7 @@ from trader.storage import connect, archive, recent, audit_prior_paper_signals, 
 from trader.assistant import numeric_context, answer_ai
 from trader.visuals import historical_marks
 from trader.runtime import current_feed_status, scan_delay_seconds
+from trader.scan_monitor import scan_event, append_scan_log
 from trader.auth import capital_credentials, active_credential, test_capital_login, test_openai_model, test_telegram_token
 from trader.access import access_configured, password_matches
 from trader.market_dna import analyze_market
@@ -239,7 +240,11 @@ with market_tab:
     scheduled_scan = bool(st.session_state.pop('_scheduled_scan',False)
         and st.session_state.get('auto_scan_active',False) and has_cap and csv is None)
     if load or auto_scan or scheduled_scan:
-        st.session_state['last_scan_utc']=datetime.now(timezone.utc).isoformat()
+        scan_trigger='MANUAL' if load else ('STARTUP' if auto_scan else 'AUTO')
+        scan_requested=datetime.now(timezone.utc)
+        previous_snap=st.session_state.get('market_snap')
+        st.session_state['last_scan_utc']=scan_requested.isoformat()
+        st.session_state['_scan_attempt_count']=int(st.session_state.get('_scan_attempt_count',0))+1
         try:
             st.session_state.pop('last_feed_error', None)
             if csv is not None:
@@ -255,12 +260,32 @@ with market_tab:
                 st.session_state['source_override']=f'Capital.com {capital_env} REST'
             else:
                 st.error('Brak Capital.com API lub CSV. NIE generuję sztucznych cen.')
+            obtained=st.session_state.get('market_snap')
+            market_status='UNKNOWN'
+            if obtained is not None and not obtained.good and has_cap and csv is None:
+                try:
+                    market_status=st.session_state['_capital_client'].market_state(instrument)
+                except (FeedError,ValueError):
+                    market_status='UNKNOWN (status API niedostępny)'
+            st.session_state['_market_status']=market_status
+            record=scan_event(scan_trigger,previous_snap,obtained,
+                              market_status=market_status,requested_utc=scan_requested)
+            st.session_state['_scan_log']=append_scan_log(st.session_state.get('_scan_log'),record)
+            st.session_state['_scan_last_result']=record
         except (FeedError,ValueError) as ex:
+            record=scan_event(scan_trigger,previous_snap,None,
+                error=f'{type(ex).__name__}: {str(ex)}',requested_utc=scan_requested)
+            st.session_state['_scan_log']=append_scan_log(st.session_state.get('_scan_log'),record)
+            st.session_state['_scan_last_result']=record
             st.session_state.pop('market_snap', None)
             st.session_state.pop('ai_context', None)
             st.session_state['last_feed_error'] = str(ex)
             st.error('❌ Nie udało się pobrać świec: '+str(ex))
         except Exception as ex:
+            record=scan_event(scan_trigger,previous_snap,None,
+                error=f'Błąd aplikacji: {type(ex).__name__}',requested_utc=scan_requested)
+            st.session_state['_scan_log']=append_scan_log(st.session_state.get('_scan_log'),record)
+            st.session_state['_scan_last_result']=record
             st.session_state.pop('market_snap', None)
             st.session_state.pop('ai_context', None)
             st.session_state['last_feed_error'] = f'Błąd aplikacji: {type(ex).__name__}'
@@ -271,6 +296,29 @@ with market_tab:
     src=st.session_state.get('source_override','BRAK')
     if st.session_state.get('last_scan_utc'):
         st.caption("Ostatnia próba odczytu (UTC): "+st.session_state['last_scan_utc'])
+    last_record=st.session_state.get('_scan_last_result')
+    if last_record:
+        if last_record['api_result']=='OK':
+            status_description='NOWA ŚWIECA' if last_record['new_candle'] else 'BRAK NOWEJ ŚWIECY'
+            if last_record['bar_result']=='STALE_OR_BLOCKED':
+                status_description='DANE NIEAKTUALNE / BLOKADA SYGNAŁÓW'
+            st.info(f"🛰️ SKAN #{st.session_state.get('_scan_attempt_count',0)} | "
+                f"wyzwalacz: {last_record['trigger']} | API: OK | "
+                f"wynik: {status_description} | rynek: {last_record['market_status']}")
+            if last_record['market_status']=='CLOSED':
+                st.warning('Capital.com zgłasza CLOSED: prawdopodobnie przerwa lub zamknięty instrument. Skaner może działać poprawnie, ale nie ma nowych zamkniętych świec. Pozostaje WAIT.')
+            elif last_record['bar_result']=='STALE_OR_BLOCKED':
+                st.warning('API odpowiedziało, ale ostatnia zamknięta świeca nie spełnia wymagań świeżości. Nie wyświetlam sygnału LONG/SHORT.')
+        else:
+            st.error('🛰️ SKAN: problem komunikacji z API — sprawdź dziennik prób poniżej.')
+    with st.expander('🛠️ DIAGNOSTYKA AUTO-SKAN — HISTORIA PRÓB'):
+        st.caption('To historia TYLKO tej sesji przeglądarki. Każdy wpis oznacza faktyczną próbę, nie automatyczną deklarację. Nie zapisuję haseł ani kluczy.')
+        st.metric('Próby pobrania w tej sesji',st.session_state.get('_scan_attempt_count',0))
+        if st.session_state.get('_scan_log'):
+            st.dataframe(pd.DataFrame(st.session_state['_scan_log'][::-1]),hide_index=True,
+                use_container_width=True)
+        else:
+            st.info('Brak prób skanowania w tej sesji.')
     if snap is not None:
         if snap.epic!=instrument or snap.resolution!=tf:
             st.warning('Zmieniono instrument lub interwał: wykonaj NOWY SKAN przed decyzją.')
