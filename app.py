@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from trader.market import CapitalReadOnly, FeedError, evaluate_snapshot, PERIOD
 from trader.strategy import indicators, decide, backtest
-from trader.storage import connect, archive, recent, audit_prior_paper_signals, paper_report
+from trader.storage import connect, archive, recent, recent_scan_decisions, audit_prior_paper_signals, paper_report
 from trader.assistant import numeric_context, answer_ai
 from trader.visuals import historical_marks
 from trader.runtime import current_feed_status, scan_delay_seconds
@@ -83,13 +83,17 @@ with st.sidebar:
             st.session_state.pop(key,None)
         st.rerun()
     instrument=st.text_input('Instrument / EPIC Capital.com',value=secret('CAPITAL_EPIC','US500'))
+    allow_live = secret('CAPITAL_ALLOW_LIVE','false').lower() in ('true','1','yes','on')
+    available_environments = ['DEMO','LIVE'] if allow_live else ['DEMO']
     preferred_env = secret('CAPITAL_ENV','DEMO').upper().strip()
-    if preferred_env not in ('DEMO','LIVE'):
+    if preferred_env not in available_environments:
         preferred_env = 'DEMO'
-    capital_env = st.radio('Środowisko API Capital.com', ['DEMO','LIVE'],
-        index=0 if preferred_env=='DEMO' else 1,
-        help='LIVE oznacza tylko odczyt cen z konta rzeczywistego. Program NIE składa zleceń.',
+    capital_env = st.radio('Środowisko API Capital.com', available_environments,
+        index=available_environments.index(preferred_env),
+        help='LIVE wyłącznie za zgodą właściciela poprzez CAPITAL_ALLOW_LIVE w Secrets; TYLKO odczyt.',
         horizontal=True)
+    if not allow_live:
+        st.caption('🔒 LIVE wyłączone. Odblokowanie: CAPITAL_ALLOW_LIVE = true w Secrets.')
     if st.session_state.get('_prev_capital_env', capital_env) != capital_env:
         for k in ('_capital_client','market_snap','ai_context','source_override',
                   'initial_scan_attempted','last_feed_error','epic_matches','_capital_test'):
@@ -336,7 +340,9 @@ with market_tab:
             current_ready,current_reason,current_age=current_feed_status(snap,src)
             c3.metric('WIEK DANYCH (teraz)',f'{current_age:.0f} s' if current_age is not None else 'BRAK')
             signal_banner=st.empty()
-            c4.metric('SPREAD',f'{snap.spread:.2f} pkt')
+            c4.metric('SPREAD zamkniętej świecy',f'{snap.spread:.2f} pkt')
+            if snap.quote_spread is not None:
+                st.caption(f'Spread najnowszej świecy (może być niezamknięta): {snap.quote_spread:.2f} pkt. Do logiki strategii używany jest spread świecy zamkniętej.')
             df=indicators(snap.frame) if len(snap.frame)>=14 else snap.frame
             fig=go.Figure()
             fig.add_trace(go.Candlestick(x=df.index,yaxis='y',open=df.Open,high=df.High,low=df.Low,close=df.Close,name='Świece (MID)'))
@@ -382,7 +388,7 @@ with market_tab:
                 else:
                     signal_banner.warning('🟡 BIEŻĄCA OCENA: '+banner)
                 st.markdown(f'### {"🟢" if decision.action=="LONG" else "🔴" if decision.action=="SHORT" else "🟡"} {decision.action} — {strategy}')
-                st.write(f'**Powód:** {decision.reason} | **Trend:** {decision.bias} | **ATR:** {decision.atr}')
+                st.write(f'**Powód:** {decision.reason} | **Trend:** {decision.bias} | **ATR:** {decision.atr:.2f}' if decision.atr is not None else f'**Powód:** {decision.reason} | **Trend:** {decision.bias} | **ATR:** BRAK')
                 if dna is not None:
                     st.info(f'🧬 MARKET DNA (kontekst badawczy): {dna.structure} / {dna.regime} / {dna.event}. To NIE zmienia aktualnej decyzji strategii.')
                 if decision.action!='WAIT':
@@ -403,7 +409,8 @@ with market_tab:
                         db=connect()
                         new=archive(db,key,snap.confirmed_utc.isoformat(),instrument,src,tf,decision)
                         reviewed=audit_prior_paper_signals(db,snap.frame,instrument,src,tf,snap.spread)
-                        if new:st.caption('Nową decyzję PAPER zapisano do osobnego archiwum.')
+                        if new:
+                            st.caption('Zapisano kandydata PAPER LONG/SHORT.' if decision.action in ('LONG','SHORT') else 'Zapisano WAIT w oddzielnym dzienniku skanów (nie w transakcjach).')
                         if reviewed:st.caption(f'Audyt zakończył {len(reviewed)} wcześniejszych symulacji PAPER.')
                     except (OSError, sqlite3.Error) as ex:
                         st.error('Nie zapisano archiwum PAPER: '+type(ex).__name__)
@@ -490,7 +497,7 @@ with lab_tab:
             st.metric('Łączne pkt forward PAPER, po kosztach',f'{active.pnl_pts.sum():.2f}')
         st.dataframe(resolved,use_container_width=True,hide_index=True)
     else:st.info('Brak rozliczonych forward PAPER. Audyt działa przy kolejnym skanowaniu świec.')
-    st.write('Tryb v0.1 zapisuje decyzje i rozlicza je po pojawieniu się kolejnych zamkniętych świec. **Nie optymalizuje automatycznie parametrów po 2–3 stratach**, bo to grozi przeuczeniem. Następny etap: walk-forward OOS i audyt niezależnych transakcji PAPER.')
+    st.write('Tryb v0.2 zapisuje decyzje i rozlicza je po pojawieniu się kolejnych zamkniętych świec. **Nie optymalizuje automatycznie parametrów po 2–3 stratach**, bo to grozi przeuczeniem. Następny etap: walk-forward OOS i audyt niezależnych transakcji PAPER.')
 
 with archive_tab:
     st.subheader('📚 OSOBNE ARCHIWUM — TYLKO TEN PROGRAM')
@@ -500,7 +507,14 @@ with archive_tab:
         st.warning('Nie udało się odczytać archiwum PAPER: '+type(ex).__name__)
         hist=[]
     if hist:st.dataframe(pd.DataFrame(hist),use_container_width=True,hide_index=True)
-    else:st.info('Brak zarejestrowanych decyzji PAPER.')
+    else:st.info('Brak kandydatów LONG/SHORT PAPER.')
+    with st.expander('🟡 Odrzucone sygnały / WAIT — osobny dziennik'):
+        try:
+            waits=recent_scan_decisions(connect(),100)
+            if waits:st.dataframe(pd.DataFrame(waits),use_container_width=True,hide_index=True)
+            else:st.info('Brak decyzji WAIT w odrębnym dzienniku.')
+        except (OSError,sqlite3.Error) as ex:
+            st.warning('Nie udało się odczytać dziennika WAIT: '+type(ex).__name__)
     st.caption('Zapis lokalny: data/fokus_paper.sqlite3. Streamlit Cloud może usuwać lokalne pliki po restarcie: do trwałej pracy 24/7 potrzebna zewnętrzna baza.')
 
 with settings_tab:
