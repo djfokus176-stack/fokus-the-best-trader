@@ -12,6 +12,7 @@ from trader.strategy import indicators, decide, backtest
 from trader.storage import connect, archive, recent, audit_prior_paper_signals, paper_report
 from trader.assistant import numeric_context, answer_ai
 from trader.visuals import historical_marks
+from trader.auth import capital_credentials, active_credential, test_capital_login, test_openai_model, test_telegram_token
 
 st.set_page_config(page_title='FOKU$ THE BEST TRADER',page_icon='📈',layout='wide')
 st.markdown('''<style>
@@ -26,8 +27,8 @@ st.caption('Nowy program napisany od zera. Analiza świec, nie wizja AI i nie gw
 
 
 def secret(name,default=''):
-    if os.getenv(name):return os.getenv(name)
-    try: return str(st.secrets.get(name,default))
+    if os.getenv(name):return os.getenv(name).strip()
+    try: return str(st.secrets.get(name,default)).strip()
     except (FileNotFoundError,KeyError):return default
 
 with st.sidebar:
@@ -42,23 +43,88 @@ with st.sidebar:
         horizontal=True)
     if st.session_state.get('_prev_capital_env', capital_env) != capital_env:
         for k in ('_capital_client','market_snap','ai_context','source_override',
-                  'initial_scan_attempted','last_feed_error','epic_matches'):
+                  'initial_scan_attempted','last_feed_error','epic_matches','_capital_test'):
             st.session_state.pop(k, None)
     st.session_state['_prev_capital_env'] = capital_env
     tf=st.selectbox('Interwał',['MINUTE','MINUTE_5','MINUTE_15','HOUR'],format_func=lambda x:{'MINUTE':'M1','MINUTE_5':'M5','MINUTE_15':'M15','HOUR':'H1'}[x])
     strategy=st.radio('Strategia',['DRUGA FALA','EMA TREND'])
     max_spread=st.slider('Maksymalny spread (pkt)',.2,5.0,2.0,.1)
     st.markdown('---')
-    st.write('🔐 Klucze API: tylko Streamlit Secrets / ENV. Nie są zapisywane do historii, ZIP ani GitHuba.')
-    cap_identifier = secret('CAPITAL_IDENTIFIER') or secret('CAPITAL_LOGIN')
-    has_cap=bool(secret('CAPITAL_API_KEY') and cap_identifier and secret('CAPITAL_PASSWORD'))
+    with st.expander('🔐 LOGOWANIE API — CAPITAL / OPENAI / TELEGRAM', expanded=True):
+        st.caption('Wpisz tylko pola, które chcesz zmienić. Puste pola korzystają z zapisanych Streamlit Secrets. Wpisane tutaj dane żyją wyłącznie w tej sesji przeglądarki.')
+        with st.form('fokus_credentials_login', clear_on_submit=True):
+            entered_key=st.text_input('Capital.com: API Key',type='password')
+            entered_login=st.text_input('Capital.com: Login / e-mail')
+            entered_password=st.text_input('Capital.com: Hasło API (nie hasło strony)',type='password')
+            entered_openai=st.text_input('OpenAI: API Key',type='password')
+            entered_telegram=st.text_input('Telegram: Bot Token',type='password')
+            entered_chat_id=st.text_input('Telegram: Chat ID (opcjonalny)')
+            save_session=st.form_submit_button('🔐 ZAPISZ W SESJI',use_container_width=True)
+            check_capital=st.form_submit_button('🧪 ZAPISZ I TESTUJ CAPITAL.COM',use_container_width=True)
+        if save_session or check_capital:
+            mapping={'CAPITAL_API_KEY':entered_key,'CAPITAL_IDENTIFIER':entered_login,
+                     'CAPITAL_PASSWORD':entered_password,'OPENAI_API_KEY':entered_openai,
+                     'TELEGRAM_BOT_TOKEN':entered_telegram,'TELEGRAM_CHAT_ID':entered_chat_id}
+            changes={k:v.strip() for k,v in mapping.items() if v and v.strip()}
+            overrides=dict(st.session_state.get('_api_session_overrides',{}))
+            overrides.update(changes)
+            st.session_state['_api_session_overrides']=overrides
+            for k in ('_capital_client','market_snap','ai_context','source_override',
+                      'initial_scan_attempted','last_feed_error','epic_matches'):
+                st.session_state.pop(k,None)
+            if save_session:
+                st.success('Zapisano tymczasowo w tej sesji — NIE na dysku ani w GitHubie.')
+        overrides=st.session_state.get('_api_session_overrides',{})
+        cap_api_key,cap_identifier,cap_password=capital_credentials(secret,overrides)
+        openai_api_key=active_credential('OPENAI_API_KEY',secret,overrides)
+        telegram_token=active_credential('TELEGRAM_BOT_TOKEN',secret,overrides)
+        has_cap=bool(cap_api_key and cap_identifier and cap_password)
+        st.caption('Capital.com: '+('pola dostępne' if has_cap else 'brak wymaganych pól')
+            +' | OpenAI: '+('jest klucz' if openai_api_key else 'brak klucza')
+            +' | Telegram: '+('jest token' if telegram_token else 'brak tokenu'))
+        if check_capital:
+            try:
+                client=test_capital_login(cap_api_key,cap_identifier,cap_password,capital_env)
+                st.session_state['_capital_client']=client
+                st.session_state['_capital_test']={'env':capital_env,'ok':True,
+                    'message':f'✅ Capital.com {capital_env}: logowanie HTTP 200, otrzymano CST i X-SECURITY-TOKEN.'}
+            except (FeedError,RuntimeError) as ex:
+                st.session_state['_capital_test']={'env':capital_env,'ok':False,
+                    'message':'❌ '+str(ex)}
+            except Exception as ex:
+                st.session_state['_capital_test']={'env':capital_env,'ok':False,
+                    'message':'❌ Test Capital.com: '+type(ex).__name__}
+        if st.session_state.get('_capital_test',{}).get('env')==capital_env:
+            result=st.session_state['_capital_test']
+            if result['ok']:
+                st.success(result['message'])
+            else:
+                st.error(result['message'])
+        if st.button('🧪 TEST OPENAI — DOSTĘP DO MODELU (bez generowania)',use_container_width=True):
+            ok,msg=test_openai_model(openai_api_key,secret('OPENAI_MODEL','gpt-5.4'))
+            (st.success if ok else st.error)(msg)
+        if st.button('🧪 TEST TELEGRAM — TOKEN (bez wysyłania)',use_container_width=True):
+            ok,msg=test_telegram_token(telegram_token)
+            (st.success if ok else st.error)(msg)
+        if st.button('🗑️ USUŃ TYMCZASOWE DANE SESJI',use_container_width=True):
+            for key in ('_api_session_overrides','_capital_client','_capital_test',
+                        'market_snap','ai_context','source_override',
+                        'initial_scan_attempted','last_feed_error','epic_matches'):
+                st.session_state.pop(key,None)
+            st.rerun()
+        st.info('Na stałe: Streamlit Cloud → My apps → Settings → Secrets. Ta aplikacja nie ma uprawnień do zmiany Secrets.')
+        st.caption('Aplikacja jest publiczna. Nie udostępniaj nikomu formularza z wpisanymi danymi; zalecane ograniczenie dostępu i osobny PIN administratora.')
+    overrides=st.session_state.get('_api_session_overrides',{})
+    cap_api_key,cap_identifier,cap_password=capital_credentials(secret,overrides)
+    openai_api_key=active_credential('OPENAI_API_KEY',secret,overrides)
+    has_cap=bool(cap_api_key and cap_identifier and cap_password)
     if has_cap:
-        st.success('✅ Capital.com skonfigurowany (obecność kluczy; połączenie wymaga testu)')
+        st.success('✅ Capital.com: klucze dostępne — status logowania pokazuje test API')
         if st.button(f'🔎 SPRAWDŹ EPIC NA KONCIE {capital_env}',use_container_width=True):
             try:
                 if '_capital_client' not in st.session_state:
-                    st.session_state['_capital_client']=CapitalReadOnly(secret('CAPITAL_API_KEY'),
-                        cap_identifier,secret('CAPITAL_PASSWORD'),environment=capital_env)
+                    st.session_state['_capital_client']=CapitalReadOnly(
+                        cap_api_key,cap_identifier,cap_password,environment=capital_env)
                 st.session_state['epic_matches']=st.session_state['_capital_client'].search_markets(instrument)
                 if not st.session_state['epic_matches']:
                     st.warning('Nie znaleziono tego symbolu. Spróbuj hasła S&P lub SP500.')
@@ -108,8 +174,8 @@ with market_tab:
                 st.session_state['source_override']='CSV NAUKA (NIE LIVE)'
             elif has_cap:
                 if '_capital_client' not in st.session_state:
-                    st.session_state['_capital_client']=CapitalReadOnly(secret('CAPITAL_API_KEY'),
-                        cap_identifier,secret('CAPITAL_PASSWORD'),environment=capital_env)
+                    st.session_state['_capital_client']=CapitalReadOnly(
+                        cap_api_key,cap_identifier,cap_password,environment=capital_env)
                 st.session_state['market_snap']=st.session_state['_capital_client'].candles(
                     instrument,tf,count=350,max_spread=max_spread)
                 st.session_state['source_override']=f'Capital.com {capital_env} REST'
@@ -196,7 +262,7 @@ with market_tab:
                     question=st.text_input('Co chcesz wyjaśnić?',value='Dlaczego WAIT/LONG/SHORT i co unieważniłoby setup?')
                     if st.button('Zapytaj AI o te świece'):
                         if st.session_state.get('ai_context'):
-                            st.write(answer_ai(secret('OPENAI_API_KEY'),secret('OPENAI_MODEL','gpt-5.4'),question,st.session_state['ai_context'], effort=secret('OPENAI_REASONING_EFFORT','high')))
+                            st.write(answer_ai(openai_api_key,secret('OPENAI_MODEL','gpt-5.4'),question,st.session_state['ai_context'], effort=secret('OPENAI_REASONING_EFFORT','high')))
                         else:st.warning('AI wymaga wiarygodnego, aktualnego zestawu zamkniętych świec Capital.com.')
             else:
                 chart_slot.plotly_chart(fig,use_container_width=True)
