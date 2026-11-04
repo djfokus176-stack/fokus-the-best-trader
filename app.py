@@ -243,6 +243,13 @@ with market_tab:
         scan_trigger='MANUAL' if load else ('STARTUP' if auto_scan else 'AUTO')
         scan_requested=datetime.now(timezone.utc)
         previous_snap=st.session_state.get('market_snap')
+        if previous_snap is not None and (
+            previous_snap.epic != instrument or previous_snap.resolution != tf
+            or previous_snap.source not in (
+                'Capital.com '+capital_env+' REST',
+                'CSV NAUKA (NIE LIVE)' if csv is not None else 'Capital.com '+capital_env+' REST')
+        ):
+            previous_snap=None
         st.session_state['last_scan_utc']=scan_requested.isoformat()
         st.session_state['_scan_attempt_count']=int(st.session_state.get('_scan_attempt_count',0))+1
         try:
