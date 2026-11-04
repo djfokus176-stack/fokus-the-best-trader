@@ -38,7 +38,10 @@ with st.sidebar:
     st.markdown('---')
     st.write('🔐 Klucze API: tylko Streamlit Secrets / ENV. Nie są zapisywane do historii, ZIP ani GitHuba.')
     has_cap=all(secret(n) for n in ['CAPITAL_API_KEY','CAPITAL_IDENTIFIER','CAPITAL_PASSWORD'])
-    st.success('✅ Capital.com skonfigurowany') if has_cap else st.warning('⚠️ Brak API Capital.com. Możesz analizować własny CSV.')
+    if has_cap:
+        st.success('✅ Capital.com skonfigurowany')
+    else:
+        st.warning('⚠️ Brak API Capital.com. Możesz analizować własny CSV.')
     st.info('Streamlit Cloud nie gwarantuje skanera działającego 24/7. Do tego potrzebny osobny worker na stale działającym hoście.')
 
 market_tab,lab_tab,archive_tab,settings_tab=st.tabs(['📊 WYKRES I SYGNAŁ','🧪 TESTY I NAUKA','📚 ARCHIWUM','🔐 STATUS SYSTEMU'])
@@ -98,7 +101,10 @@ with market_tab:
                               margin={'l':15,'r':15,'t':30,'b':10})
             st.plotly_chart(fig,use_container_width=True)
             st.caption('Wykres ze świec MID, nie cena wykonalna BID/ASK. Najnowsza świeca API została wykluczona z oceny strategii.')
-            st.success(snap.reason) if snap.good else st.error('WAIT / FEED: '+snap.reason)
+            if snap.good:
+                st.success(snap.reason)
+            else:
+                st.error('WAIT / FEED: '+snap.reason)
             ready=snap.good and src=='Capital.com DEMO REST'
             if src.startswith('CSV'):
                 st.warning('CSV: wyłącznie symulacja edukacyjna. Nie ma sygnału do egzekucji live.')
