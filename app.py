@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 import os
+import time
 from datetime import datetime, timezone
 import pandas as pd
 import plotly.graph_objects as go
@@ -12,6 +13,7 @@ from trader.strategy import indicators, decide, backtest
 from trader.storage import connect, archive, recent, audit_prior_paper_signals, paper_report
 from trader.assistant import numeric_context, answer_ai
 from trader.visuals import historical_marks
+from trader.runtime import current_feed_status, scan_delay_seconds
 from trader.auth import capital_credentials, active_credential, test_capital_login, test_openai_model, test_telegram_token
 
 st.set_page_config(page_title='FOKU$ THE BEST TRADER',page_icon='📈',layout='wide')
@@ -49,6 +51,10 @@ with st.sidebar:
     tf=st.selectbox('Interwał',['MINUTE','MINUTE_5','MINUTE_15','HOUR'],format_func=lambda x:{'MINUTE':'M1','MINUTE_5':'M5','MINUTE_15':'M15','HOUR':'H1'}[x])
     strategy=st.radio('Strategia',['DRUGA FALA','EMA TREND'])
     max_spread=st.slider('Maksymalny spread (pkt)',.2,5.0,2.0,.1)
+    st.toggle('🔄 AUTO-SKAN — tylko gdy aplikacja otwarta',value=False,key='auto_scan_active',
+        help='Ocenia zamknięte świece co najmniej co 60 sekund. Nie jest usługą działającą 24/7.')
+    st.selectbox('Interwał skanowania (sekundy)',(60,120,300),key='auto_scan_period')
+    st.caption('AUTO-SKAN nie wykonuje zleceń. GPT-5.4 HIGH uruchamiasz osobno — płatne zapytania nie są wysyłane automatycznie.')
     st.markdown('---')
     with st.expander('🔐 LOGOWANIE API — CAPITAL / OPENAI / TELEGRAM', expanded=True):
         st.caption('Wpisz tylko pola, które chcesz zmienić. Puste pola korzystają z zapisanych Streamlit Secrets. Wpisane tutaj dane żyją wyłącznie w tej sesji przeglądarki.')
@@ -139,6 +145,21 @@ with st.sidebar:
 
 market_tab,lab_tab,archive_tab,settings_tab=st.tabs(['📊 WYKRES I SYGNAŁ','🧪 TESTY I NAUKA','📚 ARCHIWUM','🔐 STATUS SYSTEMU'])
 
+@st.fragment(run_every="60s")
+def auto_scan_heartbeat():
+    """A page-open-only timer that triggers a full rerun for scan & archiving."""
+    if not st.session_state.get('auto_scan_active',False):
+        return
+    interval=scan_delay_seconds(st.session_state.get('auto_scan_period',60))
+    tick=time.monotonic()
+    previous=st.session_state.get('_last_auto_pulse',0)
+    if tick-previous >= interval-2:
+        st.session_state['_last_auto_pulse']=tick
+        st.session_state['_scheduled_scan']=True
+        st.rerun(scope='app')
+
+auto_scan_heartbeat()
+
 def read_csv(file):
     data=pd.read_csv(file)
     expected={'Time','Open','High','Low','Close'}
@@ -158,14 +179,21 @@ with market_tab:
     with col1:
         csv=st.file_uploader('Opcjonalnie własne dane OHLC CSV (wyłącznie do nauki / replay)',type=['csv'])
         load=st.button('🔄 SKANUJ ŚWIECE',type='primary',use_container_width=True)
-        st.caption('Po otwarciu strony wykonuję jedną automatyczną próbę pobrania, jeśli API jest zapisane. Ten przycisk pobiera ponownie.')
+        st.caption('Przy otwarciu strony wykonuję jedną próbę pobrania. Jeśli włączysz AUTO-SKAN, program ponowi odczyt co 60/120/300 s podczas otwartej sesji.')
+        if st.session_state.get('auto_scan_active'):
+            st.success(f"🟢 AUTO-SKAN WŁĄCZONY: co {st.session_state.get('auto_scan_period',60)} s (tylko aktywna sesja przeglądarki)")
+        else:
+            st.info('⚪ TRYB RĘCZNY — nowe świece wymagają ponownego skanowania.')
     with col2:
         st.info('Dane źródłowe = te same świece, które czyta strategia i wyświetla wykres. AI nie widzi obrazu ekranu; dostaje numeryczne OHLC i wskaźniki.')
     auto_scan = bool(has_cap and csv is None and not st.session_state.get('initial_scan_attempted') and st.session_state.get('market_snap') is None)
     if auto_scan:
         st.session_state['initial_scan_attempted'] = True
         st.info(f'🔄 Pierwsza próba pobrania świec z Capital.com {capital_env}...')
-    if load or auto_scan:
+    scheduled_scan = bool(st.session_state.pop('_scheduled_scan',False)
+        and st.session_state.get('auto_scan_active',False) and has_cap and csv is None)
+    if load or auto_scan or scheduled_scan:
+        st.session_state['last_scan_utc']=datetime.now(timezone.utc).isoformat()
         try:
             st.session_state.pop('last_feed_error', None)
             if csv is not None:
@@ -195,6 +223,8 @@ with market_tab:
         st.error('❌ Ostatnia próba skanowania: '+st.session_state['last_feed_error'])
     snap=st.session_state.get('market_snap')
     src=st.session_state.get('source_override','BRAK')
+    if st.session_state.get('last_scan_utc'):
+        st.caption("Ostatnia próba odczytu (UTC): "+st.session_state['last_scan_utc'])
     if snap is not None:
         if snap.epic!=instrument or snap.resolution!=tf:
             st.warning('Zmieniono instrument lub interwał: wykonaj NOWY SKAN przed decyzją.')
@@ -202,7 +232,9 @@ with market_tab:
             c1,c2,c3,c4=st.columns(4)
             c1.metric('ŹRÓDŁO',src)
             c2.metric('OSTATNIA ZAMKNIĘTA',snap.confirmed_utc.strftime('%H:%M:%S UTC') if snap.confirmed_utc else 'BRAK')
-            c3.metric('WIEK DANYCH',f'{snap.age_seconds:.0f} s' if snap.age_seconds is not None else 'BRAK')
+            current_ready,current_reason,current_age=current_feed_status(snap,src)
+            c3.metric('WIEK DANYCH (teraz)',f'{current_age:.0f} s' if current_age is not None else 'BRAK')
+            signal_banner=st.empty()
             c4.metric('SPREAD',f'{snap.spread:.2f} pkt')
             df=indicators(snap.frame) if len(snap.frame)>=14 else snap.frame
             fig=go.Figure()
@@ -223,16 +255,23 @@ with market_tab:
             chart_slot=st.empty()
             st.caption(f'Historyczne strzałki PAPER (hipotetyczne setupy): {len(marks)}. Brak strzałek oznacza brak pełnego sygnału w testowanym fragmencie. Strzałki NIE oznaczają zrealizowanych transakcji.')
             st.caption('Wykres ze świec MID, nie cena wykonalna BID/ASK. Najnowsza świeca API została wykluczona z oceny strategii.')
-            if snap.good:
-                st.success(snap.reason)
+            if current_ready:
+                st.success('✅ FEED AKTUALNY: '+current_reason)
             else:
-                st.error('WAIT / FEED: '+snap.reason)
-            ready=snap.good and src in ('Capital.com DEMO REST','Capital.com LIVE REST')
+                st.warning('🟡 WAIT / DANE: '+current_reason)
+            ready=current_ready
             if src.startswith('CSV'):
                 st.warning('CSV: wyłącznie symulacja edukacyjna. Nie ma sygnału do egzekucji live.')
             if snap.frame is not None and len(snap.frame)>=70:
                 decision=decide(snap.frame,strategy,spread=snap.spread)
                 if not ready: decision.action='WAIT';decision.reason='Brak zweryfikowanego, świeżego feedu LIVE/DEMO — tylko analiza historyczna'
+                banner=f"{decision.action} | {strategy} | {decision.reason}"
+                if decision.action=='LONG':
+                    signal_banner.success('🟢 BIEŻĄCA OCENA PAPER: '+banner)
+                elif decision.action=='SHORT':
+                    signal_banner.error('🔴 BIEŻĄCA OCENA PAPER: '+banner)
+                else:
+                    signal_banner.warning('🟡 BIEŻĄCA OCENA: '+banner)
                 st.markdown(f'### {"🟢" if decision.action=="LONG" else "🔴" if decision.action=="SHORT" else "🟡"} {decision.action} — {strategy}')
                 st.write(f'**Powód:** {decision.reason} | **Trend:** {decision.bias} | **ATR:** {decision.atr}')
                 if decision.action!='WAIT':
@@ -267,7 +306,8 @@ with market_tab:
             else:
                 chart_slot.plotly_chart(fig,use_container_width=True)
                 st.warning('Wykres dostępny, ale jest mniej niż 70 zamkniętych świec — brak sygnału.')
-    else:st.warning('Nie ma danych. Włącz odczyt Capital.com lub dodaj własny CSV edukacyjny. Nie pokazuję fikcyjnych sygnałów.')
+    else:
+        st.warning('Nie ma danych. Włącz odczyt Capital.com lub dodaj własny CSV edukacyjny. Nie pokazuję fikcyjnych sygnałów.')
 
 with lab_tab:
     st.subheader('🧪 TEST HISTORYCZNY — WERSJA EKSPERYMENTALNA')
