@@ -6,3 +6,7 @@ numpy==2.4.6
 plotly==6.9.0
 requests==2.34.2
 openai==2.54.0
+
+# Optional Streamlit native Google OIDC authentication (APP_AUTH_MODE=google)
+authlib==1.9.3
+httpx==0.28.1
