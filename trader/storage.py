@@ -21,10 +21,23 @@ def connect(path=None):
         signal_id TEXT PRIMARY KEY, status TEXT NOT NULL, pnl_pts REAL NOT NULL,
         reviewed_utc TEXT NOT NULL,
         FOREIGN KEY(signal_id) REFERENCES signals(id))''')
+    con.execute('''CREATE TABLE IF NOT EXISTS scan_decisions (
+       id TEXT PRIMARY KEY, recorded_utc TEXT NOT NULL, candle_utc TEXT NOT NULL,
+       epic TEXT NOT NULL, source TEXT NOT NULL, timeframe TEXT NOT NULL,
+       strategy TEXT NOT NULL, action TEXT NOT NULL, reason TEXT NOT NULL)''')
     con.commit()
     return con
 
 def archive(con, event_id, candle_utc, epic, source, timeframe, result):
+    if result.action not in ('LONG','SHORT'):
+        # WAIT and rejected setups are not trades and must not affect win rate.
+        cursor=con.execute('''INSERT OR IGNORE INTO scan_decisions
+            (id,recorded_utc,candle_utc,epic,source,timeframe,strategy,action,reason)
+            VALUES (?,?,?,?,?,?,?,?,?)''',
+            (event_id,datetime.now(timezone.utc).isoformat(),candle_utc,epic,source,
+             timeframe,result.strategy,result.action,result.reason))
+        con.commit()
+        return cursor.rowcount == 1
     cursor = con.execute('''INSERT OR IGNORE INTO signals
         (id,recorded_utc,candle_utc,epic,source,timeframe,strategy,action,reason,
          entry,stop,target,rr,atr) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
@@ -36,7 +49,14 @@ def archive(con, event_id, candle_utc, epic, source, timeframe, result):
 
 def recent(con,limit=100):
     con.row_factory=sqlite3.Row
-    return [dict(r) for r in con.execute('SELECT * FROM signals ORDER BY recorded_utc DESC LIMIT ?',(limit,))]
+    return [dict(r) for r in con.execute('SELECT * FROM signals WHERE action IN ('LONG','SHORT') ORDER BY recorded_utc DESC LIMIT ?',(limit,))]
+
+def recent_scan_decisions(con,limit=100):
+    """Separate WAIT/decision audit, never presented as completed trades."""
+    con.row_factory=sqlite3.Row
+    return [dict(r) for r in con.execute(
+        'SELECT * FROM scan_decisions ORDER BY recorded_utc DESC LIMIT ?', (limit,))]
+
 
 def audit_prior_paper_signals(con, closed_frame, epic, source, timeframe, spread, slippage=.25, holding=24):
     """Retrospective PAPER audit on subsequently closed bars, not broker fills."""
