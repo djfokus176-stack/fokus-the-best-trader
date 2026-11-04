@@ -22,6 +22,19 @@ Bramka hasłowa chroni aplikację przed przypadkowym dostępem, ale **nie zastę
 
 **CAŁKOWICIE NOWY PROJEKT.** Nowe repo `fokus-the-best-trader`, nowe `app.py`, nowy moduł analityczny, nowe archiwum. ZERO integracji, push/pull czy użycia git remote `sp500-kolega-gemini`. Stary kod nie jest tu skopiowany.
 
+## Audyt techniczny — poprawki PAPER v2 / 4 listopada 2026
+
+- **Bilans PAPER:** poziomy SL/TP są interpretowane jako **MID**, a wejście/wyjście jako odpowiednio ASK/BID dla LONG i BID/ASK dla SHORT; poślizg jest liczony na obu końcach. Jeśli oba progi są dotknięte w tej samej świecy OHLC, konserwatywnie pierwszeństwo ma SL. Nie jest to egzekucja brokerska ani tick-by-tick.
+- **Dwa spready:** `snap.spread` to spread z ostatniej zamkniętej świecy (dla setupu), a `snap.quote_spread` z najnowszego, potencjalnie niezakończonego baru (jako filtr warunków wykonania). Jeżeli którykolwiek przekroczy limit, nie wydajemy sygnału.
+- **Trwała identyfikacja kosztu:** nowe kandydatury LONG/SHORT zapisują `entry_spread` na każdej transakcji PAPER. Późniejszy audyt używa zapisanego spreadu sygnału, nie spreadu z kolejnego skanowania. Historycznie zmienny spread wewnątrz transakcji nie jest jeszcze symulowany.
+- **Oddzielne WAIT:** zapis `scan_decisions` zamiast `signals`; stare wpisy WAIT w `signals` pozostają w bazie, lecz są filtrowane z listy transakcji.
+- **Zachowane wyniki historyczne:** starym `paper_outcomes` przypisywane jest `legacy_v1`. Nie usuwamy danych, ale nie liczymy ich do statystyk v2. Nie można ich rzetelnie przeliczyć bez oryginalnych świec i spreadów.
+- **LIVE odblokowywane świadomie:** domyślnie wyłącznie DEMO. Aby udostępnić opcję read-only LIVE w panelu, właściciel może wpisać `CAPITAL_ALLOW_LIVE = true` w Streamlit Secrets.
+- **Zależności:** przypięto **bezpośrednie** zależności w `requirements.txt` do wersji obserwowanych w GitHub Actions na Python 3.11. Wersje pośrednie nie są w pełni zablokowane.
+- **Bezpieczeństwo:** aplikacja wymaga `APP_ACCESS_PASSWORD`. Nie jest to system SSO ani zaawansowana ochrona przed atakami brute-force.
+- **NIE POTWIERDZONO:** pełnego działania z prawdziwymi kluczami Capital.com / OpenAI, poprawności historycznych statystyk na realnym rynku, stałej pracy 24/7 i wydajności w Streamlit Cloud.
+
+
 ## Co rzeczywiście jest w v0.1
 
 - Streamlit + Plotly: świece M1/M5/M15/H1 i EMA9/21/50 z danych Capital.com DEMO REST (wymagają osobnych API), albo edukacyjny import CSV.
