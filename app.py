@@ -1,4 +1,4 @@
-"""FOKU$ THE BEST TRADER v0.1 — wholly new Streamlit research dashboard."""
+"""FOKU$ THE BEST TRADER v0.2 — wholly new Streamlit research dashboard."""
 from __future__ import annotations
 import hashlib
 import sqlite3
@@ -64,7 +64,7 @@ st.markdown('''<style>
 .tag {background:#21304b;color:#c8defd;padding:5px 12px;border-radius:20px;font-weight:bold;}
 </style>''',unsafe_allow_html=True)
 st.markdown('<div class="fokus">⚡ FOKU$ THE BEST TRADER</div>',unsafe_allow_html=True)
-st.markdown('<span class="tag">v0.1 NOWY PROJEKT</span> &nbsp; <span class="tag">PAPER / READ-ONLY</span> &nbsp; <span class="tag">BRAK AUTO TRADE</span>',unsafe_allow_html=True)
+st.markdown('<span class="tag">v0.2 NOWY PROJEKT</span> &nbsp; <span class="tag">PAPER / READ-ONLY</span> &nbsp; <span class="tag">BRAK AUTO TRADE</span>',unsafe_allow_html=True)
 st.caption('Nowy program napisany od zera. Analiza świec, nie wizja AI i nie gwarancja zysku. Bez połączeń ze starym repozytorium.')
 
 
