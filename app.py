@@ -17,6 +17,7 @@ from trader.runtime import current_feed_status, scan_delay_seconds
 from trader.scan_monitor import scan_event, append_scan_log
 from trader.auth import capital_credentials, active_credential, test_capital_login, test_openai_model, test_telegram_token
 from trader.access import access_configured, password_matches
+from trader.owner_auth import auth_mode, owner_email_configured, google_identity_matches
 from trader.market_dna import analyze_market
 
 st.set_page_config(page_title='FOKU$ THE BEST TRADER',page_icon='📈',layout='wide')
@@ -31,32 +32,73 @@ def _owner_password():
     except (FileNotFoundError,KeyError):
         return ''
 
-_owner_secret = _owner_password()
-_owner_digest = hashlib.sha256(_owner_secret.encode('utf-8')).hexdigest()
-_owner_authorized = bool(
-    access_configured(_owner_secret) and
-    st.session_state.get('_owner_access_digest') == _owner_digest
-)
-if not _owner_authorized:
-    st.title('🔐 FOKU$ THE BEST TRADER — dostęp właściciela')
-    if not access_configured(_owner_secret):
-        st.error('Panel jest zablokowany do czasu skonfigurowania APP_ACCESS_PASSWORD.')
-        st.info('Streamlit Cloud → My apps → Settings → Secrets: ustaw APP_ACCESS_PASSWORD na własne, unikalne hasło (min. 12 znaków), zapisz i uruchom aplikację ponownie. Nie wpisuj hasła do GitHuba ani czatu.')
-    else:
-        st.caption('Podaj hasło dostępu zapisane w Streamlit Secrets. To osobne hasło do panelu, nie hasło Capital.com.')
-        with st.form('owner_access_form'):
-            candidate = st.text_input('Hasło właściciela',type='password')
-            submitted = st.form_submit_button('🔓 Otwórz terminal')
-        if submitted:
-            if password_matches(candidate,_owner_secret):
-                st.session_state['_owner_access_digest'] = _owner_digest
-                st.session_state.pop('_owner_bad_attempts',None)
-                st.rerun()
-            else:
-                fails = int(st.session_state.get('_owner_bad_attempts',0))+1
-                st.session_state['_owner_bad_attempts'] = fails
-                st.error('Niepoprawne hasło.' if fails < 5 else 'Zbyt wiele prób w tej sesji. Zakończ sesję i spróbuj ponownie.')
+# Two owner-only modes:
+# - google: Streamlit-native OIDC; browser remembers identity for ~30 days.
+# - password: existing session-only password flow as safe fallback.
+def _early_secret(name: str, default: str = '') -> str:
+    if os.getenv(name) is not None:
+        return os.environ[name].strip()
+    try:
+        return str(st.secrets.get(name, default)).strip()
+    except (FileNotFoundError, KeyError):
+        return default
+
+try:
+    _mode = auth_mode(_early_secret('APP_AUTH_MODE', 'password'))
+except ValueError:
+    st.error('Nieprawidłowy APP_AUTH_MODE. Dostęp zablokowany; wybierz password albo google w Secrets.')
     st.stop()
+
+_owner_authorized = False
+if _mode == 'google':
+    _required_email = _early_secret('OWNER_EMAIL').lower()
+    if not owner_email_configured(_required_email):
+        st.error('Tryb Google zablokowany: podaj OWNER_EMAIL w Streamlit Secrets.')
+        st.stop()
+    try:
+        _is_google_logged_in = bool(st.user.is_logged_in)
+    except (AttributeError, RuntimeError):
+        st.error('Google OIDC niedostępne. Skonfiguruj sekcję [auth] w Streamlit Secrets.')
+        st.stop()
+    if _is_google_logged_in:
+        _owner_authorized = google_identity_matches(st.user, _required_email)
+        if not _owner_authorized:
+            st.error('To konto Google nie jest zweryfikowanym właścicielem tej aplikacji.')
+            if st.button('Wyloguj nieautoryzowane konto'):
+                st.logout()
+            st.stop()
+    else:
+        st.title('🔐 FOKU$ THE BEST TRADER')
+        st.info('Zaloguj się raz przez Google. Streamlit może zapamiętać sesję w tej przeglądarce do 30 dni.')
+        if st.button('🔓 Wejdź przez Google', type='primary'):
+            st.login()
+        st.stop()
+else:
+    _owner_secret = _owner_password()
+    _owner_digest = hashlib.sha256(_owner_secret.encode('utf-8')).hexdigest()
+    _owner_authorized = bool(
+        access_configured(_owner_secret) and
+        st.session_state.get('_owner_access_digest') == _owner_digest
+    )
+    if not _owner_authorized:
+        st.title('🔐 FOKU$ THE BEST TRADER — dostęp właściciela')
+        if not access_configured(_owner_secret):
+            st.error('Brak APP_ACCESS_PASSWORD. Ustaw własne hasło w Streamlit Secrets.')
+        else:
+            st.caption('Tryb hasła: działa w sesji przeglądarki. Aby logować się rzadziej, skonfiguruj bezpieczniejszy tryb Google w Secrets.')
+            with st.form('owner_access_form'):
+                candidate = st.text_input('Hasło właściciela',type='password')
+                submitted = st.form_submit_button('🔓 Otwórz terminal')
+            if submitted:
+                if password_matches(candidate,_owner_secret):
+                    st.session_state['_owner_access_digest'] = _owner_digest
+                    st.session_state.pop('_owner_bad_attempts',None)
+                    st.rerun()
+                else:
+                    fails = int(st.session_state.get('_owner_bad_attempts',0))+1
+                    st.session_state['_owner_bad_attempts'] = fails
+                    st.error('Niepoprawne hasło.' if fails < 5 else 'Niepoprawne hasło (wiele prób).')
+        st.stop()
 
 st.markdown('''<style>
 .stApp {background: #0c1020; color: #e7edf9;}
@@ -81,7 +123,10 @@ with st.sidebar:
                     '_capital_client','_capital_test','market_snap',
                     'ai_context','source_override','initial_scan_attempted'):
             st.session_state.pop(key,None)
-        st.rerun()
+        if _mode == 'google':
+            st.logout()
+        else:
+            st.rerun()
     instrument=st.text_input('Instrument / EPIC Capital.com',value=secret('CAPITAL_EPIC','US500'))
     allow_live = secret('CAPITAL_ALLOW_LIVE','false').lower() in ('true','1','yes','on')
     available_environments = ['DEMO','LIVE'] if allow_live else ['DEMO']
@@ -102,12 +147,12 @@ with st.sidebar:
     tf=st.selectbox('Interwał',['MINUTE','MINUTE_5','MINUTE_15','HOUR'],format_func=lambda x:{'MINUTE':'M1','MINUTE_5':'M5','MINUTE_15':'M15','HOUR':'H1'}[x])
     strategy=st.radio('Strategia',['DRUGA FALA','EMA TREND'])
     max_spread=st.slider('Maksymalny spread (pkt)',.2,5.0,2.0,.1)
-    st.toggle('🔄 AUTO-SKAN — tylko gdy aplikacja otwarta',value=False,key='auto_scan_active',
+    st.toggle('🔄 AUTO-SKAN — tylko gdy aplikacja otwarta',value=_early_secret('AUTO_SCAN_DEFAULT','true').lower() in ('true','1','yes'),key='auto_scan_active',
         help='Ocenia zamknięte świece co najmniej co 60 sekund. Nie jest usługą działającą 24/7.')
     st.selectbox('Interwał skanowania (sekundy)',(60,120,300),key='auto_scan_period')
     st.caption('AUTO-SKAN nie wykonuje zleceń. GPT-5.4 HIGH uruchamiasz osobno — płatne zapytania nie są wysyłane automatycznie.')
     st.markdown('---')
-    with st.expander('🔐 LOGOWANIE API — CAPITAL / OPENAI / TELEGRAM', expanded=True):
+    with st.expander('🔑 KLUCZE API — TESTY / ZMIANY (już zapisane w Secrets)', expanded=False):
         st.caption('Wpisz tylko pola, które chcesz zmienić. Puste pola korzystają z zapisanych Streamlit Secrets. Wpisane tutaj dane żyją wyłącznie w tej sesji przeglądarki.')
         with st.form('fokus_credentials_login', clear_on_submit=True):
             entered_key=st.text_input('Capital.com: API Key',type='password')
@@ -170,7 +215,7 @@ with st.sidebar:
                 st.session_state.pop(key,None)
             st.rerun()
         st.info('Na stałe: Streamlit Cloud → My apps → Settings → Secrets. Ta aplikacja nie ma uprawnień do zmiany Secrets.')
-        st.caption('Aplikacja jest publiczna. Nie udostępniaj nikomu formularza z wpisanymi danymi; zalecane ograniczenie dostępu i osobny PIN administratora.')
+        st.caption('Formularz dostępny dopiero po autoryzacji właściciela. Zalecane ograniczenie dostępu również w ustawieniach Sharing Streamlit Cloud.')
     overrides=st.session_state.get('_api_session_overrides',{})
     cap_api_key,cap_identifier,cap_password=capital_credentials(secret,overrides)
     openai_api_key=active_credential('OPENAI_API_KEY',secret,overrides)
@@ -203,7 +248,10 @@ def auto_scan_heartbeat():
         return
     interval=scan_delay_seconds(st.session_state.get('auto_scan_period',60))
     tick=time.monotonic()
-    previous=st.session_state.get('_last_auto_pulse',0)
+    previous=st.session_state.get('_last_auto_pulse')
+    if previous is None:
+        st.session_state['_last_auto_pulse']=tick
+        return
     if tick-previous >= interval-2:
         st.session_state['_last_auto_pulse']=tick
         st.session_state['_scheduled_scan']=True
