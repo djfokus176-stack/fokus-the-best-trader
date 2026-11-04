@@ -21,7 +21,7 @@ def http_error_message(exc, stage, epic=''):
     if not status:
         return f'{stage}: błąd połączenia ({type(exc).__name__}). Sprawdź sieć i serwer API.'
     if status in (401, 403):
-        return f'{stage}: HTTP {status} — sprawdź dane API dla konta DEMO i uprawnienia.'
+        return f'{stage}: HTTP {status} — sprawdź środowisko DEMO/LIVE, login i hasło API. Sam klucz może działać w innej aplikacji.'
     if status == 404:
         return f'{stage}: HTTP 404 — nie znaleziono instrumentu {epic}. Zweryfikuj EPIC przez wyszukiwarkę rynków Capital.com.'
     if status == 429:
