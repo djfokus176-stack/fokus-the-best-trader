@@ -100,24 +100,41 @@ def decide(frame: pd.DataFrame,strategy='DRUGA FALA',htf=None,spread=.6,min_rr=1
                     round(rr,2),round(atr,2),bias)
 
 def simulate_outcome(bars,direction,entry,stop,target,spread,slippage=.25):
-    """Worst case on candle where SL and TP are both touched: SL first."""
+    """PAPER: entry, SL and TP are MID price *levels*, not executable quotes.
+
+    Fill a new trade at next bar OPEN ask (LONG) / bid (SHORT), with adverse
+    slippage. Stop has priority if both MID barriers touch in one OHLC bar.
+    Exit LONG at bid / SHORT at ask, again with adverse slippage. A stop
+    gap is filled at the worse of stop or bar opening MID. Fixed spread
+    assumption is explicit; this is NOT broker execution or tick replay.
+    """
     if len(bars)<2:
         return 'PENDING',0.0
+    if direction not in ('LONG','SHORT') or spread<0 or slippage<0:
+        raise ValueError('Nieprawidłowy kierunek, spread lub poślizg.')
     first_mid=float(bars.iloc[0].Open)
-    fill=first_mid+spread/2+slippage if direction=='LONG' else first_mid-spread/2-slippage
-    if (direction=='LONG' and not stop<fill<target) or (direction=='SHORT' and not target<fill<stop):
+    entry_fill=(first_mid+spread/2+slippage if direction=='LONG'
+                else first_mid-spread/2-slippage)
+    if (direction=='LONG' and not stop<first_mid<target) or (
+        direction=='SHORT' and not target<first_mid<stop):
         return 'SKIPPED_GAP',0.0
     for _,r in bars.iterrows():
         if direction=='LONG':
-            if r.Low-spread/2<=stop:
-                return 'LOSS',round(stop-fill-slippage,2)
-            if r.High-spread/2>=target:
-                return 'WIN',round(target-fill-slippage,2)
+            if float(r.Low)<=stop:
+                exit_mid=min(float(stop),float(r.Open))
+                exit_bid=exit_mid-spread/2-slippage
+                return 'LOSS',round(exit_bid-entry_fill,2)
+            if float(r.High)>=target:
+                exit_bid=float(target)-spread/2-slippage
+                return 'WIN',round(exit_bid-entry_fill,2)
         else:
-            if r.High+spread/2>=stop:
-                return 'LOSS',round(fill-stop-slippage,2)
-            if r.Low+spread/2<=target:
-                return 'WIN',round(fill-target-slippage,2)
+            if float(r.High)>=stop:
+                exit_mid=max(float(stop),float(r.Open))
+                exit_ask=exit_mid+spread/2+slippage
+                return 'LOSS',round(entry_fill-exit_ask,2)
+            if float(r.Low)<=target:
+                exit_ask=float(target)+spread/2+slippage
+                return 'WIN',round(entry_fill-exit_ask,2)
     return 'PENDING',0.0
 
 def backtest(frame,strategy='DRUGA FALA',spread=.6,slippage=.25,max_holding=24,min_rr=1.5):
