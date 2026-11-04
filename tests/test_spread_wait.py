@@ -44,6 +44,6 @@ def test_wait_not_counted_in_trade_archive(tmp_path):
         assert archive(con,str(i),t,*args,Decision('WAIT','DRUGA FALA','blocked'))
     assert len(recent(con))==0
     assert len(recent_scan_decisions(con))==3
-    assert archive(con,'trade-1',t,*args,Decision('LONG','EMA TREND','paper',100,99,102,1.5))
+    assert archive(con,'trade-1',t,*args,Decision('LONG','EMA TREND','paper',100,99,102,1.5),spread=.6)
     assert len(recent(con))==1
     assert len(recent_scan_decisions(con))==3
