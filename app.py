@@ -17,7 +17,7 @@ from trader.runtime import current_feed_status, scan_delay_seconds
 from trader.scan_monitor import scan_event, append_scan_log
 from trader.auth import capital_credentials, active_credential, test_capital_login, test_openai_model, test_telegram_token
 from trader.access import access_configured, password_matches
-from trader.owner_auth import auth_mode, owner_email_configured, google_identity_matches
+from trader.owner_auth import auth_mode, owner_email_configured, google_identity_matches, google_oidc_ready
 from trader.market_dna import analyze_market
 
 st.set_page_config(page_title='FOKU$ THE BEST TRADER',page_icon='📈',layout='wide')
@@ -54,6 +54,13 @@ if _mode == 'google':
     _required_email = _early_secret('OWNER_EMAIL').lower()
     if not owner_email_configured(_required_email):
         st.error('Tryb Google zablokowany: podaj OWNER_EMAIL w Streamlit Secrets.')
+        st.stop()
+    try:
+        _auth_settings = st.secrets.get('auth', {})
+    except (FileNotFoundError,KeyError):
+        _auth_settings = {}
+    if not google_oidc_ready(_auth_settings):
+        st.error('Google OIDC wymaga kompletu danych [auth] w Streamlit Secrets. Bez nich dostęp jest zablokowany.')
         st.stop()
     try:
         _is_google_logged_in = bool(st.user.is_logged_in)
