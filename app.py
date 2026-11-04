@@ -16,6 +16,7 @@ from trader.visuals import historical_marks
 from trader.runtime import current_feed_status, scan_delay_seconds
 from trader.auth import capital_credentials, active_credential, test_capital_login, test_openai_model, test_telegram_token
 from trader.access import access_configured, password_matches
+from trader.market_dna import analyze_market
 
 st.set_page_config(page_title='FOKU$ THE BEST TRADER',page_icon='📈',layout='wide')
 
@@ -182,7 +183,7 @@ with st.sidebar:
         st.warning('⚠️ Brak API Capital.com. Możesz analizować własny CSV.')
     st.info('Streamlit Cloud nie gwarantuje skanera działającego 24/7. Do tego potrzebny osobny worker na stale działającym hoście.')
 
-market_tab,lab_tab,archive_tab,settings_tab=st.tabs(['📊 WYKRES I SYGNAŁ','🧪 TESTY I NAUKA','📚 ARCHIWUM','🔐 STATUS SYSTEMU'])
+market_tab,dna_tab,lab_tab,archive_tab,settings_tab=st.tabs(['📊 WYKRES I SYGNAŁ','🧬 MARKET DNA','🧪 TESTY I NAUKA','📚 ARCHIWUM','🔐 STATUS SYSTEMU'])
 
 @st.fragment(run_every="60s")
 def auto_scan_heartbeat():
@@ -280,6 +281,14 @@ with market_tab:
             fig.add_trace(go.Candlestick(x=df.index,yaxis='y',open=df.Open,high=df.High,low=df.Low,close=df.Close,name='Świece (MID)'))
             for col,color in [('EMA9','#e8c44f'),('EMA21','#6aa8ff'),('EMA50','#da77f2')]:
                 if col in df:fig.add_trace(go.Scatter(x=df.index,y=df[col],name=col,line={'color':color,'width':1.4}))
+            dna = analyze_market(snap.frame) if len(snap.frame)>=70 else None
+            if dna is not None:
+                if dna.swing_high is not None:
+                    fig.add_hline(y=dna.swing_high,line_color='#b68eff',line_dash='dot',
+                        opacity=.55,annotation_text='Potwierdzony swing HIGH')
+                if dna.swing_low is not None:
+                    fig.add_hline(y=dna.swing_low,line_color='#7fbf98',line_dash='dot',
+                        opacity=.55,annotation_text='Potwierdzony swing LOW')
             marks=historical_marks(snap.frame,strategy,max_bars=110)
             for direction,symbol,color,yshift in [('LONG','triangle-up','#48db98',-1),('SHORT','triangle-down','#ff6e79',1)]:
                 match=marks[marks.action==direction]
@@ -313,6 +322,8 @@ with market_tab:
                     signal_banner.warning('🟡 BIEŻĄCA OCENA: '+banner)
                 st.markdown(f'### {"🟢" if decision.action=="LONG" else "🔴" if decision.action=="SHORT" else "🟡"} {decision.action} — {strategy}')
                 st.write(f'**Powód:** {decision.reason} | **Trend:** {decision.bias} | **ATR:** {decision.atr}')
+                if dna is not None:
+                    st.info(f'🧬 MARKET DNA (kontekst badawczy): {dna.structure} / {dna.regime} / {dna.event}. To NIE zmienia aktualnej decyzji strategii.')
                 if decision.action!='WAIT':
                     m1,m2,m3,m4=st.columns(4)
                     m1.metric('Wejście (orientacyjne)',f'{decision.entry:.2f}')
@@ -347,6 +358,35 @@ with market_tab:
                 st.warning('Wykres dostępny, ale jest mniej niż 70 zamkniętych świec — brak sygnału.')
     else:
         st.warning('Nie ma danych. Włącz odczyt Capital.com lub dodaj własny CSV edukacyjny. Nie pokazuję fikcyjnych sygnałów.')
+
+
+with dna_tab:
+    st.subheader('🧬 FOKU$ MARKET DNA — analiza struktury rynku')
+    st.caption('Moduł wykorzystuje WYŁĄCZNIE OHLC ze świec zamkniętych. Nie analizuje arkusza zleceń, nie oblicza prawdopodobieństwa trafienia i nie zmienia strategii.')
+    if snap is None:
+        st.info('Zeskanuj świece Capital.com w pierwszej zakładce.')
+    elif snap.epic != instrument or snap.resolution != tf:
+        st.warning('Zmień z powrotem instrument i interwał lub wykonaj nowy skan.')
+    elif len(snap.frame) < 70:
+        st.warning('Wymagane minimum 70 zamkniętych świec.')
+    else:
+        try:
+            context=analyze_market(snap.frame)
+            st.caption('Analiza ostatniej ZAMKNIĘTEJ świecy: '+
+                snap.frame.index[-1].strftime('%Y-%m-%d %H:%M UTC'))
+            a,b,c=st.columns(3)
+            a.metric('Struktura',context.structure)
+            b.metric('Reżim rynku',context.regime)
+            c.metric('Zdarzenie',context.event)
+            m1,m2,m3,m4=st.columns(4)
+            m1.metric('Potwierdzony swing HIGH',f'{context.swing_high:.2f}' if context.swing_high is not None else 'BRAK')
+            m2.metric('Potwierdzony swing LOW',f'{context.swing_low:.2f}' if context.swing_low is not None else 'BRAK')
+            m3.metric('Efektywność ruchu (0–1)',f'{context.efficiency:.2f}')
+            m4.metric('ATR / mediana ATR',f'{context.volatility_ratio:.2f}')
+            st.info(context.explanation)
+            st.warning('SWEEP/BOS to zdarzenia cenowe do dalszej weryfikacji, a nie rekomendacja wejścia. Testy OOS i koszty transakcyjne dopiero przed nami.')
+        except ValueError as ex:
+            st.error(str(ex))
 
 with lab_tab:
     st.subheader('🧪 TEST HISTORYCZNY — WERSJA EKSPERYMENTALNA')
