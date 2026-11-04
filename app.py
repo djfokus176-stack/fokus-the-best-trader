@@ -75,6 +75,12 @@ def secret(name,default=''):
 
 with st.sidebar:
     st.header('⚙️ NOWE USTAWIENIA')
+    if st.button('🔒 WYLOGUJ Z TERMINALU',use_container_width=True):
+        for key in ('_owner_access_digest','_api_session_overrides',
+                    '_capital_client','_capital_test','market_snap',
+                    'ai_context','source_override','initial_scan_attempted'):
+            st.session_state.pop(key,None)
+        st.rerun()
     instrument=st.text_input('Instrument / EPIC Capital.com',value=secret('CAPITAL_EPIC','US500'))
     preferred_env = secret('CAPITAL_ENV','DEMO').upper().strip()
     if preferred_env not in ('DEMO','LIVE'):
