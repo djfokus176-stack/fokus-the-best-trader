@@ -15,8 +15,47 @@ from trader.assistant import numeric_context, answer_ai
 from trader.visuals import historical_marks
 from trader.runtime import current_feed_status, scan_delay_seconds
 from trader.auth import capital_credentials, active_credential, test_capital_login, test_openai_model, test_telegram_token
+from trader.access import access_configured, password_matches
 
 st.set_page_config(page_title='FOKU$ THE BEST TRADER',page_icon='📈',layout='wide')
+
+# Security gate BEFORE any market scan, API test or paid OpenAI request.
+# Community Cloud Sharing can be public even if the user is the only editor.
+def _owner_password():
+    if os.getenv('APP_ACCESS_PASSWORD'):
+        return os.environ['APP_ACCESS_PASSWORD']
+    try:
+        return str(st.secrets.get('APP_ACCESS_PASSWORD',''))
+    except (FileNotFoundError,KeyError):
+        return ''
+
+_owner_secret = _owner_password()
+_owner_digest = hashlib.sha256(_owner_secret.encode('utf-8')).hexdigest()
+_owner_authorized = bool(
+    access_configured(_owner_secret) and
+    st.session_state.get('_owner_access_digest') == _owner_digest
+)
+if not _owner_authorized:
+    st.title('🔐 FOKU$ THE BEST TRADER — dostęp właściciela')
+    if not access_configured(_owner_secret):
+        st.error('Panel jest zablokowany do czasu skonfigurowania APP_ACCESS_PASSWORD.')
+        st.info('Streamlit Cloud → My apps → Settings → Secrets: ustaw APP_ACCESS_PASSWORD na własne, unikalne hasło (min. 12 znaków), zapisz i uruchom aplikację ponownie. Nie wpisuj hasła do GitHuba ani czatu.')
+    else:
+        st.caption('Podaj hasło dostępu zapisane w Streamlit Secrets. To osobne hasło do panelu, nie hasło Capital.com.')
+        with st.form('owner_access_form'):
+            candidate = st.text_input('Hasło właściciela',type='password')
+            submitted = st.form_submit_button('🔓 Otwórz terminal')
+        if submitted:
+            if password_matches(candidate,_owner_secret):
+                st.session_state['_owner_access_digest'] = _owner_digest
+                st.session_state.pop('_owner_bad_attempts',None)
+                st.rerun()
+            else:
+                fails = int(st.session_state.get('_owner_bad_attempts',0))+1
+                st.session_state['_owner_bad_attempts'] = fails
+                st.error('Niepoprawne hasło.' if fails < 5 else 'Zbyt wiele prób w tej sesji. Zakończ sesję i spróbuj ponownie.')
+    st.stop()
+
 st.markdown('''<style>
 .stApp {background: #0c1020; color: #e7edf9;}
 [data-testid="stMetric"] {background: #171f35; padding: 16px; border: 1px solid #2f3c5c; border-radius: 10px;}
