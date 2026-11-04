@@ -417,6 +417,12 @@ with market_tab:
 with dna_tab:
     st.subheader('🧬 FOKU$ MARKET DNA — analiza struktury rynku')
     st.caption('Moduł wykorzystuje WYŁĄCZNIE OHLC ze świec zamkniętych. Nie analizuje arkusza zleceń, nie oblicza prawdopodobieństwa trafienia i nie zmienia strategii.')
+    if snap is not None:
+        context_is_current,context_note,_=current_feed_status(snap,src)
+        if context_is_current:
+            st.success('🟢 MARKET DNA: aktualny zbiór świec (nie prognoza).')
+        else:
+            st.warning('🟡 MARKET DNA — ANALIZA HISTORYCZNA, NIE LIVE: '+context_note)
     if snap is None:
         st.info('Zeskanuj świece Capital.com w pierwszej zakładce.')
     elif snap.epic != instrument or snap.resolution != tf:
