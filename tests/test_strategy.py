@@ -60,7 +60,7 @@ def test_forward_audit_when_new_candles_arrive(tmp_path):
     d=data(120,0)
     dec=Decision('LONG','EMA TREND','test setup',float(d.Close.iloc[90]),
                  float(d.Close.iloc[90]-2),float(d.Close.iloc[90]+2),2.0)
-    assert archive(con,'new',d.index[90].isoformat(),'US500','Capital.com DEMO REST','MINUTE',dec)
+    assert archive(con,'new',d.index[90].isoformat(),'US500','Capital.com DEMO REST','MINUTE',dec,spread=.6)
     first=audit_prior_paper_signals(con,d.iloc[:91],'US500','Capital.com DEMO REST','MINUTE',.6)
     assert first==[]
     later=audit_prior_paper_signals(con,d,'US500','Capital.com DEMO REST','MINUTE',.6)
