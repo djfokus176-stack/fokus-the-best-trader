@@ -11,6 +11,7 @@ from trader.market import CapitalReadOnly, FeedError, evaluate_snapshot, PERIOD
 from trader.strategy import indicators, decide, backtest
 from trader.storage import connect, archive, recent, audit_prior_paper_signals, paper_report
 from trader.assistant import numeric_context, answer_ai
+from trader.visuals import historical_marks
 
 st.set_page_config(page_title='FOKU$ THE BEST TRADER',page_icon='📈',layout='wide')
 st.markdown('''<style>
@@ -65,10 +66,16 @@ with market_tab:
     with col1:
         csv=st.file_uploader('Opcjonalnie własne dane OHLC CSV (wyłącznie do nauki / replay)',type=['csv'])
         load=st.button('🔄 SKANUJ ŚWIECE',type='primary',use_container_width=True)
+        st.caption('Po otwarciu strony wykonuję jedną automatyczną próbę pobrania, jeśli API jest zapisane. Ten przycisk pobiera ponownie.')
     with col2:
         st.info('Dane źródłowe = te same świece, które czyta strategia i wyświetla wykres. AI nie widzi obrazu ekranu; dostaje numeryczne OHLC i wskaźniki.')
-    if load:
+    auto_scan = bool(has_cap and csv is None and not st.session_state.get('initial_scan_attempted') and st.session_state.get('market_snap') is None)
+    if auto_scan:
+        st.session_state['initial_scan_attempted'] = True
+        st.info('🔄 Pierwsza próba pobrania świec z Capital.com DEMO...')
+    if load or auto_scan:
         try:
+            st.session_state.pop('last_feed_error', None)
             if csv is not None:
                 raw=read_csv(csv)
                 st.session_state['market_snap']=evaluate_snapshot(raw,instrument,tf,max_spread=max_spread)
@@ -79,7 +86,14 @@ with market_tab:
                 st.session_state['source_override']='Capital.com DEMO REST'
             else:
                 st.error('Brak Capital.com API lub CSV. NIE generuję sztucznych cen.')
-        except (FeedError,ValueError) as ex:st.error(str(ex))
+        except (FeedError,ValueError) as ex:
+            st.session_state['last_feed_error'] = str(ex)
+            st.error('❌ Nie udało się pobrać świec: '+str(ex))
+        except Exception as ex:
+            st.session_state['last_feed_error'] = f'Błąd aplikacji: {type(ex).__name__}'
+            st.error('❌ Błąd pobierania danych: '+type(ex).__name__)
+    elif st.session_state.get('last_feed_error'):
+        st.error('❌ Ostatnia próba skanowania: '+st.session_state['last_feed_error'])
     snap=st.session_state.get('market_snap')
     src=st.session_state.get('source_override','BRAK')
     if snap is not None:
@@ -96,10 +110,19 @@ with market_tab:
             fig.add_trace(go.Candlestick(x=df.index,yaxis='y',open=df.Open,high=df.High,low=df.Low,close=df.Close,name='Świece (MID)'))
             for col,color in [('EMA9','#e8c44f'),('EMA21','#6aa8ff'),('EMA50','#da77f2')]:
                 if col in df:fig.add_trace(go.Scatter(x=df.index,y=df[col],name=col,line={'color':color,'width':1.4}))
+            marks=historical_marks(snap.frame,strategy,max_bars=110)
+            for direction,symbol,color,yshift in [('LONG','triangle-up','#48db98',-1),('SHORT','triangle-down','#ff6e79',1)]:
+                match=marks[marks.action==direction]
+                if not match.empty:
+                    fig.add_trace(go.Scatter(x=match.time,y=match.price,mode='markers',
+                        marker={'symbol':symbol,'size':15,'color':color},
+                        name=f'{direction} • historyczny PAPER',
+                        hovertemplate=f'{direction} • historyczny setup<extra></extra>'))
             fig.update_layout(height=570,xaxis_rangeslider_visible=False,template='plotly_dark',
                               paper_bgcolor='#111a2d',plot_bgcolor='#111a2d',legend_orientation='h',
                               margin={'l':15,'r':15,'t':30,'b':10})
-            st.plotly_chart(fig,use_container_width=True)
+            chart_slot=st.empty()
+            st.caption(f'Historyczne strzałki PAPER (hipotetyczne setupy): {len(marks)}. Brak strzałek oznacza brak pełnego sygnału w testowanym fragmencie. Strzałki NIE oznaczają zrealizowanych transakcji.')
             st.caption('Wykres ze świec MID, nie cena wykonalna BID/ASK. Najnowsza świeca API została wykluczona z oceny strategii.')
             if snap.good:
                 st.success(snap.reason)
@@ -122,7 +145,7 @@ with market_tab:
                     # Lines belong to the CURRENT evaluated decision, not last archived trade.
                     for name,value in [('Wejście',decision.entry),('SL',decision.stop),('TP',decision.target)]:
                         fig.add_hline(y=value,annotation_text=name)
-                    st.plotly_chart(fig,use_container_width=True)
+                chart_slot.plotly_chart(fig,use_container_width=True)
                 if ready:
                     payload=numeric_context(snap.frame,decision,instrument,tf,snap.spread)
                     st.session_state['ai_context']=payload
@@ -142,6 +165,9 @@ with market_tab:
                         if st.session_state.get('ai_context'):
                             st.write(answer_ai(secret('OPENAI_API_KEY'),secret('OPENAI_MODEL','gpt-5.4'),question,st.session_state['ai_context'], effort=secret('OPENAI_REASONING_EFFORT','high')))
                         else:st.warning('AI wymaga wiarygodnego, aktualnego zestawu zamkniętych świec Capital.com.')
+            else:
+                chart_slot.plotly_chart(fig,use_container_width=True)
+                st.warning('Wykres dostępny, ale jest mniej niż 70 zamkniętych świec — brak sygnału.')
     else:st.warning('Nie ma danych. Włącz odczyt Capital.com lub dodaj własny CSV edukacyjny. Nie pokazuję fikcyjnych sygnałów.')
 
 with lab_tab:
