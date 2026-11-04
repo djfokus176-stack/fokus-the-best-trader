@@ -12,6 +12,19 @@ BASE = 'https://demo-api-capital.backend-capital.com'
 class FeedError(RuntimeError):
     pass
 
+
+def http_error_message(exc, stage, epic=''):
+    status = getattr(getattr(exc, 'response', None), 'status_code', None)
+    if not status:
+        return f'{stage}: błąd połączenia ({type(exc).__name__}). Sprawdź sieć i serwer API.'
+    if status in (401, 403):
+        return f'{stage}: HTTP {status} — sprawdź dane API dla konta DEMO i uprawnienia.'
+    if status == 404:
+        return f'{stage}: HTTP 404 — nie znaleziono instrumentu {epic}. Zweryfikuj EPIC przez wyszukiwarkę rynków Capital.com.'
+    if status == 429:
+        return f'{stage}: HTTP 429 — przekroczony limit zapytań Capital.com. Ogranicz częstotliwość.'
+    return f'{stage}: HTTP {status}. Odczyt danych nie powiódł się.'
+
 @dataclass
 class Snapshot:
     frame: pd.DataFrame
@@ -111,7 +124,7 @@ class CapitalReadOnly:
                     raise FeedError('Brak tokenów sesji')
                 self.session_started = time.time()
             except requests.RequestException as ex:
-                raise FeedError(f'Błąd logowania Capital.com: {type(ex).__name__}') from ex
+                raise FeedError(http_error_message(ex,'Logowanie Capital.com')) from ex
         return {'X-CAP-API-KEY': self.api_key, 'CST': self.cst,
                 'X-SECURITY-TOKEN': self.token}
 
@@ -127,6 +140,20 @@ class CapitalReadOnly:
             r.raise_for_status()
             return evaluate_snapshot(parse_prices(r.json()), epic, resolution, max_spread=max_spread)
         except requests.RequestException as ex:
-            raise FeedError(f'Pobieranie świec nieudane: {type(ex).__name__}') from ex
+            raise FeedError(http_error_message(ex,'Pobieranie świec',epic=epic)) from ex
         except ValueError as ex:
             raise FeedError(f'Niepoprawny JSON API: {ex}') from ex
+
+    def search_markets(self, term='US500'):
+        """Find the actual EPIC in an authenticated DEMO account (READ-ONLY GET)."""
+        try:
+            r = self.session.get(f'{BASE}/api/v1/markets',
+                params={'searchTerm':str(term).strip()[:60]},headers=self.headers(),timeout=12)
+            r.raise_for_status()
+            markets = r.json().get('markets',[])
+            return [{'EPIC':m.get('epic',''), 'Nazwa':m.get('instrumentName',''),
+                     'Status':m.get('marketStatus','')} for m in markets[:30]]
+        except requests.RequestException as ex:
+            raise FeedError(http_error_message(ex,'Wyszukiwanie instrumentów')) from ex
+        except ValueError as ex:
+            raise FeedError('Nieprawidłowa odpowiedź JSON wyszukiwarki instrumentów') from ex
