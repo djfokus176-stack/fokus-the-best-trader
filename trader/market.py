@@ -153,6 +153,26 @@ class CapitalReadOnly:
         except ValueError as ex:
             raise FeedError(f'Niepoprawny JSON API: {ex}') from ex
 
+    def market_state(self, epic: str = 'US500') -> str:
+        """Read-only instrument status; do not infer trading hours from the clock."""
+        if not epic.replace('_','').isalnum():
+            raise FeedError('Niepoprawny EPIC')
+        try:
+            r = self.session.get(f'{self.base_url}/api/v1/markets/{epic}',
+                headers=self.headers(),timeout=12)
+            r.raise_for_status()
+            payload = r.json()
+            snapshot = payload.get('snapshot') or {}
+            instrument = payload.get('instrument') or {}
+            raw = snapshot.get('marketStatus') or instrument.get('marketStatus')
+            if raw is None:
+                return 'UNKNOWN'
+            return str(raw).upper()
+        except requests.RequestException as ex:
+            raise FeedError(http_error_message(ex,'Status instrumentu',epic=epic)) from ex
+        except (ValueError,TypeError,AttributeError) as ex:
+            raise FeedError('Błędny JSON statusu rynku Capital.com') from ex
+
     def search_markets(self, term='US500'):
         """Find the actual EPIC in the selected account (READ-ONLY GET)."""
         try:
