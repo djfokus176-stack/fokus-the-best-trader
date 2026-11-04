@@ -210,10 +210,17 @@ with tab3:
                 from openai import OpenAI
                 import json
                 client=OpenAI(api_key=secret("OPENAI_API_KEY"))
-                result=client.chat.completions.create(model=secret("OPENAI_MODEL","gpt-4.1-mini"),
-                    messages=[{"role":"system","content":"Jesteś krytycznym audytorem PAPER, bez obietnic zysku. Wyjaśnij dane świec, ryzyko, cenę unieważnienia; nie udawaj widzenia ekranu."},
-                              {"role":"user","content":json.dumps(st.session_state["ai_snapshot"],ensure_ascii=False,default=str)+"\nPytanie: "+question}],
-                    max_tokens=600)
-                st.write(result.choices[0].message.content)
+                model = secret("OPENAI_MODEL", "gpt-5.4")
+                effort = secret("OPENAI_REASONING_EFFORT", "high").strip().lower()
+                if effort not in ("none", "low", "medium", "high", "xhigh"):
+                    raise ValueError("Nieznany OPENAI_REASONING_EFFORT w Secrets.")
+                result = client.responses.create(
+                    model=model,
+                    reasoning={"effort": effort},
+                    instructions="Jesteś krytycznym audytorem PAPER, bez obietnic zysku. Wyjaśnij dane świec, ryzyko, cenę unieważnienia; nie udawaj widzenia ekranu. Nie przedstawiaj prognoz jako pewnych.",
+                    input=json.dumps(st.session_state["ai_snapshot"], ensure_ascii=False, default=str) + "\nPytanie: " + question,
+                    max_output_tokens=3500,
+                )
+                st.write(result.output_text or "Model nie zwrócił tekstowej odpowiedzi. Sprawdź limit tokenów i API.")
             except Exception as e:
                 st.error("Błąd OpenAI: "+str(e)[:180])
