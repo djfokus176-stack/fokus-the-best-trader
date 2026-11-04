@@ -16,7 +16,7 @@ def scan_once(client, epic, tf, strategy, max_spread, db):
     result = decide(snap.frame,strategy,spread=snap.spread)
     stamp = snap.confirmed_utc.isoformat()
     key = hashlib.sha256(f'{epic}|{tf}|{strategy}|{stamp}|{result.action}'.encode()).hexdigest()
-    is_new = archive(db,key,stamp,epic,snap.source,tf,result)
+    is_new = archive(db,key,stamp,epic,snap.source,tf,result,spread=snap.spread)
     audit_prior_paper_signals(db,snap.frame,epic,snap.source,tf,snap.spread)
     return f'{stamp} {result.action} ({"NOWE" if is_new else "DUPLIKAT"}) {result.reason}'
 
