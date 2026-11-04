@@ -39,6 +39,7 @@ class Snapshot:
     age_seconds: float | None
     good: bool
     reason: str
+    quote_spread: float | None = None  # latest forming bar: for tradeability only
 
 def parse_prices(payload: dict) -> pd.DataFrame:
     rows = []
@@ -86,7 +87,8 @@ def evaluate_snapshot(raw: pd.DataFrame, epic: str, resolution: str,
     confirmed_time = confirmed.index[-1].to_pydatetime()
     age = (now - confirmed_time).total_seconds()
     step = PERIOD[resolution]
-    spread = float(raw.iloc[-1]['Spread'])
+    spread = float(confirmed.iloc[-1]['Spread'])  # strategy's CLOSED signal candle
+    quote_spread = float(raw.iloc[-1]['Spread'])  # newest/forming bar, never model history
     if raw.index[-1] <= confirmed.index[-1]:
         reason = 'Brak świecy następującej po świecy sygnałowej'
     elif age < -step:
@@ -94,7 +96,9 @@ def evaluate_snapshot(raw: pd.DataFrame, epic: str, resolution: str,
     elif age > step * 3 + 60:
         reason = f'Dane przestarzałe ({age:.0f} s)'
     elif spread > max_spread:
-        reason = f'Za duży spread: {spread:.2f} > {max_spread:.2f}'
+        reason = f'Spread zamkniętej świecy: {spread:.2f} > {max_spread:.2f}'
+    elif quote_spread > max_spread:
+        reason = f'Bieżący spread: {quote_spread:.2f} > {max_spread:.2f}'
     elif confirmed[['Open','High','Low','Close']].tail(25).isna().any().any():
         reason = 'Puste OHLC'
     elif (confirmed.index[-20:].to_series().diff().dt.total_seconds().dropna() > step * 4).any():
@@ -102,7 +106,7 @@ def evaluate_snapshot(raw: pd.DataFrame, epic: str, resolution: str,
     else:
         reason = 'OK: poprzednia świeca ma nowszego następcę (nie potwierdza ticków ani jakości feedu)'
     return Snapshot(confirmed, source, epic, resolution,
-                    spread, confirmed_time, age, reason.startswith('OK:'), reason)
+                    spread, confirmed_time, age, reason.startswith('OK:'), reason, quote_spread)
 
 class CapitalReadOnly:
     def __init__(self, api_key: str, identifier: str, password: str, environment: str = 'DEMO'):
