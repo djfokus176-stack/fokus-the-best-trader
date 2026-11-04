@@ -25,10 +25,17 @@ def connect(path=None):
        id TEXT PRIMARY KEY, recorded_utc TEXT NOT NULL, candle_utc TEXT NOT NULL,
        epic TEXT NOT NULL, source TEXT NOT NULL, timeframe TEXT NOT NULL,
        strategy TEXT NOT NULL, action TEXT NOT NULL, reason TEXT NOT NULL)''')
+    # In-place forward-only migration; never delete old PAPER rows.
+    signal_columns={row[1] for row in con.execute('PRAGMA table_info(signals)')}
+    if 'entry_spread' not in signal_columns:
+        con.execute('ALTER TABLE signals ADD COLUMN entry_spread REAL')
+    outcome_columns={row[1] for row in con.execute('PRAGMA table_info(paper_outcomes)')}
+    if 'model_version' not in outcome_columns:
+        con.execute("ALTER TABLE paper_outcomes ADD COLUMN model_version TEXT NOT NULL DEFAULT 'legacy_v1'")
     con.commit()
     return con
 
-def archive(con, event_id, candle_utc, epic, source, timeframe, result):
+def archive(con, event_id, candle_utc, epic, source, timeframe, result, spread=None):
     if result.action not in ('LONG','SHORT'):
         # WAIT and rejected setups are not trades and must not affect win rate.
         cursor=con.execute('''INSERT OR IGNORE INTO scan_decisions
@@ -40,10 +47,10 @@ def archive(con, event_id, candle_utc, epic, source, timeframe, result):
         return cursor.rowcount == 1
     cursor = con.execute('''INSERT OR IGNORE INTO signals
         (id,recorded_utc,candle_utc,epic,source,timeframe,strategy,action,reason,
-         entry,stop,target,rr,atr) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+         entry,stop,target,rr,atr,entry_spread) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
         (event_id,datetime.now(timezone.utc).isoformat(),candle_utc,epic,source,
          timeframe,result.strategy,result.action,result.reason,result.entry,
-         result.stop,result.target,result.rr,result.atr))
+         result.stop,result.target,result.rr,result.atr,spread))
     con.commit()
     return cursor.rowcount == 1
 
@@ -62,10 +69,11 @@ def audit_prior_paper_signals(con, closed_frame, epic, source, timeframe, spread
     """Retrospective PAPER audit on subsequently closed bars, not broker fills."""
     from .strategy import simulate_outcome
     completed=[]
-    signals=con.execute('''SELECT id,candle_utc,action,entry,stop,target FROM signals
+    signals=con.execute('''SELECT id,candle_utc,action,entry,stop,target,entry_spread FROM signals
       WHERE epic=? AND source=? AND timeframe=? AND action IN ('LONG','SHORT')
+      AND entry_spread IS NOT NULL
       AND id NOT IN (SELECT signal_id FROM paper_outcomes)''', (epic,source,timeframe)).fetchall()
-    for signal_id, timestamp, side, entry, stop, target in signals:
+    for signal_id, timestamp, side, entry, stop, target, entry_spread in signals:
         if entry is None or stop is None or target is None:
             continue
         t=datetime.fromisoformat(timestamp)
@@ -74,20 +82,22 @@ def audit_prior_paper_signals(con, closed_frame, epic, source, timeframe, spread
         future=closed_frame[closed_frame.index > t].iloc[:holding]
         if len(future) < 1:
             continue
-        result,pnl=simulate_outcome(future,side,float(entry),float(stop),float(target),spread,slippage)
+        signal_spread=float(entry_spread)
+        result,pnl=simulate_outcome(future,side,float(entry),float(stop),float(target),signal_spread,slippage)
         if result == 'PENDING' and len(future) == holding:
             exit_mid=float(future.iloc[-1].Close)
             first_mid=float(future.iloc[0].Open)
             if side=='LONG':
-                pnl=(exit_mid-spread/2-slippage)-(first_mid+spread/2+slippage)
+                pnl=(exit_mid-signal_spread/2-slippage)-(first_mid+signal_spread/2+slippage)
             else:
-                pnl=(first_mid-spread/2-slippage)-(exit_mid+spread/2+slippage)
+                pnl=(first_mid-signal_spread/2-slippage)-(exit_mid+signal_spread/2+slippage)
             result='TIMEOUT'
         if result=='PENDING':
             continue
         con.execute('''INSERT OR IGNORE INTO paper_outcomes
-          (signal_id,status,pnl_pts,reviewed_utc) VALUES (?,?,?,?)''',
-          (signal_id,result,round(float(pnl),2),datetime.now(timezone.utc).isoformat()))
+          (signal_id,status,pnl_pts,reviewed_utc,model_version) VALUES (?,?,?,?,?)''',
+          (signal_id,result,round(float(pnl),2),datetime.now(timezone.utc).isoformat(),
+           'v2_mid_bidask'))
         completed.append((signal_id,result,round(float(pnl),2)))
     con.commit()
     return completed
@@ -95,6 +105,13 @@ def audit_prior_paper_signals(con, closed_frame, epic, source, timeframe, spread
 def paper_report(con):
     con.row_factory=sqlite3.Row
     return [dict(r) for r in con.execute('''SELECT s.candle_utc,s.epic,s.timeframe,s.strategy,
-        s.action, o.status, o.pnl_pts, o.reviewed_utc
+        s.action, o.status, o.pnl_pts, o.reviewed_utc, o.model_version, s.entry_spread
         FROM paper_outcomes o JOIN signals s ON o.signal_id=s.id
+        WHERE o.model_version='v2_mid_bidask'
         ORDER BY o.reviewed_utc DESC LIMIT 300''')]
+
+
+def legacy_outcomes_count(con):
+    """Old results kept for forensic review, excluded from v2 performance metrics."""
+    return int(con.execute(
+        "SELECT COUNT(*) FROM paper_outcomes WHERE model_version!='v2_mid_bidask'").fetchone()[0])
