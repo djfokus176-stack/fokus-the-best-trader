@@ -44,6 +44,12 @@ def test_dashboard_v3_queue_then_simulated_open_on_next_closed_candle(monkeypatc
              (now-end).total_seconds(),True,"OK mock",quote_spread=.6)
     monkeypatch.setattr(CapitalReadOnly,"candles",mocked_candles)
     monkeypatch.setattr(CapitalReadOnly,"market_state",lambda self,epic:"TRADEABLE")
+    # The UI now gets the same status from an authenticated market quote.
+    # No network calls in this controlled PAPER integration fixture.
+    from trader.market import MarketQuote
+    monkeypatch.setattr(CapitalReadOnly,"market_quote",
+        lambda self,epic: MarketQuote(epic,"DEMO",100.0,100.6,100.3,.6,
+            "TRADEABLE",datetime.now(timezone.utc),datetime.now(timezone.utc),0,True))
     import trader.strategies_pro as pro
     def mocked_decision(frame,strategy,spread):
         return Decision("LONG",strategy,"controlled test only",100,98,102,1.5,1.0,"UP")
