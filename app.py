@@ -35,7 +35,7 @@ from trader.auth import capital_credentials, active_credential, test_capital_log
 from trader.access import access_configured, password_matches
 from trader.owner_auth import auth_mode, owner_email_configured, google_identity_matches, google_oidc_ready
 from trader.market_dna import analyze_market
-from trader.feed_audit import inspect_labels
+from trader.feed_audit import inspect_labels,compare_clock_observations
 
 st.set_page_config(page_title='FOKU$ THE BEST TRADER',page_icon='📈',layout='wide')
 
@@ -920,13 +920,25 @@ with settings_tab:
                     # instance retained in Streamlit session_state after redeploy.
                     fresh_demo=CapitalReadOnly(cap_api_key,cap_identifier,cap_password,environment='DEMO')
                     raw=fresh_demo.raw_candle_time_diagnostic(instrument,'MINUTE')
-                    st.session_state['_last_raw_time_audit']=inspect_labels(raw,'MINUTE')
+                    result=inspect_labels(raw,'MINUTE')
+                    prior=st.session_state.get('_last_raw_time_audit')
+                    st.session_state['_clock_pair_verdict']=(
+                        compare_clock_observations(prior,result) if prior else None)
+                    st.session_state['_last_raw_time_audit']=result
                 except (FeedError,ValueError,TypeError,AttributeError) as ex:
                     st.error('Diagnostyka API DEMO nie zakończyła się poprawnie: '+type(ex).__name__+
                              '. Szczegóły możesz sprawdzić w logach Streamlit; nie publikuj kluczy.')
         if st.session_state.get('_last_raw_time_audit'):
             st.json(st.session_state['_last_raw_time_audit'])
-            st.caption('Porównaj ten wynik z zegarem i świecami brokera w przeglądarce. Nie wysyłaj na screenie kluczy ani poświadczeń.')
+            pair=st.session_state.get('_clock_pair_verdict')
+            if pair:
+                st.info('🕒 Porównanie dwóch odczytów: '+pair.get('status','BRAK'))
+                st.json(pair)
+            else:
+                st.caption('Pierwszy odczyt zarejestrowany. Kliknij ponownie po pojawieniu się kolejnej świecy M1, żeby porównać oba oznaczenia.')
+            if secret('FOKUS_CANDLE_TIME_CONFIRMED','').lower()!='open':
+                st.warning('NOWE WEJŚCIA PAPER: ZABLOKOWANE do niezależnego potwierdzenia, że API oznacza czas OTWARCIA. Nie używaj ustawienia close.')
+            st.caption('Porównaj wynik z czasem świec w terminalu Capital.com. Surowe oznaczenia pozostają bez przesunięcia; OHLC w strategiach przeliczane są na czas zamknięcia.')
 
 
 
