@@ -60,3 +60,82 @@ def test_worker_remote_requires_github_cloud_secrets_not_local_fallback():
     from trader.remote_checkpoint import RemoteCheckpoint
     with pytest.raises(RemoteError):
         RemoteCheckpoint.from_env(env={})
+
+
+def test_real_remote_scan_persists_cloud_ohlc_without_local_candle_history(monkeypatch):
+    """Regression for real GH Actions failure: SQLite lacks candle_history."""
+    from datetime import datetime, timezone
+    from trader.market import Snapshot
+    from trader.auto_strategy import AUTO_MODE
+    from trader.strategy import Decision
+
+    cp=Checkpoint()
+    cp.ohlc_updates=0
+    def cloud_upsert(snapshots,epic):
+        assert "MINUTE" in snapshots and epic=="US500"
+        cp.ohlc_updates+=1
+        return 120
+    cp.upsert_candles=cloud_upsert
+
+    at=pd.Timestamp.now(tz="UTC").floor("min")-pd.Timedelta(minutes=2)
+    idx=pd.date_range(end=at,periods=120,freq="min",tz="UTC")
+    data=pd.DataFrame({"Open":[100.0]*120,"High":[101.0]*120,
+       "Low":[99.0]*120,"Close":[100.0]*120,"Spread":[0.5]*120},index=idx)
+    snap=Snapshot(data,"Capital.com DEMO REST","US500","MINUTE",
+         0.5,at.to_pydatetime(),90,True,"OK synthetic",quote_spread=0.5)
+
+    class Client:
+        environment="DEMO"
+        def market_state(self,epic): return "TRADEABLE"
+
+    monkeypatch.setattr(worker,"fetch_all_timeframes",
+        lambda *args,**kwargs:({"MINUTE":snap},{}))
+    monkeypatch.setattr(worker,"current_feed_status",lambda *args:(True,"OK",0))
+    def no_sql_archive(*args,**kwargs):
+        raise AssertionError("remote must never attempt local candle_history")
+    monkeypatch.setattr(worker,"archive_candles",no_sql_archive)
+    waiting=Decision("WAIT",AUTO_MODE,"synthetic no signal")
+    monkeypatch.setattr(worker,"evaluate_auto",
+        lambda *args,**kwargs:(waiting,[]))
+    ready=type("TF",(),{"ready":True,"trend":"NEUTRAL","timeframe":"MINUTE"})()
+    monkeypatch.setattr(worker,"filter_mtf_decision",
+        lambda *args,**kwargs:(waiting,[ready]*4))
+    monkeypatch.setattr(worker,"decide_any",lambda *args,**kwargs:waiting)
+
+    outcome=worker.remote_scan_once(cp,Client(),"US500","MINUTE",
+        AUTO_MODE,2,strict_macro=False,enable_setups=False)
+    assert cp.ohlc_updates==1
+    assert cp.writes==1
+    assert cp.v==1
+    assert "CLOUD_CHECKPOINT_VERSION=1" in outcome
+    assert "CANDLES=120" in outcome
+    assert cp.state["meta"]["epic"]=="US500"
+    assert cp.state["auto_ai"]=={}
+
+
+def test_remote_ohlc_write_failure_prevents_billable_ai_and_checkpoint(monkeypatch):
+    """Cloud OHLC failure must fail closed before the optional paid review."""
+    from trader.market import Snapshot
+    from trader.auto_strategy import AUTO_MODE
+    cp=Checkpoint()
+    cp.upsert_candles=lambda *args,**kwargs: (_ for _ in ()).throw(RemoteError("cloud unavailable"))
+    at=pd.Timestamp.now(tz="UTC").floor("min")-pd.Timedelta(minutes=2)
+    idx=pd.date_range(end=at,periods=120,freq="min",tz="UTC")
+    data=pd.DataFrame({"Open":[100.0]*120,"High":[101.0]*120,
+      "Low":[99.0]*120,"Close":[100.0]*120,"Spread":[0.5]*120},index=idx)
+    snap=Snapshot(data,"Capital.com DEMO REST","US500","MINUTE",
+         0.5,at.to_pydatetime(),90,True,"OK synthetic",quote_spread=0.5)
+    class Client:
+        environment="DEMO"
+        def market_state(self,epic): return "TRADEABLE"
+    monkeypatch.setattr(worker,"fetch_all_timeframes",
+         lambda *a,**kw:({"MINUTE":snap},{}))
+    monkeypatch.setattr(worker,"archive_candles",
+         lambda *a,**kw:(_ for _ in ()).throw(AssertionError("wrong archive")))
+    monkeypatch.setattr(worker,"review_closed_candle",
+         lambda *a,**kw: (_ for _ in ()).throw(AssertionError("paid review invoked")),
+         raising=False)
+    with pytest.raises(RemoteError,match="cloud unavailable"):
+        worker.remote_scan_once(cp,Client(),"US500","MINUTE",
+             AUTO_MODE,2,strict_macro=False)
+    assert cp.writes==0
