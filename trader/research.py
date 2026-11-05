@@ -28,7 +28,8 @@ def _outcome(future, action, entry, stop, target, spread, slippage, holding):
 
 def replay(frame: pd.DataFrame, strategy: str, spread: float=.6,
            slippage: float=.25, holding: int=20,
-           evaluation_start: int=85, evaluation_end: int|None=None) -> pd.DataFrame:
+           evaluation_start: int=85, evaluation_end: int|None=None,
+           trade_gate=None, max_history: int|None=None) -> pd.DataFrame:
     """Only emit predictions using prefix [:i] and future candles [i:i+holding].
     Each setup waits for next candle OPEN, positions never overlap.
     """
@@ -44,8 +45,14 @@ def replay(frame: pd.DataFrame, strategy: str, spread: float=.6,
     i=start
     while i+holding<=end:
         # Prefix contains ONLY completed bars, evaluated at i-1.
-        decision=decide_any(frame.iloc[:i],strategy,spread=spread)
+        # Fixed rolling warmup bounds CPU/memory on long CSV datasets.
+        # Every result uses only candles fully closed before the signal.
+        prefix=frame.iloc[max(0,i-max_history):i] if max_history else frame.iloc[:i]
+        decision=decide_any(prefix,strategy,spread=spread)
         if decision.action not in ("LONG","SHORT"):
+            i+=1
+            continue
+        if trade_gate is not None and not trade_gate(decision,frame.index[i-1]):
             i+=1
             continue
         future=frame.iloc[i:i+holding]
