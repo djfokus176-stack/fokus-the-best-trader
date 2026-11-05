@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 def annotate_open_paper(fig, position):
-    """Only OPEN trades get persistent entry/SL/TP lines; never PENDING/WAIT."""
+    """OPEN only: draw separate MID reference and modeled executable fill."""
     if not position or position.get("status")!="OPEN":
         return fig
     for label,value,color in (
-        ("PAPER ENTRY",position.get("entry_mid"),"#77c8ff"),
+        ("PAPER ENTRY MID (OHLC)",position.get("entry_mid"),"#77c8ff"),
+        ("PAPER FILL BID/ASK (MODEL)",position.get("entry_executable"),"#f6b157"),
         ("PAPER SL",position.get("stop_mid"),"#ff6680"),
         ("PAPER TP",position.get("target_mid"),"#3bdf99"),
     ):
