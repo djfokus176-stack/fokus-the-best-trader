@@ -26,6 +26,8 @@ jobs:
       CAPITAL_IDENTIFIER: ${{ secrets.CAPITAL_IDENTIFIER }}
       CAPITAL_PASSWORD: ${{ secrets.CAPITAL_PASSWORD }}
       CAPITAL_EPIC: ${{ vars.CAPITAL_EPIC || 'US500' }}
+      # Optional strategy comparison; AUTO remains default until opted in.
+      FOKUS_PAPER_STRATEGY: ${{ vars.FOKUS_PAPER_STRATEGY || 'AUTO — 6 STRATEGII' }}
       # Separate worker secret, never committed. No billable call unless opt-in.
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       FOKUS_AUTO_AI_ENABLED: ${{ vars.FOKUS_AUTO_AI_ENABLED || 'false' }}
