@@ -497,9 +497,16 @@ with market_tab:
             market_status='UNKNOWN'
             if obtained is not None and has_cap and csv is None:
                 try:
-                    market_status=st.session_state['_capital_client'].market_state(instrument)
-                except (FeedError,ValueError):
+                    quote=st.session_state['_capital_client'].market_quote(instrument)
+                    market_status=quote.status
+                    st.session_state['_live_quote']=quote
+                    st.session_state['_live_quote_error']=None
+                    st.session_state['_live_samples']=quote_sample(
+                        st.session_state.get('_live_samples'),quote,tf)
+                except (FeedError,ValueError) as ex:
                     market_status='UNKNOWN (status API niedostępny)'
+                    st.session_state['_live_quote']=None
+                    st.session_state['_live_quote_error']=str(ex)[:160]
             st.session_state['_market_status']=market_status
             # Save each CLOSED Capital series without mixing EPIC, source or TF.
             try:
@@ -553,6 +560,25 @@ with market_tab:
             st.error('❌ Błąd pobierania danych: '+type(ex).__name__)
     elif st.session_state.get('last_feed_error'):
         st.error('❌ Ostatnia próba skanowania: '+st.session_state['last_feed_error'])
+    if scheduled_live_quote and not actual_scan_this_rerun:
+        # A single quick /markets GET, never the heavy 350-bar OHLC endpoint.
+        # Never use these quote samples for trade decisions.
+        try:
+            if '_capital_client' not in st.session_state:
+                st.session_state['_capital_client']=CapitalReadOnly(
+                    cap_api_key,cap_identifier,cap_password,environment=capital_env)
+            if time.monotonic()>=st.session_state.get('_quote_backoff_until',0):
+                quote=st.session_state['_capital_client'].market_quote(instrument)
+                st.session_state['_live_quote']=quote
+                st.session_state['_market_status']=quote.status
+                st.session_state['_live_quote_error']=None
+                st.session_state['_live_samples']=quote_sample(
+                    st.session_state.get('_live_samples'),quote,tf)
+        except (FeedError,ValueError) as ex:
+            st.session_state['_live_quote']=None
+            st.session_state['_live_quote_error']=str(ex)[:160]
+            if '429' in str(ex):
+                st.session_state['_quote_backoff_until']=time.monotonic()+60
     snap=st.session_state.get('market_snap')
     src=st.session_state.get('source_override','BRAK')
     if st.session_state.get('last_scan_utc'):
@@ -608,7 +634,10 @@ with market_tab:
                        ' Nie używaj tych danych do nowej decyzji.')
         else:
             st.select_slider('🔎 Powiększenie wykresu — liczba ostatnich świec',
-                options=[60,90,120,180,240,350],value=120,key='chart_window_size')
+                options=[20,30,45,60,90,120,180,240,350],value=30,
+                key='chart_window_size')
+            st.toggle('📐 Automatycznie dopasuj skalę ceny do widocznych świec',
+                value=True,key='chart_price_autoscale')
             c1,c2,c3,c4=st.columns(4)
             c1.metric('ŹRÓDŁO',src)
             c2.metric('OSTATNIA ZAMKNIĘTA',snap.confirmed_utc.strftime('%H:%M:%S UTC') if snap.confirmed_utc else 'BRAK')
@@ -616,6 +645,28 @@ with market_tab:
             c3.metric('WIEK DANYCH (teraz)',f'{current_age:.0f} s' if current_age is not None else 'BRAK')
             signal_banner=st.empty()
             c4.metric('SPREAD zamkniętej świecy',f'{snap.spread:.2f} pkt')
+            live_quote=st.session_state.get('_live_quote')
+            quote_current=bool(
+                live_quote is not None and live_quote.fresh
+                and live_quote.epic==instrument
+                and live_quote.environment==capital_env
+                and st.session_state.get('auto_scan_active',False)
+                and src==f'Capital.com {capital_env} REST'
+                and (datetime.now(timezone.utc)-live_quote.received_utc).total_seconds()<=30)
+            if quote_current:
+                q1,q2,q3,q4=st.columns(4)
+                q1.metric('⚡ BIEŻĄCY MID • REST',f'{live_quote.mid:.2f}')
+                q2.metric('BID',f'{live_quote.bid:.2f}')
+                q3.metric('OFFER',f'{live_quote.ask:.2f}')
+                q4.metric('BIEŻĄCY SPREAD',f'{live_quote.spread:.2f} pkt')
+                st.caption('⚡ Cena z bieżącego snapshotu Capital.com, '
+                           'nie pełna świeca ani wykonany kurs zlecenia. '
+                           'Czas brokera UTC: '+live_quote.update_utc.isoformat())
+            elif st.session_state.get('auto_scan_active',False):
+                detail=st.session_state.get('_live_quote_error') or (
+                    'Brak świeżego snapshotu BID/OFFER; rynek może być zamknięty '
+                    'lub czas dostawcy opóźniony.')
+                st.warning('⚠️ LIVE: '+str(detail)[:210])
             if snap.quote_spread is not None:
                 st.caption(f'Spread najnowszej świecy (może być niezamknięta): {snap.quote_spread:.2f} pkt. Do logiki strategii używany jest spread świecy zamkniętej.')
             df=indicators(snap.frame) if len(snap.frame)>=14 else snap.frame
@@ -631,8 +682,18 @@ with market_tab:
                 if dna.swing_low is not None:
                     fig.add_hline(y=dna.swing_low,line_color='#7fbf98',line_dash='dot',
                         opacity=.55,annotation_text='Potwierdzony swing LOW')
-            # No historical backfilled arrows. Only actual archived PAPER
-            # OPEN/CLOSED positions are allowed to draw trade markers.
+            # No historical setup arrows. Add an explicitly non-tradable
+            # forming candle built from sampled current BID/OFFER MID quotes.
+            preview=sampled_preview(st.session_state.get('_live_samples',[]),
+                         closed_time=snap.confirmed_utc) if quote_current else None
+            show_quote_preview(fig,preview,bars=snap.frame,
+                 visible_bars=st.session_state.get('chart_window_size',30),
+                 auto_zoom=st.session_state.get('chart_price_autoscale',True))
+            if preview is not None:
+                st.caption('🟢/🔴 Bieżąca świeca po PRAWEJ jest niepełna: '
+                    f'{preview["samples"]} próbek ceny MID z REST. '
+                    'Wysokie/niskie obejmują tylko odczytane próbki (nie wszystkie ticki). '
+                    'Nie liczy się do EMA, LONG/SHORT ani PAPER.')
             fig.update_layout(height=570,xaxis_rangeslider_visible=False,template='plotly_dark',
                               paper_bgcolor='#111a2d',plot_bgcolor='#111a2d',legend_orientation='h',
                               margin={'l':15,'r':15,'t':30,'b':10})
@@ -815,7 +876,9 @@ with market_tab:
                 # No BUY/SELL-looking historical scan markers. Trade chart is
                 # restricted to verified PAPER OPEN/CLOSED ledger events.
                 chart_slot.plotly_chart(fig,use_container_width=True)
-                st.caption('🤖 BOT ocenia zamknięte świece z wykresu według wybranego interwału odświeżania (5–300 s), tylko gdy strona jest otwarta. Bez streamingu ticków i zleceń.')
+                st.caption('🤖 Strategie i PAPER używają tylko ZAMKNIĘTYCH świec. '
+                           'Bieżący podgląd MID aktualizuje się z REST według wybranych '
+                           '5–300 s, ale nie daje sygnału ani nie wysyła zlecenia.')
                 if ready:
                     payload=numeric_context(snap.frame,decision,instrument,tf,snap.spread)
                     st.session_state['ai_context']=payload
