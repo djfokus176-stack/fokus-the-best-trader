@@ -71,6 +71,30 @@ def parse_prices(payload: dict) -> pd.DataFrame:
         raise FeedError('Niespójne OHLC lub ujemny spread')
     return df
 
+def capital_prices_as_close_times(raw: pd.DataFrame, resolution: str) -> pd.DataFrame:
+    """Translate presumed Capital OPEN labels to our internal CLOSE-time format.
+
+    On 2026-11-05 at 20:24:17 UTC, the DEMO M1 latest label was 20:24:00.
+    This suggests OPEN labels, but the broker clock convention still requires
+    final confirmation. New PAPER positions are blocked until owner confirms.
+    Apply exactly once to original API prices, never to a CSV or Snapshot.
+    """
+    if resolution not in PERIOD:
+        raise FeedError("Nieznany interwal danych Capital")
+    if raw is None or raw.empty or raw.index.tz is None:
+        raise FeedError("Niepoprawne czasy UTC danych Capital")
+    if raw.attrs.get("capital_clock_basis")=="close_shifted":
+        raise FeedError("Nie wolno dwukrotnie przesuwac oznaczen swiec")
+    seconds=PERIOD[resolution]
+    if any(int(ts.value//1_000_000_000)%seconds for ts in raw.index):
+        raise FeedError("Nieprawidlowe wyrownanie czasu swiec API do UTC")
+    result=raw.copy()
+    result.index=raw.index+pd.Timedelta(seconds=seconds)
+    result.index.name="time"
+    result.attrs["capital_clock_basis"]="close_shifted"
+    return result
+
+
 def evaluate_snapshot(raw: pd.DataFrame, epic: str, resolution: str,
                       now: datetime | None = None, max_spread: float = 2.0,
                       source: str = 'Capital.com DEMO REST') -> Snapshot:
@@ -150,7 +174,10 @@ class CapitalReadOnly:
                 params={'resolution':resolution, 'max':min(int(count), 1000)},
                 headers=self.headers(), timeout=12)
             r.raise_for_status()
-            return evaluate_snapshot(parse_prices(r.json()), epic, resolution, max_spread=max_spread,
+            # API label is presumed OPEN; trading engine expects CLOSE-time.
+            # The newest possibly forming candle is still excluded downstream.
+            raw=capital_prices_as_close_times(parse_prices(r.json()),resolution)
+            return evaluate_snapshot(raw, epic, resolution, max_spread=max_spread,
                                      source=f'Capital.com {self.environment} REST')
         except requests.RequestException as ex:
             raise FeedError(http_error_message(ex,'Pobieranie świec',epic=epic)) from ex
