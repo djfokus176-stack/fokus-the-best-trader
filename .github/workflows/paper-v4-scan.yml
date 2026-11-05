@@ -33,6 +33,8 @@ jobs:
       FOKUS_AUTO_AI_DAILY_LIMIT: ${{ vars.FOKUS_AUTO_AI_DAILY_LIMIT || '24' }}
       FOKUS_AUTO_AI_MONTHLY_LIMIT: ${{ vars.FOKUS_AUTO_AI_MONTHLY_LIMIT || '200' }}
       FOKUS_AUTO_AI_INCLUDE_WAIT: ${{ vars.FOKUS_AUTO_AI_INCLUDE_WAIT || 'false' }}
+      # Opt-in only: default fixed targets until PAPER policy comparisons validate.
+      FOKUS_PAPER_EXIT_POLICY: ${{ vars.FOKUS_PAPER_EXIT_POLICY || 'fixed' }}
     steps:
       - name: Verify explicit opt-in and required secrets (no output of secret values)
         id: preflight
