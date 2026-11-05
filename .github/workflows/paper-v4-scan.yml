@@ -26,6 +26,13 @@ jobs:
       CAPITAL_IDENTIFIER: ${{ secrets.CAPITAL_IDENTIFIER }}
       CAPITAL_PASSWORD: ${{ secrets.CAPITAL_PASSWORD }}
       CAPITAL_EPIC: ${{ vars.CAPITAL_EPIC || 'US500' }}
+      # Separate worker secret, never committed. No billable call unless opt-in.
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      FOKUS_AUTO_AI_ENABLED: ${{ vars.FOKUS_AUTO_AI_ENABLED || 'false' }}
+      FOKUS_AUTO_AI_MODEL: ${{ vars.FOKUS_AUTO_AI_MODEL || 'gpt-5.4-mini' }}
+      FOKUS_AUTO_AI_DAILY_LIMIT: ${{ vars.FOKUS_AUTO_AI_DAILY_LIMIT || '24' }}
+      FOKUS_AUTO_AI_MONTHLY_LIMIT: ${{ vars.FOKUS_AUTO_AI_MONTHLY_LIMIT || '200' }}
+      FOKUS_AUTO_AI_INCLUDE_WAIT: ${{ vars.FOKUS_AUTO_AI_INCLUDE_WAIT || 'false' }}
     steps:
       - name: Verify explicit opt-in and required secrets (no output of secret values)
         id: preflight
