@@ -86,7 +86,34 @@ def test_mtf_never_sees_future_htf_after_signal(monkeypatch):
 def test_mtf_uses_last_completed_h1_not_inprogress_hour():
     df=m1_sample(4750)
     gate=HistoricalMTFGate(df,build_higher_closed_bars(df))
-    t=pd.Timestamp("2026-11-02T07:01:00Z")
-    if t in df.index:
-        assert gate.consensus(t) in ("UP","DOWN","NEUTRAL","WAIT")
-        assert gate.consensus(t)==gate.consensus(t+pd.Timedelta(minutes=1)) or True
+    full_hour=pd.Timestamp("2026-11-02T07:00:00Z")
+    assert full_hour in gate.series["HOUR"].index
+    incomplete=full_hour+pd.Timedelta(minutes=1)
+    assert incomplete in df.index
+    # A new M1 candle at 07:01 must NOT create a fresh H1 candle at 07:01.
+    assert gate.series["HOUR"].index.max()<=full_hour
+    assert gate.consensus(incomplete) in ("UP","DOWN","NEUTRAL","WAIT")
+
+
+def test_historical_mtf_veto_measures_rejections_not_phantom_trades(monkeypatch):
+    df=m1_sample(4800)
+    df["Open"]=10000-df["Open"]
+    df["High"]=10000-df["Low"]
+    df["Low"]=10000-(5000+ .002*np.arange(len(df))+.65*np.sin(np.arange(len(df))/13)+.8)
+    df["Close"]=10000-df["Close"]
+    # Ensure valid OHLC for a synthetic downtrend.
+    import trader.research as research
+    from trader.strategy import Decision
+    def always_long(prefix,strategy,spread):
+        entry=float(prefix.Close.iloc[-1])
+        return Decision("LONG",strategy,"synthetic test candidate",
+                        entry=entry,stop=entry-2,target=entry+4,rr=1.5)
+    monkeypatch.setattr(research,"decide_any",always_long)
+    report,trade_rows,_=compare_mtf_on_m1_csv(
+        df,strategies=("EMA TREND",),holding=10)
+    earlier=report[report.okres=="WCZEŚNIEJSZE / 70%"]
+    baseline=earlier[earlier.wariant=="BEZ MTF"].iloc[0]
+    filtered=earlier[earlier.wariant=="Z MTF"].iloc[0]
+    assert baseline["n"]>0
+    assert filtered["odrzucone_mtf"]>0
+    assert filtered["n"]<=baseline["n"]
