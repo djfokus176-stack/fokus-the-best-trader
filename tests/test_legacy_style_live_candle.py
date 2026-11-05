@@ -67,3 +67,18 @@ def test_bad_current_bid_ask_never_draws_a_live_bar(monkeypatch):
     monkeypatch.setattr(client.session,"get",lambda *args,**kw:Response())
     with pytest.raises(FeedError,match="bid > ask"):
         client.forming_candle(now=NOW)
+
+
+
+def test_bad_previous_bar_does_not_block_valid_latest_forming_bar(monkeypatch):
+    client=CapitalReadOnly("api","id","pass","DEMO")
+    class Response:
+        def raise_for_status(self):pass
+        def json(self):
+            x=payload()
+            x["prices"][0]["closePrice"]={"bid":7440,"ask":7330}
+            return x
+    monkeypatch.setattr(client,"headers",lambda:{})
+    monkeypatch.setattr(client.session,"get",lambda *args,**kw:Response())
+    item=client.forming_candle(now=NOW)
+    assert item["Close"]==pytest.approx(7331.0)
