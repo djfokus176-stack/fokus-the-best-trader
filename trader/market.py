@@ -41,15 +41,32 @@ class Snapshot:
     reason: str
     quote_spread: float | None = None  # latest forming bar: for tradeability only
 
-def parse_prices(payload: dict) -> pd.DataFrame:
+def parse_prices(payload: dict, *, quarantine_bad: bool = False) -> pd.DataFrame:
+    """Parse Capital quotes; optional quarantine NEVER authorizes trading.
+
+    A crossed bid/ask quote can occur in a broker response. In chart mode,
+    skip the malformed BAR (not a price field), remember its UTC label and
+    return only structurally valid bars. A snapshot containing any quarantined
+    bar is marked NOT GOOD by evaluate_snapshot and cannot create signals.
+    Diagnostic raw-label reads stay strict by default.
+    """
     rows = []
-    for item in payload.get('prices', []):
+    quarantined = []
+    prices = payload.get('prices', [])
+    if not isinstance(prices, list):
+        raise FeedError('Nieprawidłowa lista świec Capital.com')
+    for item in prices:
+        label = str(item.get('snapshotTimeUTC', 'BRAK'))[:36] if isinstance(item, dict) else 'BRAK'
         try:
             t = pd.to_datetime(item['snapshotTimeUTC'], utc=True)
+            if pd.isna(t):
+                raise ValueError('Brak timestamp UTC')
             row = {'time': t}
             for field, val in [('Open', 'openPrice'), ('High', 'highPrice'),
                                ('Low', 'lowPrice'), ('Close', 'closePrice')]:
                 b, a = float(item[val]['bid']), float(item[val]['ask'])
+                if not (pd.notna(b) and pd.notna(a)):
+                    raise ValueError('NaN ceny BID/ASK')
                 if b > a:
                     raise ValueError('bid > ask')
                 row[field] = (b + a) / 2
@@ -57,19 +74,23 @@ def parse_prices(payload: dict) -> pd.DataFrame:
                     row['Bid'] = b
                     row['Ask'] = a
                     row['Spread'] = a - b
+            if (row['High'] < max(row['Open'], row['Close'], row['Low']) or
+                row['Low'] > min(row['Open'], row['Close'], row['High'])):
+                raise ValueError('Niespójne OHLC')
             rows.append(row)
-        except (KeyError, TypeError, ValueError) as ex:
-            raise FeedError(f'Nieprawidłowy rekord danych Capital: {ex}') from ex
+        except (KeyError, TypeError, ValueError, OverflowError) as ex:
+            if not quarantine_bad:
+                raise FeedError(f'Nieprawidłowy rekord danych Capital: {ex}') from ex
+            quarantined.append({'candle_utc': label, 'issue': str(ex)[:60]})
     if not rows:
-        raise FeedError('Brak świec z API Capital.com')
+        raise FeedError(f'Brak poprawnych świec z API Capital.com; odrzucono {len(quarantined)}')
     df = pd.DataFrame(rows).set_index('time').sort_index()
     if df.index.has_duplicates:
+        # Duplicate UTC labels cannot be reconciled safely by choosing one.
         raise FeedError('Duplikaty timestampów OHLC')
-    if not ((df.High >= df[['Open','Close','Low']].max(axis=1)) &
-            (df.Low <= df[['Open','Close','High']].min(axis=1)) &
-            (df.Spread >= 0)).all():
-        raise FeedError('Niespójne OHLC lub ujemny spread')
+    df.attrs['quarantined_candles'] = tuple(quarantined)
     return df
+
 
 def capital_prices_as_close_times(raw: pd.DataFrame, resolution: str) -> pd.DataFrame:
     """Translate presumed Capital OPEN labels to our internal CLOSE-time format.
@@ -92,6 +113,7 @@ def capital_prices_as_close_times(raw: pd.DataFrame, resolution: str) -> pd.Data
     result.index=raw.index+pd.Timedelta(seconds=seconds)
     result.index.name="time"
     result.attrs["capital_clock_basis"]="close_shifted"
+    result.attrs["quarantined_candles"]=raw.attrs.get("quarantined_candles",())
     return result
 
 
@@ -103,9 +125,13 @@ def evaluate_snapshot(raw: pd.DataFrame, epic: str, resolution: str,
         raise ValueError('now musi mieć strefę czasową')
     if resolution not in PERIOD:
         raise ValueError('Nieznany interwał')
+    quarantined=raw.attrs.get('quarantined_candles',())
     if raw.empty or len(raw) < 70:
+        reason='Za mało poprawnych świec (wymagane minimum 70)'
+        if quarantined:
+            reason+=f'; odrzucono wadliwych rekordów: {len(quarantined)}'
         return Snapshot(raw.iloc[0:0], source, epic, resolution, 0, None, None, False,
-                        'Za mało świec (wymagane minimum 70)')
+                        reason)
     # The newest candle could still be forming; use the preceding closed candle.
     confirmed = raw.iloc[:-1].copy()
     confirmed_time = confirmed.index[-1].to_pydatetime()
@@ -113,7 +139,12 @@ def evaluate_snapshot(raw: pd.DataFrame, epic: str, resolution: str,
     step = PERIOD[resolution]
     spread = float(confirmed.iloc[-1]['Spread'])  # strategy's CLOSED signal candle
     quote_spread = float(raw.iloc[-1]['Spread'])  # newest/forming bar, never model history
-    if raw.index[-1] <= confirmed.index[-1]:
+    if quarantined:
+        first=quarantined[0]
+        reason=(f'DANE_WADLIWE: odrzucono {len(quarantined)} rekordów, '
+                f'np. {first["candle_utc"]}: {first["issue"]}. '
+                'Wykres tylko historyczny; LONG/SHORT zablokowane do czystego odczytu.')
+    elif raw.index[-1] <= confirmed.index[-1]:
         reason = 'Brak świecy następującej po świecy sygnałowej'
     elif age < -step:
         reason = 'Świece z przyszłości / błędna strefa czasu'
@@ -176,7 +207,8 @@ class CapitalReadOnly:
             r.raise_for_status()
             # API label is presumed OPEN; trading engine expects CLOSE-time.
             # The newest possibly forming candle is still excluded downstream.
-            raw=capital_prices_as_close_times(parse_prices(r.json()),resolution)
+            raw=capital_prices_as_close_times(
+                parse_prices(r.json(),quarantine_bad=True),resolution)
             return evaluate_snapshot(raw, epic, resolution, max_spread=max_spread,
                                      source=f'Capital.com {self.environment} REST')
         except requests.RequestException as ex:
