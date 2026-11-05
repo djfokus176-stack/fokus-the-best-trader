@@ -38,7 +38,7 @@ def test_adaptive_extends_target_only_after_closed_bar_and_protects_profit(tmp_p
     b1=_frame([[100,100.5,99.5,100.2]])
     assert progress_paper(db,b1,"US500",SRC,"MINUTE")==["PAPER_OPEN"]
     rows=_frame([[100,100.5,99.5,100.2],
-                 [100.2,103.2,100,102.8]])
+                 [100.2,103.6,100,103.2]])
     events=progress_paper(db,rows,"US500",SRC,"MINUTE")
     assert events==["PAPER_TRAIL_SL","PAPER_EXTEND_TP"]
     pos=recent_positions(db)[0]
@@ -50,7 +50,7 @@ def test_adaptive_extends_target_only_after_closed_bar_and_protects_profit(tmp_p
     # A new bar sees newly protected SL and extended target.
     rows=_frame([[100,100.5,99.5,100.2],
                  [100.2,103.2,100,102.8],
-                 [102.8,104.2,100.1,101]])
+                 [103.2,104.2,101.0,101.2]])
     events=progress_paper(db,rows,"US500",SRC,"MINUTE")
     assert events==["PAPER_CLOSE_SL"]
     pos=recent_positions(db)[0]
