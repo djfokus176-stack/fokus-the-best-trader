@@ -16,6 +16,68 @@ class FeedError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class MarketQuote:
+    """Read-only Capital.com snapshot. Never a closed candle or broker fill."""
+    epic: str
+    environment: str
+    bid: float
+    ask: float
+    mid: float
+    spread: float
+    status: str
+    update_utc: datetime | None
+    received_utc: datetime
+    delay_seconds: float
+    fresh: bool
+
+
+def parse_market_quote(payload: dict, epic: str, environment: str,
+                       now: datetime | None = None) -> MarketQuote:
+    """Validate one live-market quote independently of OHLC strategy data."""
+    import math
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        raise ValueError("Timestamp cytatu bez strefy")
+    if not isinstance(payload,dict):
+        raise FeedError("Zły format odpowiedzi /markets")
+    snap=payload.get("snapshot") or {}
+    instrument=payload.get("instrument") or {}
+    if not isinstance(snap,dict) or not isinstance(instrument,dict):
+        raise FeedError("Błędny JSON snapshot /markets")
+    try:
+        bid=float(snap["bid"])
+        ask=float(snap["offer"])
+    except (KeyError,ValueError,TypeError) as ex:
+        raise FeedError("Brak poprawnych BID/OFFER w /markets") from ex
+    if not all(math.isfinite(x) for x in (bid,ask)) or bid<=0 or ask<bid:
+        raise FeedError("Wadliwy bieżący BID/OFFER (bid > ask lub NaN)")
+    status=str(snap.get("marketStatus") or instrument.get("marketStatus")
+               or "UNKNOWN").upper()
+    update_utc=None
+    timestamp=snap.get("updateTimeUTC")
+    if timestamp:
+        try:
+            stamp=pd.Timestamp(timestamp)
+            if not pd.isna(stamp):
+                update_utc=(stamp.tz_localize("UTC") if stamp.tzinfo is None
+                            else stamp.tz_convert("UTC")).to_pydatetime()
+        except (ValueError,TypeError,OverflowError):
+            update_utc=None
+    try:
+        delay_seconds=float(snap.get("delayTime") or 0)
+    except (ValueError,TypeError):
+        delay_seconds=-1
+    # No vendor timestamp or delayed quote is NEVER shown as fresh LIVE.
+    age=(now-update_utc).total_seconds() if update_utc is not None else None
+    fresh=(status=="TRADEABLE" and delay_seconds==0 and age is not None
+           and -10<=age<=30)
+    return MarketQuote(str(epic),str(environment).upper(),bid,ask,
+                       (bid+ask)/2,ask-bid,status,update_utc,now,
+                       delay_seconds,fresh)
+
+
+
 def http_error_message(exc, stage, epic=''):
     status = getattr(getattr(exc, 'response', None), 'status_code', None)
     if not status:
@@ -232,6 +294,20 @@ class CapitalReadOnly:
             return parse_prices(r.json())
         except requests.RequestException as ex:
             raise FeedError(http_error_message(ex,'Diagnostyka timestampów',epic)) from ex
+
+    def market_quote(self, epic: str = 'US500') -> MarketQuote:
+        """Fast read-only GET: current bid/offer, status and provider timestamp."""
+        if not epic.replace('_','').isalnum():
+            raise FeedError('Niepoprawny EPIC')
+        try:
+            r=self.session.get(f'{self.base_url}/api/v1/markets/{epic}',
+                headers=self.headers(),timeout=8)
+            r.raise_for_status()
+            return parse_market_quote(r.json(),epic,self.environment)
+        except requests.RequestException as ex:
+            raise FeedError(http_error_message(ex,'Bieżąca cena',epic)) from ex
+        except (ValueError,TypeError,AttributeError) as ex:
+            raise FeedError('Błędny JSON bieżącej ceny Capital.com') from ex
 
     def market_state(self, epic: str = 'US500') -> str:
         """Read-only instrument status; do not infer trading hours from the clock."""
