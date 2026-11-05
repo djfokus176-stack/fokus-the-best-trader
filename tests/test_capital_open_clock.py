@@ -27,7 +27,7 @@ def test_open_to_close_exact_shift_for_all_timeframes(tf):
     shifted=capital_prices_as_close_times(raw,tf)
     assert shifted.index[0]==raw.index[0]+pd.Timedelta(seconds=PERIOD[tf])
     assert shifted.index[-1]==raw.index[-1]+pd.Timedelta(seconds=PERIOD[tf])
-    assert shifted.Close.equals(raw.Close)
+    assert list(shifted.Close.to_numpy())==list(raw.Close.to_numpy())
     assert raw.index[-1]!=shifted.index[-1]
     with pytest.raises(FeedError):
         capital_prices_as_close_times(shifted,tf)
