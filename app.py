@@ -943,6 +943,56 @@ with news_tab:
 with reports_tab:
     st.subheader('📈 FOKU$ LAB — PORÓWNAJ 6 STRATEGII PO KOSZTACH')
     st.caption('Rejestr badań PAPER. Chronologiczny holdout 70/30 + kroczące przedziały. Żaden wynik nie jest obietnicą zysku.')
+    with st.expander('🧪 PAPER v3 — POZYCJE DEMO, ZDARZENIA I RAPORT DZIENNY/TYGODNIOWY',expanded=True):
+        st.info('To wyłącznie symulowane pozycje PAPER v3 z Capital.com DEMO. PENDING nie jest wejściem; OPEN to wejście odtworzone z OPEN następnej ZAMKNIĘTEJ świecy. Starsze v2 i CSV są oddzielne. Brak prawdziwych zleceń.')
+        try:
+            paper_db=connect()
+            ensure_paper_v3(paper_db)
+            all_positions=[p for p in recent_positions(paper_db,200)
+                if p['source']=='Capital.com DEMO REST' and p['epic']==instrument]
+            days,weeks,summary=daily_weekly(paper_db,epic=instrument)
+            x1,x2,x3,x4=st.columns(4)
+            x1.metric('Zamknięte PAPER v3',summary['liczba'])
+            x2.metric('Skuteczność P&L > 0',
+                f"{summary['win_rate_pct']:.1f}%" if summary['win_rate_pct'] is not None else 'BRAK')
+            x3.metric('Suma po kosztach',f"{summary['suma_pkt']:+.2f} pkt")
+            x4.metric('Max obsunięcie',f"{summary['max_drawdown_pkt']:.2f} pkt")
+            if summary['liczba']:
+                st.caption(
+                    f"Średni wynik: {summary['expectancy_pkt']:+.3f} pkt | "
+                    f"średnie R: {summary['avg_R']:+.3f} | "
+                    f"Profit factor: {summary['profit_factor'] if summary['profit_factor'] is not None else 'BRAK MIARODAJNEJ STRATY'}")
+            if summary['liczba']<30:
+                st.warning('Mała próba (<30 zamkniętych PAPER v3) — NIE ma dowodu rentowności.')
+            if all_positions:
+                st.markdown('**Pozycje PENDING / OPEN / CLOSED / INVALIDATED**')
+                st.dataframe(pd.DataFrame(all_positions),hide_index=True,use_container_width=True)
+                st.download_button('⬇️ Zapis pozycji PAPER v3 CSV',
+                    data=pd.DataFrame(all_positions).to_csv(index=False).encode('utf-8-sig'),
+                    file_name='FOKUS_PAPER_V3_POZYCJE.csv',mime='text/csv',key='paper_v3_export')
+            else:
+                st.caption('Brak pozycji v3 dla tego instrumentu. Po skanie dopiero pełny setup generuje PENDING.')
+            all_events=[e for e in recent_events(paper_db,200)
+                if any(p['trade_id']==e['trade_id'] for p in all_positions)]
+            if all_events:
+                with st.expander('📑 Dziennik zdarzeń OPEN / SL / TP / TIMEOUT / INVALIDATED'):
+                    st.dataframe(pd.DataFrame(all_events),hide_index=True,use_container_width=True)
+            left,right=st.columns(2)
+            with left:
+                st.markdown('**Raport dzienny (czas Polska)**')
+                if not days.empty:st.dataframe(days,hide_index=True,use_container_width=True)
+                else:st.caption('Brak zakończonych transakcji.')
+            with right:
+                st.markdown('**Raport tygodniowy (czas Polska)**')
+                if not weeks.empty:st.dataframe(weeks,hide_index=True,use_container_width=True)
+                else:st.caption('Brak zakończonych transakcji.')
+        except (OSError,sqlite3.Error,ValueError,TypeError) as ex:
+            st.error('Nie można wyświetlić raportu PAPER v3: '+type(ex).__name__)
+        alerts_enabled=secret('PAPER_TELEGRAM_ALERTS_ENABLED','false').lower() in ('true','1','yes')
+        st.caption('📣 Alerty Telegram: '+('WŁĄCZONE w Secrets' if alerts_enabled else
+            'WYŁĄCZONE (domyślnie). Włącz przez PAPER_TELEGRAM_ALERTS_ENABLED=true oraz ustaw token i chat ID w Secrets.'))
+        st.caption('Telegram: jedna próba wysłania na event_id. Jeśli żądanie się nie powiedzie, alert może zostać utracony i NIE będzie ponawiany, aby nie tworzyć duplikatów.')
+
     with st.expander('🧪 CSV M1 — PORÓWNAJ 6 STRATEGII BEZ MTF I Z MTF (OFFLINE)',expanded=True):
         st.info('Reprodukowalny test OFFLINE: w CSV kolumna Time oznacza UTC CZAS ZAMKNIĘCIA świecy M1, nie czas otwarcia. M5/M15/H1 są agregowane z pełnych bloków M1 (nie z odrębnego feedu brokera).')
         offline_csv=st.file_uploader('📁 Wybierz historyczny CSV M1 (Time, Open, High, Low, Close, opcjonalnie Spread)',
