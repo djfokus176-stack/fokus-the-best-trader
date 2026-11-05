@@ -43,6 +43,14 @@ class FakeREST:
                     k=(candle["source"],candle["epic"],candle["timeframe"],candle["candle_utc"])
                     self.candles[k]=candle
                 return Response(201,None)
+            if method=="GET":
+                all_data=[{
+                    "candle_utc":r["candle_utc"],"open":r["open"],"high":r["high"],
+                    "low":r["low"],"close":r["close"],"spread":r["spread"]}
+                    for r in self.candles.values()]
+                all_data.sort(key=lambda x:x["candle_utc"],reverse=True)
+                start=int(params["offset"]);length=int(params["limit"])
+                return Response(200,all_data[start:start+length])
         return Response(404,{"error":"bad"})
 
 def make():
@@ -109,3 +117,20 @@ def test_cloud_http_error_redacts_body_and_key():
         remote.fetch()
     assert KEY not in str(exc.value)
     assert "HTTP 401" in str(exc.value)
+
+
+def test_remote_candle_pagination_and_order():
+    remote,mock=make()
+    from types import SimpleNamespace
+    import pandas as pd
+    ix=pd.date_range("2026-11-04T13:01Z",periods=1105,freq="min")
+    arr=[100.0+i*.01 for i in range(len(ix))]
+    frame=pd.DataFrame({"Open":arr,"High":[x+1 for x in arr],
+        "Low":[x-1 for x in arr],"Close":arr,"Spread":[.6]*len(ix)},index=ix)
+    sn=SimpleNamespace(good=True,source="Capital.com DEMO REST",epic="US500",frame=frame)
+    remote.upsert_candles({"MINUTE":sn},"US500",max_per_tf=1105)
+    read=remote.fetch_candles("US500","MINUTE",limit=1105)
+    assert len(read)==1105
+    assert read.index.is_monotonic_increasing
+    assert read.index[0]==ix[0] and read.index[-1]==ix[-1]
+    assert read.Close.iloc[-1]==arr[-1]
