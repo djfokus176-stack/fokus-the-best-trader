@@ -4,6 +4,7 @@ The marker advances ONLY when a new confirmed closed candle arrives.
 It does not simulate live tick motion or broker orders.
 """
 from __future__ import annotations
+from datetime import timedelta
 import pandas as pd
 import plotly.graph_objects as go
 from .market import PERIOD
@@ -40,6 +41,6 @@ def annotate_scan(fig,frame,decision,record=None,bar_limit=120,resolution="MINUT
                   opacity=.40)
     n=max(40,int(bar_limit))
     if len(frame)>n:
-        future=pd.Timedelta(seconds=2*PERIOD.get(resolution,60))
+        future=timedelta(seconds=2*PERIOD.get(resolution,60))
         fig.update_xaxes(range=[frame.index[-n],tick+future])
     return fig
