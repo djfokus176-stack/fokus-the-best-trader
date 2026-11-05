@@ -29,7 +29,8 @@ from trader.chart_tracker import annotate_scan
 from trader.paper_lifecycle import (
     ensure_tables as ensure_paper_v3, queue_paper, progress_paper,
     active_position, recent_positions, recent_events)
-from trader.paper_display import annotate_open_paper
+from trader.paper_display import annotate_open_paper,annotate_paper_history
+from trader.paper_sounds import unseen_paper_event,wav_notice,SOUND_EVENTS
 from trader.paper_reporting import daily_weekly
 from trader.remote_checkpoint import RemoteCheckpoint,remote_view_db,RemoteError,dump_state
 from trader.telegram_alerts import dispatch_alerts, record_stale_event
@@ -177,6 +178,7 @@ def paper_view_db():
         st.session_state['_paper_remote_version']=version
         st.session_state['_paper_remote_meta']=payload.get('meta') or {}
         st.session_state['_paper_remote_auto_ai']=payload.get('auto_ai') or {}
+        st.session_state['_paper_remote_candidates']=payload.get('candidate_feed') or []
         return db
     return connect()
 
@@ -250,6 +252,11 @@ with st.sidebar:
     if st.session_state['auto_scan_period'] < 60:
         st.caption('⚠️ Tryb szybki odpytuje Capital.com częściej. W przypadku HTTP 429 '
                    'wybierz 60 s; M1 nadal ma nowe zamknięcie najwyżej raz na minutę.')
+    st.toggle('🔔 DŹWIĘKI PAPER: otwarcie / TP / SL / timeout',
+        value=False,key='paper_audio_enabled',
+        help='Wymaga interakcji z przeglądarką. Dźwięk dotyczy tylko nowych '
+             'zdarzeń potwierdzonych w archiwum PAPER; przeglądarka może go zablokować. '
+             'Nie oznacza rzeczywistych transakcji.')
     st.caption('AUTO-SKAN nie wykonuje zleceń. Płatne AI jest ręczne w CZAT AI; osobny worker może opcjonalnie uruchamiać limitowane komentarze GPT po włączeniu w GitHub.')
     st.markdown('---')
     with st.expander('🔑 KLUCZE API — TESTY / ZMIANY (już zapisane w Secrets)', expanded=False):
@@ -631,7 +638,16 @@ with market_tab:
                         snap.frame,snap.spread,st.session_state.get('mtf_snapshots',{}),
                         asof=snap.confirmed_utc,use_mtf=True)
                     st.caption('🤖 AUTO analizuje wszystkie 6 strategii. MINIMUM 2 zgodne po MTF i żadnego przeciwnego sygnału. To filtr badawczy, nie miara skuteczności.')
-                    with st.expander('📊 AUTO — OCENY 6 STRATEGII NA TEJ SAMEJ ZAMKNIĘTEJ ŚWIECY'):
+                    raw_candidates=[r for r in auto_audit if r.get('Setup OHLC') in ('LONG','SHORT')]
+                    if raw_candidates:
+                        st.markdown('#### 🔎 RADAR KANDYDATÓW (PRZED WERYFIKACJĄ MTF)')
+                        st.caption('To wykryte układy 6 strategii, NIE otwarte pozycje. '
+                                   'Po filtrach MTF mogą być odrzucone; nie liczę ich do skuteczności.')
+                        st.dataframe(pd.DataFrame(raw_candidates),hide_index=True,use_container_width=True)
+                    else:
+                        st.info('🔎 Radar sześciu strategii: brak surowego LONG/SHORT '
+                                'na tej zamkniętej świecy — nie generuję fikcyjnego typu.')
+                    with st.expander('📊 AUTO — WSZYSTKIE 6 STRATEGII I BLOKADY'):
                         st.dataframe(pd.DataFrame(auto_audit),hide_index=True,use_container_width=True)
                 else:
                     decision=decide_any(snap.frame,strategy,spread=snap.spread)
@@ -702,11 +718,38 @@ with market_tab:
                             alert_result=dispatch_alerts(db_v3,token,chat_id,enabled=True)
                             if alert_result.get('failed'):
                                 st.warning(f"Telegram: {alert_result['failed']} alertów miało błąd dostarczenia i nie będzie automatycznie ponawianych.")
+                    paper_rows=[x for x in recent_positions(db_v3,limit=80)
+                                if x.get('epic')==instrument and x.get('source')==src]
+                    paper_ids={x['trade_id'] for x in paper_rows}
+                    paper_events=[e for e in recent_events(db_v3,limit=150)
+                                  if e.get('trade_id') in paper_ids]
+                    if paper_rows:
+                        with st.expander('📋 DZIENNIK WEJŚĆ I WYJŚĆ PAPER — GODZINA / PUNKTY'):
+                            columns=['setup_utc','opened_utc','closed_utc','side',
+                                     'status','entry_mid','stop_mid','target_mid',
+                                     'exit_mid','pnl_pts','close_reason','exit_policy']
+                            st.dataframe(pd.DataFrame([
+                                {key:r.get(key) for key in columns} for r in paper_rows[:35]
+                            ]),hide_index=True,use_container_width=True)
+                            st.caption('Punkty netto po modelowanym spreadzie i poślizgu; '
+                                       'PAPER_OPEN odtworzony dopiero po zamknięciu świecy.')
+                    active_audio=bool(st.session_state.get('paper_audio_enabled',False))
+                    prev_audio=st.session_state.get('_last_paper_audio_event')
+                    latest_audio,audio_event=unseen_paper_event(paper_events,prev_audio)
+                    st.session_state['_last_paper_audio_event']=latest_audio
+                    if active_audio and audio_event:
+                        kind=audio_event['kind']
+                        st.info('🔔 '+SOUND_EVENTS[kind]+
+                                ' — zdarzenie PAPER, nie zlecenie rzeczywiste.')
+                        st.audio(wav_notice(kind),format='audio/wav',autoplay=True)
                     current_paper=active_position(db_v3,instrument,src,tf)
                 except (OSError, sqlite3.Error,ValueError,RemoteError) as ex:
                     st.error('❌ Silnik PAPER/REMOTE: '+type(ex).__name__+'; brak zdalnego odczytu, nie wyświetlam starej pozycji jako aktualnej.')
                 if current_paper:
                     st.markdown('### 🧪 AKTYWNA SYMULACJA PAPER v3')
+                    st.caption('Zarządzanie wyjściem: '+('ADAPTIVE — eksperymentalny trailing SL/runner TP'
+                         if current_paper.get('exit_policy')=='adaptive' else 'FIXED SL/TP')+
+                        '. Zmiany stopa obowiązują od następnej świecy, nie wstecz.')
                     st.info(
                         f"Status: **{current_paper['status']}** | {current_paper['side']} "
                         f"| {current_paper['strategy']} | ID: {current_paper['trade_id'][:10]} "
@@ -723,6 +766,8 @@ with market_tab:
                 if current_paper and current_paper['timeframe']!=tf:
                     st.warning(f"Pozycja PAPER v3 działa na {current_paper['timeframe']}, nie na aktualnym {tf}. Linie poziomów są ukryte, żeby nie mieszać interwałów. Włącz MTF i AUTO-SKAN, aby odświeżać również pierwotny interwał.")
                 annotate_open_paper(fig,current_paper if current_paper and current_paper['timeframe']==tf else None)
+                annotate_paper_history(fig,locals().get('paper_rows',[]),
+                    instrument,src,tf)
                 record_for_chart=dict(st.session_state.get('_scan_last_result') or {})
                 record_for_chart['scan_no']=st.session_state.get('_scan_attempt_count',0)
                 annotate_scan(fig,snap.frame,decision,record_for_chart,
