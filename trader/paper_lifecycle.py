@@ -97,6 +97,7 @@ def queue_paper(db, epic, source, timeframe, decision, signal_utc,
         return None
     if spread<0 or slippage<0:
         return None
+    ensure_tables(db)
     stamp=_utc(signal_utc)
     tid=hashlib.sha256(f"{source}|{epic}|{timeframe}|{decision.strategy}|{stamp}|{decision.action}".encode()).hexdigest()
     now=_now()
