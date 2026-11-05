@@ -24,6 +24,14 @@ def test_dashboard_v3_queue_then_simulated_open_on_next_closed_candle(monkeypatc
     # Owner explicitly confirmed raw API labels are OPEN to enable PAPER.
     monkeypatch.setenv("FOKUS_CANDLE_TIME_CONFIRMED","open")
     monkeypatch.setenv("PAPER_TELEGRAM_ALERTS_ENABLED","false")
+    # Full integration now requires a verified BLS calendar, not just
+    # "no known blackout". Supply a valid future OFFICIAL fixture offline.
+    import trader.news_radar as news_radar
+    monkeypatch.setattr(news_radar,"fetch_headlines",
+        lambda **kw: ([],{}))
+    monkeypatch.setattr(news_radar,"fetch_bls_schedule",
+        lambda **kw: [{"wydarzenie":"CPI",
+            "data_utc":datetime.now(timezone.utc)+timedelta(days=3)}])
     import trader.storage as storage
     monkeypatch.setattr(storage,"DB_PATH",tmp_path/"v3.sqlite3")
     calls={"m1":0}
