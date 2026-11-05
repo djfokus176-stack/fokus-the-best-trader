@@ -12,6 +12,7 @@ import streamlit as st
 from trader.market import CapitalReadOnly, FeedError, evaluate_snapshot, PERIOD
 from trader.strategy import indicators, backtest
 from trader.strategies_pro import decide_any, ALL_STRATEGIES
+from trader.auto_strategy import AUTO_MODE, evaluate_auto
 from trader.mtf import TIMEFRAMES, LABELS, evaluate_timeframes, filter_mtf_decision
 from trader.research import chronological_report, rolling_oos, replay, stats
 from trader.mtf_replay import compare_mtf_on_m1_csv
@@ -225,14 +226,18 @@ with st.sidebar:
             st.session_state.pop(k, None)
     st.session_state['_prev_capital_env'] = capital_env
     tf=st.selectbox('Interwał',['MINUTE','MINUTE_5','MINUTE_15','HOUR'],format_func=lambda x:{'MINUTE':'M1','MINUTE_5':'M5','MINUTE_15':'M15','HOUR':'H1'}[x])
-    strategy=st.selectbox('Strategia badawcza',ALL_STRATEGIES)
+    strategy=st.selectbox('Tryb analizy / strategia', (AUTO_MODE,)+ALL_STRATEGIES, index=0,
+        help='AUTO ocenia sześć hipotez na tym samym wykresie. Wymaga min. dwóch zgodnych i kompletnych M1/M5/M15/H1; konflikt = WAIT. Nie jest to model uczący się ani zlecenie.')
+    if strategy==AUTO_MODE:
+        st.caption('🤖 AUTO: 6 strategii, minimum 2 zgodne, brak przeciwnego LONG/SHORT, obowiązkowy filtr MTF. Własna ocena PAPER, nie autotrading.')
     st.toggle('🧭 Potwierdzenie M1/M5/M15/H1 (veto)',value=True,key='mtf_enabled',
         help='Bot nie pokaże nowego LONG/SHORT gdy nie ma 4 zgodnych i świeżych odczytów.')
     st.caption('Każda strategia jest HIPOTEZĄ PAPER, nie potwierdzonym systemem zarobkowym.')
     max_spread=st.slider('Maksymalny spread (pkt)',.2,5.0,2.0,.1)
     st.toggle('🔄 AUTO-SKAN — tylko gdy aplikacja otwarta',value=_early_secret('AUTO_SCAN_DEFAULT','true').lower() in ('true','1','yes'),key='auto_scan_active',
         help='Ocenia zamknięte świece co najmniej co 60 sekund. Nie jest usługą działającą 24/7.')
-    st.selectbox('Interwał skanowania (sekundy)',(60,120,300),key='auto_scan_period')
+    st.session_state['auto_scan_period']=300
+    st.caption('⏲️ Automatyczne pobieranie świec co 5 minut (300 sekund), tylko gdy ta strona jest otwarta.')
     st.caption('AUTO-SKAN nie wykonuje zleceń. GPT-5.4 HIGH uruchamiasz osobno — płatne zapytania nie są wysyłane automatycznie.')
     st.markdown('---')
     with st.expander('🔑 KLUCZE API — TESTY / ZMIANY (już zapisane w Secrets)', expanded=False):
@@ -328,12 +333,12 @@ market_tab,chat_tab,dna_tab,mtf_tab,strategies_tab,lab_tab,news_tab,reports_tab,
     '🧪 LABORATORIUM','📰 NEWS / MAKRO','📈 RAPORTY',
     '📚 ARCHIWUM','⚙️ STATUS / API'])
 
-@st.fragment(run_every="60s")
+@st.fragment(run_every="300s")
 def auto_scan_heartbeat():
     """A page-open-only timer that triggers a full rerun for scan & archiving."""
     if not st.session_state.get('auto_scan_active',False):
         return
-    interval=scan_delay_seconds(st.session_state.get('auto_scan_period',60))
+    interval=scan_delay_seconds(st.session_state.get('auto_scan_period',300))
     tick=time.monotonic()
     previous=st.session_state.get('_last_auto_pulse')
     if previous is None:
@@ -356,7 +361,7 @@ with market_tab:
     with col1:
         csv=st.file_uploader('Opcjonalnie własne dane OHLC CSV (wyłącznie do nauki / replay)',type=['csv'])
         load=st.button('🔄 SKANUJ ŚWIECE',type='primary',use_container_width=True)
-        st.caption('Przy otwarciu strony wykonuję jedną próbę pobrania. Jeśli włączysz AUTO-SKAN, program ponowi odczyt co 60/120/300 s podczas otwartej sesji.')
+        st.caption('Przy otwarciu strony wykonuję jedną próbę pobrania. AUTO-SKAN ponawia odczyt co 5 minut (300 s), wyłącznie gdy strona jest otwarta.')
         if st.session_state.get('auto_scan_active'):
             st.success(f"🟢 AUTO-SKAN WŁĄCZONY: co {st.session_state.get('auto_scan_period',60)} s (tylko aktywna sesja przeglądarki)")
         else:
@@ -560,7 +565,7 @@ with market_tab:
                               paper_bgcolor='#111a2d',plot_bgcolor='#111a2d',legend_orientation='h',
                               margin={'l':15,'r':15,'t':30,'b':10})
             chart_slot=st.empty()
-            st.caption(f'Historyczne setupy PAPER strategii {strategy}: {len(marks)} w ostatnich {visible_bars} zamkniętych świecach. Strzałki NIE oznaczają zrealizowanych transakcji i nie uwzględniają historycznej walidacji MTF/makro.')
+            st.caption(f'Historyczne setupy PAPER w trybie {strategy}: {len(marks)} w ostatnich {visible_bars} zamkniętych świecach. W trybie AUTO to tylko konsensus historycznych reguł OHLC, BEZ wstecznej walidacji MTF/makro. Strzałki NIE oznaczają transakcji.')
             if marks.empty:
                 st.info(f'🔎 W wybranym oknie {visible_bars} świec strategia {strategy} nie wykryła pełnego setupu. To normalny wynik WAIT, nie awaria wykresu. Zwiększ okno lub wybierz inną strategię.')
             else:
@@ -586,11 +591,19 @@ with market_tab:
             if src.startswith('CSV'):
                 st.warning('CSV: wyłącznie symulacja edukacyjna. Nie ma sygnału do egzekucji live.')
             if snap.frame is not None and len(snap.frame)>=70:
-                decision=decide_any(snap.frame,strategy,spread=snap.spread)
-                if ready and st.session_state.get('mtf_enabled',False):
-                    decision,_mtf_rows=filter_mtf_decision(
-                        decision,st.session_state.get('mtf_snapshots',{}),
-                        asof=snap.confirmed_utc)
+                if strategy==AUTO_MODE:
+                    decision,auto_audit=evaluate_auto(
+                        snap.frame,snap.spread,st.session_state.get('mtf_snapshots',{}),
+                        asof=snap.confirmed_utc,use_mtf=True)
+                    st.caption('🤖 AUTO analizuje wszystkie 6 strategii. MINIMUM 2 zgodne po MTF i żadnego przeciwnego sygnału. To filtr badawczy, nie miara skuteczności.')
+                    with st.expander('📊 AUTO — OCENY 6 STRATEGII NA TEJ SAMEJ ZAMKNIĘTEJ ŚWIECY'):
+                        st.dataframe(pd.DataFrame(auto_audit),hide_index=True,use_container_width=True)
+                else:
+                    decision=decide_any(snap.frame,strategy,spread=snap.spread)
+                    if ready and st.session_state.get('mtf_enabled',False):
+                        decision,_mtf_rows=filter_mtf_decision(
+                            decision,st.session_state.get('mtf_snapshots',{}),
+                            asof=snap.confirmed_utc)
                 if ready:
                     blackout,note=macro_blackout(st.session_state.get('_macro_calendar',[]))
                     if blackout:
@@ -681,7 +694,7 @@ with market_tab:
                               bar_limit=st.session_state.get('chart_window_size',120),
                               resolution=tf,source=src)
                 chart_slot.plotly_chart(fig,use_container_width=True)
-                st.caption('🤖 Znacznik BOT przesuwa się wyłącznie na nową ZAMKNIĘTĄ świecę po faktycznym pobraniu danych. To odczyt co 60/120/300 s, nie streaming tickowy.')
+                st.caption('🤖 BOT ocenia ten sam zbiór zamkniętych świec co wykres. Aktualizacja co 5 minut przy otwartej stronie, bez streamingu ticków i bez zleceń.')
                 if ready:
                     payload=numeric_context(snap.frame,decision,instrument,tf,snap.spread)
                     st.session_state['ai_context']=payload
@@ -1272,7 +1285,7 @@ with reports_tab:
             if int(table.n.sum())<30:
                 st.warning('Łącznie mniej niż 30 rozstrzygniętych transakcji w raportowanych sekcjach. To ZA MAŁO, by mówić o przewadze.')
             if st.button('🔁 KROCZĄCE OKNA OOS — WYBRANA STRATEGIA',key='rolling_run'):
-                folds=rolling_oos(research_frame,strategy,spread=research_spread,slippage=research_slip)
+                folds=rolling_oos(research_frame,('DRUGA FALA' if strategy==AUTO_MODE else strategy),spread=research_spread,slippage=research_slip)
                 st.dataframe(folds,hide_index=True,use_container_width=True)
         else:
             st.info('Kliknij PRZELICZ. Wyniki nie są generowane automatycznie na każdej świecy.')
