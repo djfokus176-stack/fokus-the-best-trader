@@ -28,6 +28,7 @@ from trader.paper_lifecycle import (
     active_position, recent_positions, recent_events)
 from trader.paper_display import annotate_open_paper
 from trader.paper_reporting import daily_weekly
+from trader.remote_checkpoint import RemoteCheckpoint,remote_view_db,RemoteError
 from trader.telegram_alerts import dispatch_alerts, record_stale_event
 from trader.auth import capital_credentials, active_credential, test_capital_login, test_openai_model, test_telegram_token
 from trader.access import access_configured, password_matches
@@ -142,6 +143,23 @@ def secret(name,default=''):
     if os.getenv(name):return os.getenv(name).strip()
     try: return str(st.secrets.get(name,default)).strip()
     except (FileNotFoundError,KeyError):return default
+
+
+def remote_paper_view_enabled():
+    return secret('FOKUS_REMOTE_VIEW_ENABLED','false').lower() in ('true','1','yes')
+
+
+def paper_view_db():
+    if remote_paper_view_enabled():
+        # Uses only Streamlit SERVER Secrets, after owner login.
+        # Remote database is read-only for the dashboard; worker is
+        # the one authoritative writer. Never fallback to local silently.
+        remote=RemoteCheckpoint(secret('FOKUS_SUPABASE_URL'),
+                                secret('FOKUS_SUPABASE_SECRET_KEY'))
+        db,version=remote_view_db(remote)
+        st.session_state['_paper_remote_version']=version
+        return db
+    return connect()
 
 
 def manual_ai_request(question, payload, effort=None):
@@ -584,9 +602,12 @@ with market_tab:
                     st.caption('To kandydat SETUP. Linie zarezerwowane są dla pozycji, która naprawdę przeszła w OPEN w silniku PAPER v3.')
                 current_paper=None
                 try:
-                    db_v3=connect()
+                    db_v3=paper_view_db()
                     ensure_paper_v3(db_v3)
-                    if actual_scan_this_rerun and snap.good and src=='Capital.com DEMO REST':
+                    if remote_paper_view_enabled():
+                        st.caption('☁️ PAPER REMOTE VIEW: pozycje z trwałego checkpointu workera. Ten terminal nie zapisuje nowych pozycji PAPER — jeden writer w GitHub Actions.')
+                    if (not remote_paper_view_enabled() and actual_scan_this_rerun
+                            and snap.good and src=='Capital.com DEMO REST'):
                         # Process all available broker TFs so switching M1/M5/H1
                         # cannot silently strand an older OPEN position.
                         available={tf:snap}
@@ -614,8 +635,8 @@ with market_tab:
                             if alert_result.get('failed'):
                                 st.warning(f"Telegram: {alert_result['failed']} alertów miało błąd dostarczenia i nie będzie automatycznie ponawianych.")
                     current_paper=active_position(db_v3,instrument,src,tf)
-                except (OSError, sqlite3.Error,ValueError) as ex:
-                    st.error('❌ Silnik pozycji PAPER v3: '+type(ex).__name__+'; nie zakładam, że otwarto pozycję.')
+                except (OSError, sqlite3.Error,ValueError,RemoteError) as ex:
+                    st.error('❌ Silnik PAPER/REMOTE: '+type(ex).__name__+'; brak zdalnego odczytu, nie wyświetlam starej pozycji jako aktualnej.')
                 if current_paper:
                     st.markdown('### 🧪 AKTYWNA SYMULACJA PAPER v3')
                     st.info(
@@ -975,8 +996,12 @@ with reports_tab:
     with st.expander('🧪 PAPER v3 — POZYCJE DEMO, ZDARZENIA I RAPORT DZIENNY/TYGODNIOWY',expanded=True):
         st.info('To wyłącznie symulowane pozycje PAPER v3 z Capital.com DEMO. PENDING nie jest wejściem; OPEN to wejście odtworzone z OPEN następnej ZAMKNIĘTEJ świecy. Starsze v2 i CSV są oddzielne. Brak prawdziwych zleceń.')
         try:
-            paper_db=connect()
+            paper_db=paper_view_db()
             ensure_paper_v3(paper_db)
+            if remote_paper_view_enabled():
+                st.success(f"☁️ REMOTE PAPER: checkpoint worker version {st.session_state.get('_paper_remote_version','BRAK')}. Statystyki pochodzą z bazy workera, nie z lokalnego SQLite.")
+            else:
+                st.caption('Lokalna historia PAPER v3; w Streamlit Cloud może zniknąć podczas redeploy.')
             all_positions=[p for p in recent_positions(paper_db,200)
                 if p['source']=='Capital.com DEMO REST' and p['epic']==instrument]
             days,weeks,summary=daily_weekly(paper_db,epic=instrument)
@@ -1001,9 +1026,12 @@ with reports_tab:
                     file_name='FOKUS_PAPER_V3_POZYCJE.csv',mime='text/csv',key='paper_v3_export')
             else:
                 st.caption('Brak pozycji v3 dla tego instrumentu. Po skanie dopiero pełny setup generuje PENDING.')
-            rejected=[r for r in recent_scan_decisions(paper_db,200)
-                if r['source']=='Capital.com DEMO REST' and
-                   r['epic']==instrument and r['action']=='WAIT']
+            rejected=([] if remote_paper_view_enabled() else
+                [r for r in recent_scan_decisions(paper_db,200)
+                 if r['source']=='Capital.com DEMO REST' and
+                    r['epic']==instrument and r['action']=='WAIT'])
+            if remote_paper_view_enabled():
+                st.caption('Dziennik WAIT z archiwum v2 jest lokalny i nie jest częścią zdalnego checkpointu v3.')
             if rejected:
                 with st.expander('⛔ Odrzucone setupy / WAIT — powody i godziny'):
                     st.dataframe(pd.DataFrame(rejected),hide_index=True,
@@ -1022,8 +1050,8 @@ with reports_tab:
                 st.markdown('**Raport tygodniowy (czas Polska)**')
                 if not weeks.empty:st.dataframe(weeks,hide_index=True,use_container_width=True)
                 else:st.caption('Brak zakończonych transakcji.')
-        except (OSError,sqlite3.Error,ValueError,TypeError) as ex:
-            st.error('Nie można wyświetlić raportu PAPER v3: '+type(ex).__name__)
+        except (OSError,sqlite3.Error,ValueError,TypeError,RemoteError) as ex:
+            st.error('Nie można wyświetlić raportu PAPER v3 / cloud: '+type(ex).__name__)
         alerts_enabled=secret('PAPER_TELEGRAM_ALERTS_ENABLED','false').lower() in ('true','1','yes')
         st.caption('📣 Alerty Telegram: '+('WŁĄCZONE w Secrets' if alerts_enabled else
             'WYŁĄCZONE (domyślnie). Włącz przez PAPER_TELEGRAM_ALERTS_ENABLED=true oraz ustaw token i chat ID w Secrets.'))
