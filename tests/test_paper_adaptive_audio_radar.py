@@ -141,3 +141,26 @@ def test_raw_candidate_is_archived_but_never_equated_to_trade():
     assert two[0]["raw_candidates"][0]["direction"]=="LONG"
     assert two[0]["decision"]=="WAIT"
     assert "trade_id" not in two[0]
+
+
+def test_policy_reports_do_not_merge_adaptive_with_fixed(tmp_path):
+    from trader.paper_reporting import performance_by_policy
+    db=connect(tmp_path/"policy.sqlite")
+    _open(db,policy="fixed")
+    progress_paper(db,_frame([[100,100.5,99.5,100],[100,104.2,99.5,104]]),
+                   "US500",SRC,"MINUTE")
+    # Distinct candle timestamp and strategy used for a new PAPER trade.
+    t2=T0+pd.Timedelta(minutes=3)
+    d=Decision("LONG","EMA TREND","another signal",100,98,104,2)
+    tid=queue_paper(db,"US500",SRC,"MINUTE",d,t2,.6,slippage=0,
+                    exit_policy="adaptive")
+    assert tid
+    second=pd.DataFrame([[100,100.5,99.5,100],
+                         [100,104.2,99.5,104]],
+        index=pd.date_range(t2+pd.Timedelta(minutes=1),periods=2,freq="min",tz="UTC"),
+        columns=["Open","High","Low","Close"])
+    progress_paper(db,second,"US500",SRC,"MINUTE")
+    result=performance_by_policy(db,"US500")
+    assert len(result)==2
+    assert {r["Wariant"] for r in result}=={"fixed","adaptive"}
+    assert sum(r["Zamknięte"] for r in result)==2
