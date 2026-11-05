@@ -28,7 +28,8 @@ from .remote_checkpoint import (RemoteCheckpoint, configured, dump_state,
 def scan_once(client,epic,tf,strategy,max_spread,db, *,
               slippage=.25,enable_setups=True,strict_macro=True,
               calendar_fetch=fetch_bls_schedule,telegram_token="",
-              telegram_chat_id="",telegram_enabled=False,remote=None):
+              telegram_chat_id="",telegram_enabled=False,remote=None,
+              reviewer=None):
     """One accountable v3 scan, using Capital DEMO + closed bars only.
 
     Existing PAPER can progress independently of new-signal permissions;
@@ -92,6 +93,12 @@ def scan_once(client,epic,tf,strategy,max_spread,db, *,
                     reasons.append("MACRO_BLACKOUT")
         except (OSError,ValueError,TimeoutError,FeedError,TypeError):
             reasons.append("MACRO_CALENDAR_UNAVAILABLE")
+    # Optional AI is commentary only. It cannot change verdict, gates or orders.
+    if reviewer is not None:
+        try:
+            reviewer(main,verdict,auto_votes if strategy==AUTO_MODE else [],views,reasons)
+        except Exception:
+            pass  # A paid commentary failure must not alter PAPER accounting.
     queued=None
     if not reasons and verdict.action in ("LONG","SHORT"):
         queued=queue_paper(db,epic,main.source,tf,verdict,main.confirmed_utc,
@@ -119,13 +126,21 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
     job that crashes after sending but before checkpointing).
     """
     version,payload=remote.fetch()
+    auto_state=payload.get("auto_ai",{})
+    def review_snapshot(snapshot,decision,votes,views,blockers):
+        nonlocal auto_state
+        from .auto_ai import review_closed_candle
+        auto_state=review_closed_candle(auto_state,snapshot,decision,votes,views,blockers)
     db=sqlite3.connect(":memory:")
     try:
         restore_state(db,payload)
         status=scan_once(client,epic,tf,strategy,max_spread,db,
                          enable_setups=enable_setups,strict_macro=strict_macro,
-                         calendar_fetch=calendar_fetch,telegram_enabled=False)
+                         calendar_fetch=calendar_fetch,telegram_enabled=False,
+                         reviewer=review_snapshot)
         payload=dump_state(db)
+        if isinstance(auto_state,dict):
+            payload["auto_ai"]=auto_state
         payload["meta"]={
             "last_scan_utc":datetime.now(timezone.utc).isoformat(),
             "last_scan_summary":status[:350],
