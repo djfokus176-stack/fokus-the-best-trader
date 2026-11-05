@@ -1,3 +1,11 @@
+## 🧠 Płatny GPT w osobnym workerze — opcjonalny, z limitami
+
+Dodano bezpieczną integrację komentarzy GPT do skanów PAPER w GitHub Actions. Domyślnie **WYŁĄCZONA**, nie generuje opłat bez osobnego sekretu i opt-in. Model nie zmienia deterministycznych sygnałów ani żadnych blokad i nigdy nie wysyła zleceń REAL. Domyślne limity to 24 próby dziennie i 200 miesięcznie; nie są to limity kwotowe OpenAI. Historia i licznik pokazują się w panelu RAPORTY przy połączeniu Supabase.
+
+Instrukcja konfiguracji: [dokumentacja/AUTO_GPT_WORKER.md](dokumentacja/AUTO_GPT_WORKER.md). ChatGPT Plus nie obejmuje API; rozliczenia w osobnym panelu OpenAI.
+
+---
+
 ## 🤖 AUTO — 6 STRATEGII i 5-minutowy skan (PAPER, bez zleceń)
 
 Domyślny tryb w terminalu: **AUTO — 6 STRATEGII**. Na dokładnie
@@ -22,7 +30,7 @@ harmonogram około 5 minut, ale jest opt-in i pozostaje
 wyłączony bez konfiguracji właściciela. Przestój internetu,
 Streamlit Cloud, GitHub Actions lub broker API oznacza brak
 gwarancji pracy ciągłej. Telegram i automatyczne płatne wywołania
-OpenAI są wyłączone.
+OpenAI są domyślnie wyłączone (GPT można jawnie włączyć w workerze z limitami).
 
 **Bramka zegara API**: nowe pozycje PAPER nie są tworzone,
 dopóki użytkownik nie potwierdzi OPEN-label timestampów
