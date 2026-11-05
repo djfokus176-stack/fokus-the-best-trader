@@ -26,8 +26,8 @@ def test_stale_bad_snapshot_never_ready():
     assert current_feed_status(fake(now,good=False),'Capital.com DEMO REST',now)[0] is False
 
 def test_manual_refresh_options():
-    assert [scan_delay_seconds(i) for i in (60,120,300)] == [60,120,300]
+    assert [scan_delay_seconds(i) for i in (5,15,30,60,120,300)] == [5,15,30,60,120,300]
     import pytest
-    for x in (0,5,30,61,600):
+    for x in (0,1,10,31,61,600):
         with pytest.raises(ValueError):
             scan_delay_seconds(x)
