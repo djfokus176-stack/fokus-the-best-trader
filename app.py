@@ -13,6 +13,7 @@ from trader.strategy import indicators, backtest
 from trader.strategies_pro import decide_any, ALL_STRATEGIES
 from trader.mtf import TIMEFRAMES, LABELS, evaluate_timeframes, filter_mtf_decision
 from trader.research import chronological_report, rolling_oos, replay, stats
+from trader.mtf_replay import compare_mtf_on_m1_csv
 from trader.news_radar import fetch_headlines, fetch_bls_schedule, macro_blackout
 from trader.storage import connect, archive, recent, recent_scan_decisions, audit_prior_paper_signals, paper_report, legacy_outcomes_count, archive_candles, load_candles
 from trader.assistant import numeric_context, answer_ai
@@ -901,6 +902,60 @@ with news_tab:
 with reports_tab:
     st.subheader('📈 FOKU$ LAB — PORÓWNAJ 6 STRATEGII PO KOSZTACH')
     st.caption('Rejestr badań PAPER. Chronologiczny holdout 70/30 + kroczące przedziały. Żaden wynik nie jest obietnicą zysku.')
+    with st.expander('🧪 CSV M1 — PORÓWNAJ 6 STRATEGII BEZ MTF I Z MTF (OFFLINE)',expanded=True):
+        st.info('Reprodukowalny test OFFLINE: w CSV kolumna Time oznacza UTC CZAS ZAMKNIĘCIA świecy M1, nie czas otwarcia. M5/M15/H1 są agregowane z pełnych bloków M1 (nie z odrębnego feedu brokera).')
+        offline_csv=st.file_uploader('📁 Wybierz historyczny CSV M1 (Time, Open, High, Low, Close, opcjonalnie Spread)',
+            type=['csv'],key='offline_mtf_csv',help='Potrzeba 4600–6500 kolejnych minut, w tym >=70 pełnych godzin H1. Długie przerwy mogą wykluczyć raport.')
+        c_a,c_b=st.columns(2)
+        with c_a:
+            offline_spread=st.number_input('Spread testowy, jeśli brak informacji w CSV (pkt)',
+                min_value=0.0,max_value=10.0,value=0.6,step=0.1,key='offline_mtf_spread')
+        with c_b:
+            offline_slip=st.number_input('Poślizg na stronę (pkt)',
+                min_value=0.0,max_value=5.0,value=0.25,step=0.05,key='offline_mtf_slip')
+        st.caption('⚠️ Wyniki po kosztach są symulacją ze STAŁYM spreadem zadanym powyżej. CSV Spread może zawierać rzeczywiste obserwacje, ale ten wariant replay jeszcze nie symuluje zmian spreadu w czasie. Nie zakładaj, że wyniki to rzeczywiste transakcje.')
+        if st.button('🔬 TEST OFFLINE: BEZ MTF vs Z MTF — 6 STRATEGII',
+                     key='offline_mtf_start',type='primary',use_container_width=True):
+            if offline_csv is None:
+                st.warning('Wybierz CSV M1 z danymi historycznymi.')
+            else:
+                with st.spinner('Rekonstrukcja 4 interwałów z M1, chronologiczny test PAPER i koszty...'):
+                    try:
+                        file_bytes=offline_csv.getvalue()
+                        file_hash=hashlib.sha256(file_bytes).hexdigest()
+                        import io as _io
+                        offline=read_ohlc_csv(_io.BytesIO(file_bytes),default_spread=offline_spread)
+                        table,trade_table,counts=compare_mtf_on_m1_csv(
+                            offline,spread=offline_spread,slippage=offline_slip,
+                            holding=20,split=.70)
+                        st.session_state['_csv_mtf_result']={
+                            'table':table,'trades':trade_table,'counts':counts,
+                            'sha256':file_hash,'size':len(offline),
+                            'costs':(offline_spread,offline_slip)}
+                    except (ValueError,TypeError,KeyError,OverflowError) as ex:
+                        st.session_state.pop('_csv_mtf_result',None)
+                        st.error('Nie wykonano raportu CSV MTF: '+str(ex))
+        csv_result=st.session_state.get('_csv_mtf_result')
+        if csv_result:
+            st.success(f"Raport offline: {csv_result['size']} świec M1; hash pliku SHA256: {csv_result['sha256'][:18]}…; agregaty pełne: {csv_result['counts']}.")
+            st.caption('Podział 70/30 liczony PO rozgrzaniu 70 pełnych godzin H1. Reguły strategii identyczne; wariant Z MTF może odrzucać sygnały, ale nie otwiera ich sam. Każdy wariant ma własną, niepokrywającą się historię pozycji PAPER.')
+            comp=csv_result['table']
+            st.dataframe(comp,use_container_width=True,hide_index=True)
+            st.download_button('⬇️ CSV: PORÓWNANIE 6 STRATEGII',
+                data=comp.to_csv(index=False).encode('utf-8-sig'),
+                mime='text/csv',file_name='FOKUS_CSV_MTF_POROWNANIE.csv',
+                key='offline_mtf_export')
+            trades=csv_result['trades']
+            if not trades.empty:
+                st.download_button('⬇️ CSV: ROZLICZENIA POSZCZEGÓLNYCH POZYCJI PAPER',
+                    data=trades.to_csv(index=False).encode('utf-8-sig'),
+                    mime='text/csv',file_name='FOKUS_CSV_MTF_TRADE_LOG.csv',
+                    key='offline_mtf_trades_export')
+            later=comp[comp['okres']=='PÓŹNIEJSZE / 30%']
+            if len(later) and (later.n<30).any():
+                st.warning('Część wyników późniejszego holdout ma mniej niż 30 zakończonych transakcji. NIE wyciągaj wniosku o skuteczności MTF na tak małej próbie.')
+            st.warning('Wyniki OFFLINE nie obejmują rzeczywistych ticków, poślizgu dynamicznego, brokerowych blackoutów makro, prowizji i historycznej zmienności spreadu. Nie testują połączenia Capital.com LIVE.')
+    st.markdown('### 📉 Podstawowy replay bieżącej serii')
     if snap is None or len(snap.frame)<125:
         st.warning('Do raportu potrzeba >=125 zamkniętych świec. Najlepiej kilkadziesiąt tysięcy świec z wiarygodnego archiwum, a nie tylko 350 z REST.')
     else:
