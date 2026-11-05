@@ -295,6 +295,47 @@ class CapitalReadOnly:
         except requests.RequestException as ex:
             raise FeedError(http_error_message(ex,'Diagnostyka timestampów',epic)) from ex
 
+    def forming_candle(self, epic='US500', resolution='MINUTE', *,
+                       now=None):
+        """Optional UI-only INCOMPLETE OHLC from Capital /prices, max=2.
+
+        Same endpoint as older SP500 v7, but NO historical arrows, no PAPER
+        signals, no stored strategy candles. A current OPEN-labelled last bar
+        must be fresh: an old bar is NEVER portrayed as a live moving candle.
+        """
+        if resolution not in PERIOD or not epic.replace('_','').isalnum():
+            raise FeedError('Niepoprawny EPIC lub interwał świecy w trakcie')
+        try:
+            r=self.session.get(f'{self.base_url}/api/v1/prices/{epic}',
+                params={'resolution':resolution,'max':2},
+                headers=self.headers(),timeout=8)
+            r.raise_for_status()
+            raw=parse_prices(r.json())
+        except requests.RequestException as exc:
+            raise FeedError(http_error_message(exc,'Świeca bieżąca',epic)) from exc
+        if raw.empty:
+            raise FeedError('Brak świecy bieżącej w /prices')
+        now=now or datetime.now(timezone.utc)
+        if now.tzinfo is None:
+            raise ValueError('Wymagany UTC datetime z tzinfo')
+        open_time=raw.index[-1]
+        delta=(pd.Timestamp(now)-open_time).total_seconds()
+        if not (-5<=delta<=PERIOD[resolution]+5):
+            raise FeedError(f'Bieżąca świeca /prices jest nieaktualna: {delta:.0f}s')
+        row=raw.iloc[-1]
+        close_time=open_time+pd.Timedelta(seconds=PERIOD[resolution])
+        return {
+            "time":close_time,
+            "Open":float(row["Open"]),"High":float(row["High"]),
+            "Low":float(row["Low"]),"Close":float(row["Close"]),
+            "bid":float(row["Bid"]),"ask":float(row["Ask"]),
+            "spread":float(row["Spread"]),
+            "epic":epic,"environment":self.environment,
+            "timeframe":resolution,"last_tick":open_time,
+            "source":"Capital.com /prices • bieżąca OHLC",
+            "samples":0,
+        }
+
     def market_quote(self, epic: str = 'US500') -> MarketQuote:
         """Fast read-only GET: current bid/offer, status and provider timestamp."""
         if not epic.replace('_','').isalnum():
