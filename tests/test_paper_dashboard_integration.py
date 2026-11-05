@@ -56,6 +56,13 @@ def test_dashboard_v3_queue_then_simulated_open_on_next_closed_candle(monkeypatc
     app.button[0].click()
     app.run()
     assert not app.exception,[str(x.message) for x in app.exception]
+    # This scenario tests the legacy one-strategy PAPER setup specifically;
+    # AUTO mode has intentionally stricter two-strategy consensus gating.
+    manual=[x for x in app.selectbox if "Tryb analizy / strategia" in x.label]
+    assert len(manual)==1
+    manual[0].set_value("DRUGA FALA")
+    app.run()
+    assert not app.exception,[str(x.message) for x in app.exception]
     db=connect(tmp_path/"v3.sqlite3")
     recorded=recent_positions(db)
     assert len(recorded)==1 and recorded[0]["status"]=="PENDING"
