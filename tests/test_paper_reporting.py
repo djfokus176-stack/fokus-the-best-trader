@@ -38,3 +38,26 @@ def test_drawdown_includes_zero_and_negative_results(tmp_path):
     assert m["liczba"]==2
     assert m["max_drawdown_pkt"]==2.6
     assert m["suma_pkt"]==-1.2
+
+
+def test_reporting_covers_more_than_1000_closed_positions(tmp_path):
+    from trader.paper_lifecycle import ensure_tables
+    db=connect(tmp_path/"all-paper.sqlite3")
+    ensure_tables(db)
+    rows=[]
+    for i in range(1103):
+        t=f"2026-11-{(i%26)+1:02d}T13:00:00+00:00"
+        rows.append((f"trade-{i}","US500","Capital.com DEMO REST","MINUTE",
+            "EMA TREND","LONG",t,"synthetic",98.0,102.0,.6,.0,
+            "CLOSED_TP",t,t,100.0,100.3,102.0,101.7,1.4,t,t))
+    db.executemany("""INSERT INTO paper_positions_v3 (
+        trade_id,epic,source,timeframe,strategy,side,setup_utc,setup_reason,
+        stop_mid,target_mid,setup_spread,slippage,status,opened_utc,closed_utc,
+        entry_mid,entry_executable,exit_mid,exit_executable,pnl_pts,
+        created_utc,updated_utc)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",rows)
+    db.commit()
+    days,weeks,summary=daily_weekly(db,epic="US500")
+    assert summary["liczba"]==1103
+    assert int(days.liczba.sum())==1103
+    assert int(weeks.liczba.sum())==1103
