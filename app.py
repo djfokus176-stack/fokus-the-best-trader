@@ -22,6 +22,7 @@ from trader.storage import connect, archive, recent, recent_scan_decisions, audi
 from trader.assistant import numeric_context, answer_ai
 from trader.csv_data import read_ohlc_csv
 from trader.runtime import current_feed_status, scan_delay_seconds
+from trader.live_chart import quote_sample,sampled_preview,show_quote_preview
 from trader.scan_monitor import scan_event, append_scan_log
 from trader.chat_ui import append_message, renderable_history, preview_context
 from trader.paper_lifecycle import (
@@ -238,18 +239,20 @@ with st.sidebar:
     max_spread=st.slider('Maksymalny spread (pkt)',.2,5.0,2.0,.1)
     st.toggle('🔄 AUTO-SKAN — tylko gdy aplikacja otwarta',value=_early_secret('AUTO_SCAN_DEFAULT','true').lower() in ('true','1','yes'),key='auto_scan_active',
         help='Ocenia zamknięte świece co najmniej co 60 sekund. Nie jest usługą działającą 24/7.')
-    st.selectbox('⏱️ Częstotliwość AUTO-SKAN (aktywna strona)',
-        options=(5,15,30,60,120,300),index=3,
+    st.selectbox('⚡ Odświeżanie bieżącej ceny na wykresie',
+        options=(5,15,30,60,120,300),index=0,
         format_func=lambda secs: f'co {secs} sekund' if secs < 60 else f'co {secs // 60} min',
         key='auto_scan_period',
-        help='Ręcznie wybierasz jak często odpytywać Capital.com DEMO i oceniać 6 strategii. '
-             '5 s zwiększa ruch REST/API oraz obciążenie Streamlit. Zamknięta świeca M1 '
-             'pojawia się zwykle raz na minutę; to nie jest streaming ticków ani nowe świece co 5 s.')
-    st.caption('⏲️ AUTO-SKAN co '+str(st.session_state['auto_scan_period'])+
-               ' s, tylko przy otwartej stronie. GitHub worker niezależnie co około 5 minut.')
+        help='Odświeża dostępny snapshot BID/OFFER Capital.com, NIE pobiera całego okna '
+             'OHLC i NIE otwiera pozycji. Nowe pełne świece i strategie M1 są '
+             'sprawdzane najczęściej co 60 sekund.')
+    st.caption('⚡ Bieżąca cena co '+str(st.session_state['auto_scan_period'])+
+               ' s • pełny odczyt świec najczęściej co 60 s (M1). '
+               'Osobny worker PAPER GitHub pozostaje na swoim harmonogramie.')
     if st.session_state['auto_scan_period'] < 60:
-        st.caption('⚠️ Tryb szybki odpytuje Capital.com częściej. W przypadku HTTP 429 '
-                   'wybierz 60 s; M1 nadal ma nowe zamknięcie najwyżej raz na minutę.')
+        st.caption('⚠️ REST nie gwarantuje nowego ticka co 5 s. '
+                   'Bieżąca świeca będzie podglądem z próbek, bez użycia do sygnałów. '
+                   'Przy HTTP 429 wybierz 60 s.')
     st.toggle('🔔 DŹWIĘKI PAPER: otwarcie / TP / SL / timeout',
         value=False,key='paper_audio_enabled',
         help='Wymaga interakcji z przeglądarką. Dźwięk dotyczy tylko nowych '
@@ -374,20 +377,28 @@ market_tab,chat_tab,dna_tab,mtf_tab,strategies_tab,lab_tab,news_tab,reports_tab,
 
 @st.fragment(run_every="5s")
 def auto_scan_heartbeat():
-    """A page-open-only timer that triggers a full rerun for scan & archiving."""
+    """A page-open-only timer: fast quotes, slow CLOSED-candle strategy scans."""
     if not st.session_state.get('auto_scan_active',False):
         return
-    interval=scan_delay_seconds(st.session_state.get('auto_scan_period',60))
+    interval=scan_delay_seconds(st.session_state.get('auto_scan_period',5))
     tick=time.monotonic()
     previous=st.session_state.get('_last_auto_pulse')
     if previous is None:
         st.session_state['_last_auto_pulse']=tick
+        st.session_state.setdefault('_last_full_ohlc_pulse',tick)
         return
-    if tick-previous >= interval-2:
+    # Fragment wakes at 5s intervals; never overlap a paid manual GPT call.
+    if tick-previous >= interval-1:
         if st.session_state.get('_ai_busy',False):
-            return  # Never interrupt the current manually paid AI request.
+            return
         st.session_state['_last_auto_pulse']=tick
-        st.session_state['_scheduled_scan']=True
+        st.session_state['_scheduled_live_quote']=True
+        # Even if the quote updates every 5s, M1 strategies only consume
+        # real CLOSED candles. No redundant 350-bar downloads every 5s.
+        last_full=st.session_state.get('_last_full_ohlc_pulse',tick)
+        if tick-last_full >= max(60,interval)-1:
+            st.session_state['_last_full_ohlc_pulse']=tick
+            st.session_state['_scheduled_scan']=True
         st.rerun(scope='app')
 
 auto_scan_heartbeat()
@@ -400,9 +411,12 @@ with market_tab:
     with col1:
         csv=st.file_uploader('Opcjonalnie własne dane OHLC CSV (wyłącznie do nauki / replay)',type=['csv'])
         load=st.button('🔄 SKANUJ ŚWIECE',type='primary',use_container_width=True)
-        st.caption('AUTO-SKAN: odświeżanie według wybranej częstotliwości 5–300 s, gdy strona jest otwarta. GitHub Actions: osobno, około co 5 min.')
+        st.caption('LIVE: odczyt BID/OFFER co 5–300 s według wyboru; '
+                   'M1: 350 świec i 6 strategii najczęściej co 60 s. '
+                   'GitHub Actions PAPER: niezależnie, około co 5 min.')
         if st.session_state.get('auto_scan_active'):
-            st.success(f"🟢 AUTO-SKAN WŁĄCZONY: co {st.session_state.get('auto_scan_period',60)} s (tylko aktywna sesja przeglądarki)")
+            st.success(f"🟢 LIVE CENA: co {st.session_state.get('auto_scan_period',5)} s • "
+                       "świece/strategie: co najmniej 60 s • tylko otwarta strona")
         else:
             st.info('⚪ TRYB RĘCZNY — nowe świece wymagają ponownego skanowania.')
     with col2:
@@ -416,6 +430,8 @@ with market_tab:
     scheduled_scan = bool(st.session_state.pop('_scheduled_scan',False)
         and st.session_state.get('auto_scan_active',False) and has_cap and csv is None)
     actual_scan_this_rerun=bool(load or auto_scan or scheduled_scan)
+    scheduled_live_quote=bool(st.session_state.pop('_scheduled_live_quote',False)
+        and st.session_state.get('auto_scan_active',False) and has_cap and csv is None)
     if actual_scan_this_rerun:
         scan_trigger='MANUAL' if load else ('STARTUP' if auto_scan else 'AUTO')
         scan_requested=datetime.now(timezone.utc)
@@ -428,6 +444,7 @@ with market_tab:
         ):
             previous_snap=None
         st.session_state['last_scan_utc']=scan_requested.isoformat()
+        st.session_state['_last_full_ohlc_pulse']=time.monotonic()
         st.session_state['_scan_attempt_count']=int(st.session_state.get('_scan_attempt_count',0))+1
         try:
             st.session_state.pop('last_feed_error', None)
