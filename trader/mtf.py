@@ -41,10 +41,12 @@ def trend_from_closed(frame: pd.DataFrame) -> str:
     return "NEUTRAL"
 
 
-def evaluate_timeframes(snapshots: dict, now=None) -> tuple[list[TFView], str]:
+def evaluate_timeframes(snapshots: dict, now=None, asof=None) -> tuple[list[TFView], str]:
     """Fail closed on missing, stale, mismatched or future HTF observations."""
     anchor = snapshots.get("MINUTE")
     anchor_time = getattr(anchor, "confirmed_utc", None)
+    if anchor_time is not None and asof is not None:
+        anchor_time = min(anchor_time, asof)
     if anchor_time is None:
         return [TFView(tf,"UNKNOWN",None,None,None,False,"Brak świec M1") for tf in TIMEFRAMES], "WAIT"
     rows = []
@@ -56,8 +58,7 @@ def evaluate_timeframes(snapshots: dict, now=None) -> tuple[list[TFView], str]:
         ready, reason, _ = current_feed_status(sn, sn.source, now)
         if sn.epic != anchor.epic or sn.source != anchor.source or sn.resolution != tf:
             ready, reason = False, "Niezgodny instrument, interwał lub źródło"
-        if sn.confirmed_utc and sn.confirmed_utc > anchor_time:
-            ready, reason = False, "Świeca HTF jest nowsza od analizowanej M1"
+        # Future bars in a fetched HTF series are never included in calculations.
         frame = sn.frame.loc[sn.frame.index <= pd.Timestamp(anchor_time)]
         if len(frame) < 70:
             ready, reason = False, "Za mało potwierdzonych świec"
@@ -80,9 +81,9 @@ def evaluate_timeframes(snapshots: dict, now=None) -> tuple[list[TFView], str]:
     return rows, "NEUTRAL"
 
 
-def filter_mtf_decision(decision: Decision, snapshots: dict, now=None) -> tuple[Decision, list[TFView]]:
+def filter_mtf_decision(decision: Decision, snapshots: dict, now=None, asof=None) -> tuple[Decision, list[TFView]]:
     """MTF never invents a signal, only allows or vetoes a base strategy."""
-    rows, consensus = evaluate_timeframes(snapshots, now)
+    rows, consensus = evaluate_timeframes(snapshots, now, asof=asof)
     if decision.action not in ("LONG","SHORT"):
         return decision, rows
     need = "UP" if decision.action=="LONG" else "DOWN"
