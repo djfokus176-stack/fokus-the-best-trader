@@ -22,6 +22,7 @@ from trader.storage import connect, archive, recent, recent_scan_decisions, audi
 from trader.assistant import numeric_context, answer_ai
 from trader.csv_data import read_ohlc_csv
 from trader.runtime import current_feed_status, scan_delay_seconds
+from trader.live_chart import quote_sample,sampled_preview,show_quote_preview
 from trader.scan_monitor import scan_event, append_scan_log
 from trader.chat_ui import append_message, renderable_history, preview_context
 from trader.paper_lifecycle import (
@@ -167,9 +168,16 @@ def paper_view_db():
         # Uses only Streamlit SERVER Secrets, after owner login.
         # Remote database is read-only for the dashboard; worker is
         # the one authoritative writer. Never fallback to local silently.
-        remote=RemoteCheckpoint(secret('FOKUS_SUPABASE_URL'),
-                                secret('FOKUS_SUPABASE_SECRET_KEY'))
-        version,payload=remote.fetch()
+        cached=st.session_state.get('_paper_remote_read_cache')
+        now=time.monotonic()
+        if cached is not None and now-cached["received"]<15:
+            version,payload=cached["version"],cached["payload"]
+        else:
+            remote=RemoteCheckpoint(secret('FOKUS_SUPABASE_URL'),
+                                    secret('FOKUS_SUPABASE_SECRET_KEY'))
+            version,payload=remote.fetch()
+            st.session_state['_paper_remote_read_cache']={
+                "received":now,"version":version,"payload":payload}
         db=sqlite3.connect(':memory:')
         from trader.remote_checkpoint import restore_state
         restore_state(db,payload)
@@ -238,18 +246,20 @@ with st.sidebar:
     max_spread=st.slider('Maksymalny spread (pkt)',.2,5.0,2.0,.1)
     st.toggle('🔄 AUTO-SKAN — tylko gdy aplikacja otwarta',value=_early_secret('AUTO_SCAN_DEFAULT','true').lower() in ('true','1','yes'),key='auto_scan_active',
         help='Ocenia zamknięte świece co najmniej co 60 sekund. Nie jest usługą działającą 24/7.')
-    st.selectbox('⏱️ Częstotliwość AUTO-SKAN (aktywna strona)',
-        options=(5,15,30,60,120,300),index=3,
+    st.selectbox('⚡ Odświeżanie bieżącej ceny na wykresie',
+        options=(5,15,30,60,120,300),index=0,
         format_func=lambda secs: f'co {secs} sekund' if secs < 60 else f'co {secs // 60} min',
         key='auto_scan_period',
-        help='Ręcznie wybierasz jak często odpytywać Capital.com DEMO i oceniać 6 strategii. '
-             '5 s zwiększa ruch REST/API oraz obciążenie Streamlit. Zamknięta świeca M1 '
-             'pojawia się zwykle raz na minutę; to nie jest streaming ticków ani nowe świece co 5 s.')
-    st.caption('⏲️ AUTO-SKAN co '+str(st.session_state['auto_scan_period'])+
-               ' s, tylko przy otwartej stronie. GitHub worker niezależnie co około 5 minut.')
+        help='Odświeża dostępny snapshot BID/OFFER Capital.com, NIE pobiera całego okna '
+             'OHLC i NIE otwiera pozycji. Nowe pełne świece i strategie M1 są '
+             'sprawdzane najczęściej co 60 sekund.')
+    st.caption('⚡ Bieżąca cena co '+str(st.session_state['auto_scan_period'])+
+               ' s • pełny odczyt świec najczęściej co 60 s (M1). '
+               'Osobny worker PAPER GitHub pozostaje na swoim harmonogramie.')
     if st.session_state['auto_scan_period'] < 60:
-        st.caption('⚠️ Tryb szybki odpytuje Capital.com częściej. W przypadku HTTP 429 '
-                   'wybierz 60 s; M1 nadal ma nowe zamknięcie najwyżej raz na minutę.')
+        st.caption('⚠️ REST nie gwarantuje nowego ticka co 5 s. '
+                   'Bieżąca świeca będzie podglądem z próbek, bez użycia do sygnałów. '
+                   'Przy HTTP 429 wybierz 60 s.')
     st.toggle('🔔 DŹWIĘKI PAPER: otwarcie / TP / SL / timeout',
         value=False,key='paper_audio_enabled',
         help='Wymaga interakcji z przeglądarką. Dźwięk dotyczy tylko nowych '
@@ -374,20 +384,28 @@ market_tab,chat_tab,dna_tab,mtf_tab,strategies_tab,lab_tab,news_tab,reports_tab,
 
 @st.fragment(run_every="5s")
 def auto_scan_heartbeat():
-    """A page-open-only timer that triggers a full rerun for scan & archiving."""
+    """A page-open-only timer: fast quotes, slow CLOSED-candle strategy scans."""
     if not st.session_state.get('auto_scan_active',False):
         return
-    interval=scan_delay_seconds(st.session_state.get('auto_scan_period',60))
+    interval=scan_delay_seconds(st.session_state.get('auto_scan_period',5))
     tick=time.monotonic()
     previous=st.session_state.get('_last_auto_pulse')
     if previous is None:
         st.session_state['_last_auto_pulse']=tick
+        st.session_state.setdefault('_last_full_ohlc_pulse',tick)
         return
-    if tick-previous >= interval-2:
+    # Fragment wakes at 5s intervals; never overlap a paid manual GPT call.
+    if tick-previous >= interval-1:
         if st.session_state.get('_ai_busy',False):
-            return  # Never interrupt the current manually paid AI request.
+            return
         st.session_state['_last_auto_pulse']=tick
-        st.session_state['_scheduled_scan']=True
+        st.session_state['_scheduled_live_quote']=True
+        # Even if the quote updates every 5s, M1 strategies only consume
+        # real CLOSED candles. No redundant 350-bar downloads every 5s.
+        last_full=st.session_state.get('_last_full_ohlc_pulse',tick)
+        if tick-last_full >= max(60,interval)-1:
+            st.session_state['_last_full_ohlc_pulse']=tick
+            st.session_state['_scheduled_scan']=True
         st.rerun(scope='app')
 
 auto_scan_heartbeat()
@@ -400,9 +418,12 @@ with market_tab:
     with col1:
         csv=st.file_uploader('Opcjonalnie własne dane OHLC CSV (wyłącznie do nauki / replay)',type=['csv'])
         load=st.button('🔄 SKANUJ ŚWIECE',type='primary',use_container_width=True)
-        st.caption('AUTO-SKAN: odświeżanie według wybranej częstotliwości 5–300 s, gdy strona jest otwarta. GitHub Actions: osobno, około co 5 min.')
+        st.caption('LIVE: odczyt BID/OFFER co 5–300 s według wyboru; '
+                   'M1: 350 świec i 6 strategii najczęściej co 60 s. '
+                   'GitHub Actions PAPER: niezależnie, około co 5 min.')
         if st.session_state.get('auto_scan_active'):
-            st.success(f"🟢 AUTO-SKAN WŁĄCZONY: co {st.session_state.get('auto_scan_period',60)} s (tylko aktywna sesja przeglądarki)")
+            st.success(f"🟢 LIVE CENA: co {st.session_state.get('auto_scan_period',5)} s • "
+                       "świece/strategie: co najmniej 60 s • tylko otwarta strona")
         else:
             st.info('⚪ TRYB RĘCZNY — nowe świece wymagają ponownego skanowania.')
     with col2:
@@ -416,6 +437,8 @@ with market_tab:
     scheduled_scan = bool(st.session_state.pop('_scheduled_scan',False)
         and st.session_state.get('auto_scan_active',False) and has_cap and csv is None)
     actual_scan_this_rerun=bool(load or auto_scan or scheduled_scan)
+    scheduled_live_quote=bool(st.session_state.pop('_scheduled_live_quote',False)
+        and st.session_state.get('auto_scan_active',False) and has_cap and csv is None)
     if actual_scan_this_rerun:
         scan_trigger='MANUAL' if load else ('STARTUP' if auto_scan else 'AUTO')
         scan_requested=datetime.now(timezone.utc)
@@ -428,6 +451,7 @@ with market_tab:
         ):
             previous_snap=None
         st.session_state['last_scan_utc']=scan_requested.isoformat()
+        st.session_state['_last_full_ohlc_pulse']=time.monotonic()
         st.session_state['_scan_attempt_count']=int(st.session_state.get('_scan_attempt_count',0))+1
         try:
             st.session_state.pop('last_feed_error', None)
@@ -480,9 +504,16 @@ with market_tab:
             market_status='UNKNOWN'
             if obtained is not None and has_cap and csv is None:
                 try:
-                    market_status=st.session_state['_capital_client'].market_state(instrument)
-                except (FeedError,ValueError):
+                    quote=st.session_state['_capital_client'].market_quote(instrument)
+                    market_status=quote.status
+                    st.session_state['_live_quote']=quote
+                    st.session_state['_live_quote_error']=None
+                    st.session_state['_live_samples']=quote_sample(
+                        st.session_state.get('_live_samples'),quote,tf)
+                except (FeedError,ValueError) as ex:
                     market_status='UNKNOWN (status API niedostępny)'
+                    st.session_state['_live_quote']=None
+                    st.session_state['_live_quote_error']=str(ex)[:160]
             st.session_state['_market_status']=market_status
             # Save each CLOSED Capital series without mixing EPIC, source or TF.
             try:
@@ -536,6 +567,25 @@ with market_tab:
             st.error('❌ Błąd pobierania danych: '+type(ex).__name__)
     elif st.session_state.get('last_feed_error'):
         st.error('❌ Ostatnia próba skanowania: '+st.session_state['last_feed_error'])
+    if scheduled_live_quote and not actual_scan_this_rerun:
+        # A single quick /markets GET, never the heavy 350-bar OHLC endpoint.
+        # Never use these quote samples for trade decisions.
+        try:
+            if '_capital_client' not in st.session_state:
+                st.session_state['_capital_client']=CapitalReadOnly(
+                    cap_api_key,cap_identifier,cap_password,environment=capital_env)
+            if time.monotonic()>=st.session_state.get('_quote_backoff_until',0):
+                quote=st.session_state['_capital_client'].market_quote(instrument)
+                st.session_state['_live_quote']=quote
+                st.session_state['_market_status']=quote.status
+                st.session_state['_live_quote_error']=None
+                st.session_state['_live_samples']=quote_sample(
+                    st.session_state.get('_live_samples'),quote,tf)
+        except (FeedError,ValueError) as ex:
+            st.session_state['_live_quote']=None
+            st.session_state['_live_quote_error']=str(ex)[:160]
+            if '429' in str(ex):
+                st.session_state['_quote_backoff_until']=time.monotonic()+60
     snap=st.session_state.get('market_snap')
     src=st.session_state.get('source_override','BRAK')
     if st.session_state.get('last_scan_utc'):
@@ -591,7 +641,10 @@ with market_tab:
                        ' Nie używaj tych danych do nowej decyzji.')
         else:
             st.select_slider('🔎 Powiększenie wykresu — liczba ostatnich świec',
-                options=[60,90,120,180,240,350],value=120,key='chart_window_size')
+                options=[20,30,45,60,90,120,180,240,350],value=30,
+                key='chart_window_size')
+            st.toggle('📐 Automatycznie dopasuj skalę ceny do widocznych świec',
+                value=True,key='chart_price_autoscale')
             c1,c2,c3,c4=st.columns(4)
             c1.metric('ŹRÓDŁO',src)
             c2.metric('OSTATNIA ZAMKNIĘTA',snap.confirmed_utc.strftime('%H:%M:%S UTC') if snap.confirmed_utc else 'BRAK')
@@ -599,6 +652,28 @@ with market_tab:
             c3.metric('WIEK DANYCH (teraz)',f'{current_age:.0f} s' if current_age is not None else 'BRAK')
             signal_banner=st.empty()
             c4.metric('SPREAD zamkniętej świecy',f'{snap.spread:.2f} pkt')
+            live_quote=st.session_state.get('_live_quote')
+            quote_current=bool(
+                live_quote is not None and live_quote.fresh
+                and live_quote.epic==instrument
+                and live_quote.environment==capital_env
+                and st.session_state.get('auto_scan_active',False)
+                and src==f'Capital.com {capital_env} REST'
+                and (datetime.now(timezone.utc)-live_quote.received_utc).total_seconds()<=30)
+            if quote_current:
+                q1,q2,q3,q4=st.columns(4)
+                q1.metric('⚡ BIEŻĄCY MID • REST',f'{live_quote.mid:.2f}')
+                q2.metric('BID',f'{live_quote.bid:.2f}')
+                q3.metric('OFFER',f'{live_quote.ask:.2f}')
+                q4.metric('BIEŻĄCY SPREAD',f'{live_quote.spread:.2f} pkt')
+                st.caption('⚡ Cena z bieżącego snapshotu Capital.com, '
+                           'nie pełna świeca ani wykonany kurs zlecenia. '
+                           'Czas brokera UTC: '+live_quote.update_utc.isoformat())
+            elif st.session_state.get('auto_scan_active',False):
+                detail=st.session_state.get('_live_quote_error') or (
+                    'Brak świeżego snapshotu BID/OFFER; rynek może być zamknięty '
+                    'lub czas dostawcy opóźniony.')
+                st.warning('⚠️ LIVE: '+str(detail)[:210])
             if snap.quote_spread is not None:
                 st.caption(f'Spread najnowszej świecy (może być niezamknięta): {snap.quote_spread:.2f} pkt. Do logiki strategii używany jest spread świecy zamkniętej.')
             df=indicators(snap.frame) if len(snap.frame)>=14 else snap.frame
@@ -614,8 +689,18 @@ with market_tab:
                 if dna.swing_low is not None:
                     fig.add_hline(y=dna.swing_low,line_color='#7fbf98',line_dash='dot',
                         opacity=.55,annotation_text='Potwierdzony swing LOW')
-            # No historical backfilled arrows. Only actual archived PAPER
-            # OPEN/CLOSED positions are allowed to draw trade markers.
+            # No historical setup arrows. Add an explicitly non-tradable
+            # forming candle built from sampled current BID/OFFER MID quotes.
+            preview=sampled_preview(st.session_state.get('_live_samples',[]),
+                         closed_time=snap.confirmed_utc) if quote_current else None
+            show_quote_preview(fig,preview,bars=snap.frame,
+                 visible_bars=st.session_state.get('chart_window_size',30),
+                 auto_zoom=st.session_state.get('chart_price_autoscale',True))
+            if preview is not None:
+                st.caption('🟢/🔴 Bieżąca świeca po PRAWEJ jest niepełna: '
+                    f'{preview["samples"]} próbek ceny MID z REST. '
+                    'Wysokie/niskie obejmują tylko odczytane próbki (nie wszystkie ticki). '
+                    'Nie liczy się do EMA, LONG/SHORT ani PAPER.')
             fig.update_layout(height=570,xaxis_rangeslider_visible=False,template='plotly_dark',
                               paper_bgcolor='#111a2d',plot_bgcolor='#111a2d',legend_orientation='h',
                               margin={'l':15,'r':15,'t':30,'b':10})
@@ -798,7 +883,9 @@ with market_tab:
                 # No BUY/SELL-looking historical scan markers. Trade chart is
                 # restricted to verified PAPER OPEN/CLOSED ledger events.
                 chart_slot.plotly_chart(fig,use_container_width=True)
-                st.caption('🤖 BOT ocenia zamknięte świece z wykresu według wybranego interwału odświeżania (5–300 s), tylko gdy strona jest otwarta. Bez streamingu ticków i zleceń.')
+                st.caption('🤖 Strategie i PAPER używają tylko ZAMKNIĘTYCH świec. '
+                           'Bieżący podgląd MID aktualizuje się z REST według wybranych '
+                           '5–300 s, ale nie daje sygnału ani nie wysyła zlecenia.')
                 if ready:
                     payload=numeric_context(snap.frame,decision,instrument,tf,snap.spread)
                     st.session_state['ai_context']=payload

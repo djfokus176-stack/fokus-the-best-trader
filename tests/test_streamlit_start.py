@@ -73,8 +73,8 @@ def test_owner_defaults_to_auto_six_and_selectable_five_second_page_scan(monkeyp
     assert not a.exception,[str(x.message) for x in a.exception]
     chosen=[x for x in a.selectbox if "Tryb analizy / strategia" in x.label]
     assert len(chosen)==1 and chosen[0].value==AUTO_MODE
-    assert a.session_state["auto_scan_period"]==60
-    refresh=[x for x in a.selectbox if "Częstotliwość AUTO-SKAN" in x.label]
+    assert a.session_state["auto_scan_period"]==5
+    refresh=[x for x in a.selectbox if "Odświeżanie bieżącej ceny na wykresie" in x.label]
     assert len(refresh)==1
     assert tuple(refresh[0].options)==tuple(f"co {i} sekund" if i<60 else f"co {i//60} min" for i in (5,15,30,60,120,300))
     refresh[0].set_value("co 1 min")
