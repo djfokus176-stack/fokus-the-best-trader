@@ -208,6 +208,9 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             "last_scan_summary":status[:350],
             "source":"Capital.com DEMO REST",
             "timeframe":tf,"epic":epic,
+            "strategy":strategy,
+            "news_status":news_feed.get("status","NO_DATA"),
+            "news_last_fetch_utc":news_feed.get("last_fetch_utc"),
             "worker":"GitHub Actions or foreground process",
             "telegram_remote":"DISABLED"}
         new_version=remote.save(version,payload)
