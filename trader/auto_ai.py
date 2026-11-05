@@ -59,11 +59,15 @@ def review_closed_candle(previous, snapshot, decision, votes, mtf_views,
     if state.get("month") != month:
         state["month"], state["monthly_calls"] = month, 0
     action = getattr(decision, "action", "WAIT")
-    if action not in ("LONG", "SHORT"):
+    raw_candidates=[x for x in (votes or [])
+                    if x.get("Setup OHLC") in ("LONG","SHORT")]
+    research_only=action not in ("LONG","SHORT") and bool(raw_candidates)
+    if action not in ("LONG", "SHORT") and not research_only:
         if not _on(e.get("FOKUS_AUTO_AI_INCLUDE_WAIT", "")):
             state["status"] = "SKIP_WAIT"
             return state
-        # Max one routine WAIT explanation per hour even on a 5-minute worker.
+        # Only routine WAIT explanations are hourly; a NEW unapproved raw
+        # LONG/SHORT candidate may get a bounded research review immediately.
         last = state.get("last_wait_review_utc")
         if last:
             try:
@@ -92,6 +96,7 @@ def review_closed_candle(previous, snapshot, decision, votes, mtf_views,
         "last_closed_utc": bar_id,
         "spread": float(snapshot.spread),
         "proposed_action": action,
+        "unapproved_research_candidate_only": research_only,
         "strategy": _brief(getattr(decision, "strategy", ""), 80),
         "strategy_reason": _brief(getattr(decision, "reason", ""), 600),
         "entry": getattr(decision, "entry", None),
@@ -112,7 +117,7 @@ def review_closed_candle(previous, snapshot, decision, votes, mtf_views,
     state["daily_calls"] = int(state.get("daily_calls", 0)) + 1
     state["monthly_calls"] = int(state.get("monthly_calls", 0)) + 1
     state["model"] = _brief(e.get("FOKUS_AUTO_AI_MODEL", "gpt-5.4-mini"), 60)
-    if action == "WAIT":
+    if action == "WAIT" and not raw_candidates:
         state["last_wait_review_utc"] = at.isoformat()
     try:
         if call is None:
@@ -131,6 +136,9 @@ def review_closed_candle(previous, snapshot, decision, votes, mtf_views,
                 "polsku: co sugerują wskaźniki, argumenty za/przeciw, "
                 "kluczowy warunek unieważnienia, co wymaga potwierdzenia. "
                 "Nie widzisz screenshotu ani wiadomości na żywo. "
+                "Jeśli proposed_action=WAIT, ale istnieją surowe kandydatury, "
+                "NIGDY nie opisuj ich jako zatwierdzone wejście; podkreśl "
+                "konkretne powody blokad i brak wykonania transakcji. "
                 "To tylko komentarz, bez automatycznych zleceń i bez "
                 "pewnych prognoz. Nigdy nie obchodź blokad PAPER."),
             input=json.dumps(payload, ensure_ascii=False, default=str))
