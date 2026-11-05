@@ -30,6 +30,7 @@ def test_full_master_dashboard_with_four_realistic_synthetic_timeframes(monkeypa
     monkeypatch.setenv("CAPITAL_PASSWORD","secret-mock")
     monkeypatch.setenv("APP_AUTH_MODE","password")
     monkeypatch.setattr(CapitalReadOnly,"candles",fake_candles)
+    monkeypatch.setattr(CapitalReadOnly,"market_state",lambda self,epic: "TRADEABLE")
     import trader.storage as storage
     monkeypatch.setattr(storage,"DB_PATH",tmp_path/"paper.sqlite3")
     app=AppTest.from_file(APP,default_timeout=55).run()
