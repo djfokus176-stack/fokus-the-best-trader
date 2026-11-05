@@ -16,9 +16,19 @@ Alerty są wyłączone domyślnie. Deduplikacja ogranicza próby wysyłki do
 jednej na event_id, ale może utracić wiadomość przy błędzie sieci.
 
 **Pełny opis i ograniczenia:** [dokumentacja/PAPER_V3_LIFECYCLE.md](dokumentacja/PAPER_V3_LIFECYCLE.md).
-Nie istnieje jeszcze serwer 24/7 ani zewnętrzna trwała baza, a stary worker
-nie został podłączony do v3. Lokalne SQLite w Community Cloud może zniknąć
-po restarcie lub wdrożeniu. Prawdziwe API właściciela nie było testowane.
+Nie istnieje jeszcze serwer 24/7 ani zewnętrzna trwała baza.
+**Worker jest już przełączony na PAPER v3**, ale działa tylko wtedy, gdy go
+ręcznie uruchomisz (np. `python -m trader.worker --once`). Nie ma wspólnej
+bazy pomiędzy oddzielnymi serwerami Streamlit i workera. Lokalne SQLite
+w Community Cloud może zniknąć po restarcie lub wdrożeniu.
+Konwencja `snapshotTimeUTC` (czas OPEN czy CLOSE świecy) pozostaje
+niepotwierdzona na rzeczywistym feedzie użytkownika.
+
+**Poprawki audytu:** osobne linie ENTRY MID i modelowany fill BID/ASK,
+`entry_assumed_utc` (teoretyczna godzina OPEN) i `entry_detected_utc`
+(faktyczny czas wykrycia przez skaner), raporty z całej dostępnej historii
+SQLite bez limitu 1000 rekordów. Telegram nadal tylko at-most-once attempt,
+bez potwierdzonego delivery/retry. Nie testowano rzeczywistego konta API.
 
 ---
 
