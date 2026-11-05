@@ -902,7 +902,7 @@ with settings_tab:
                 st.error('Najpierw połącz Capital.com DEMO i wykonaj SKANUJ ŚWIECE. Nie pobieram LIVE w tej diagnostyce.')
             else:
                 try:
-                    raw=diag_client.raw_candle_time_diagnostic(instrument,'MINUTE')
+                    raw=CapitalReadOnly(cap_api_key,cap_identifier,cap_password,environment='DEMO').raw_candle_time_diagnostic(instrument,'MINUTE')
                     diag=inspect_labels(raw,'MINUTE')
                     st.session_state['_last_raw_time_audit']=diag
                 except (FeedError,ValueError) as ex:
