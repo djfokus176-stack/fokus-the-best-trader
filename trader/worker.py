@@ -18,6 +18,7 @@ from .news_radar import fetch_bls_schedule,macro_blackout
 from .runtime import current_feed_status
 from .storage import connect,archive_candles
 from .strategies_pro import ALL_STRATEGIES,decide_any
+from .auto_strategy import AUTO_MODE,evaluate_auto
 from .paper_lifecycle import ensure_tables,progress_paper,queue_paper,active_position
 from .telegram_alerts import dispatch_alerts,record_stale_event
 from .remote_checkpoint import (RemoteCheckpoint, configured, dump_state,
@@ -60,8 +61,16 @@ def scan_once(client,epic,tf,strategy,max_spread,db, *,
             archived+=archive_candles(db,snapshot.frame,epic,snapshot.source,resolution)
             transitions.extend(progress_paper(db,snapshot.frame,epic,snapshot.source,
                                               resolution,max_holding=20))
-    verdict=decide_any(main.frame,strategy,spread=main.spread)
-    verdict,views=filter_mtf_decision(verdict,snapshots,asof=main.confirmed_utc)
+    if strategy==AUTO_MODE:
+        verdict,auto_votes=evaluate_auto(main.frame,main.spread,snapshots,
+                                          asof=main.confirmed_utc,use_mtf=True)
+        # Keep explicit readiness checks even if AUTO returns WAIT.
+        _,views=filter_mtf_decision(
+            decide_any(main.frame,ALL_STRATEGIES[0],spread=main.spread),
+            snapshots,asof=main.confirmed_utc)
+    else:
+        verdict=decide_any(main.frame,strategy,spread=main.spread)
+        verdict,views=filter_mtf_decision(verdict,snapshots,asof=main.confirmed_utc)
     fresh,why,_=current_feed_status(main,main.source)
     reasons=[]
     if not enable_setups:
@@ -136,7 +145,7 @@ def main(argv=None):
     parser.add_argument("--interval",type=int,default=65)
     parser.add_argument("--epic",default=os.getenv("CAPITAL_EPIC","US500"))
     parser.add_argument("--tf",choices=list(TIMEFRAMES),default="MINUTE")
-    parser.add_argument("--strategy",choices=list(ALL_STRATEGIES),default="DRUGA FALA")
+    parser.add_argument("--strategy",choices=[AUTO_MODE,*ALL_STRATEGIES],default=AUTO_MODE)
     parser.add_argument("--disable-new-setups",action="store_true")
     parser.add_argument("--skip-macro-calendar",action="store_true",
                         help="Research only! Removes BLS blackout veto, not recommended.")
