@@ -8,7 +8,13 @@ from trader.auto_strategy import evaluate_auto,AUTO_MODE
 
 def trending_frame(direction=1, n=100):
     idx=pd.date_range("2026-11-05T16:00:00Z",periods=n,freq="min")
-    close=np.array([100+direction*i*.3 for i in range(n)],dtype=float)
+    # RSI of a perfectly one-way decline is ~0, so it must rightly
+    # fail the model's 28-point oversold filter. Use a choppy downward
+    # trend with some up-closes to test an eligible SHORT instead.
+    if direction<0:
+        close=np.array([100-i*.3+.8*np.sin(i*2.) for i in range(n)],dtype=float)
+    else:
+        close=np.array([100+i*.3 for i in range(n)],dtype=float)
     open_=close-direction*.1
     high=close+.6
     low=close-.6
