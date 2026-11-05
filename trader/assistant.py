@@ -25,8 +25,11 @@ def answer_ai(api_key, model, question, payload, effort='high'):
         if effort not in {'low','medium','high','xhigh'}:
             return 'Niepoprawny OPENAI_REASONING_EFFORT — ustaw low/medium/high/xhigh.'
         from openai import OpenAI
-        response = OpenAI(api_key=api_key,timeout=65).responses.create(
-           model=model, reasoning={'effort':effort}, max_output_tokens=7000,
+        # Configured ceilings are safety limits, NOT a guarantee of minimum spend.
+        token_ceiling = 2400 if effort in ('low','medium') else 4200
+        timeout_sec = 45 if effort in ('low','medium') else 65
+        response = OpenAI(api_key=api_key,timeout=timeout_sec).responses.create(
+           model=model, reasoning={'effort':effort}, max_output_tokens=token_ceiling,
            instructions=('Jesteś asystentem badawczym FOKU$ do scalpingu US500 w trybie PAPER. '
              'Używaj TYLKO danych dostarczonych w JSON. Kiedy brak świec, wyraźnie napisz BRAK WYKRESU. '
              'Jeśli dostaniesz news_untrusted_external, przedstaw chronologię i potencjalne scenariusze, '
@@ -39,6 +42,14 @@ def answer_ai(api_key, model, question, payload, effort='high'):
            input='PYTANIE: '+question+'\nDANE WYKRESU: '+json.dumps(payload,ensure_ascii=False))
         written = str(getattr(response,'output_text','') or '').strip()
         if written:
+            usage=getattr(response,'usage',None)
+            if usage is not None:
+                input_count=getattr(usage,'input_tokens',None)
+                output_count=getattr(usage,'output_tokens',None)
+                if input_count is not None and output_count is not None:
+                    written += (f'\n\n_ℹ️ Zużycie tego wywołania API: '
+                                f'{input_count} tokenów wejścia i {output_count} tokenów wyjścia. '
+                                'To nie jest wyliczenie kwoty; koszt zależy od stawek API._')
             return written
         # Some reasoning responses may expend all tokens on internal reasoning.
         # Show the actual API state instead of pretending the bot said nothing.
