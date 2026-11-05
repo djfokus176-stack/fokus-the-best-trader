@@ -32,6 +32,11 @@ def connect(path=None):
     outcome_columns={row[1] for row in con.execute('PRAGMA table_info(paper_outcomes)')}
     if 'model_version' not in outcome_columns:
         con.execute("ALTER TABLE paper_outcomes ADD COLUMN model_version TEXT NOT NULL DEFAULT 'legacy_v1'")
+    con.execute('''CREATE TABLE IF NOT EXISTS candle_history (
+        source TEXT NOT NULL, epic TEXT NOT NULL, timeframe TEXT NOT NULL,
+        candle_utc TEXT NOT NULL, open REAL NOT NULL, high REAL NOT NULL,
+        low REAL NOT NULL, close REAL NOT NULL, spread REAL NOT NULL,
+        PRIMARY KEY(source,epic,timeframe,candle_utc))''')
     con.commit()
     return con
 
@@ -115,3 +120,42 @@ def legacy_outcomes_count(con):
     """Old results kept for forensic review, excluded from v2 performance metrics."""
     return int(con.execute(
         "SELECT COUNT(*) FROM paper_outcomes WHERE model_version!='v2_mid_bidask'").fetchone()[0])
+
+
+def archive_candles(con, frame, epic: str, source: str, timeframe: str) -> int:
+    """Deduplicate only CLOSED API bars; separated by instrument and feed."""
+    import pandas as pd
+    if frame is None or frame.empty or source not in (
+        'Capital.com DEMO REST','Capital.com LIVE REST'):
+        return 0
+    if frame.index.tz is None:
+        raise ValueError('Świece muszą mieć UTC timezone.')
+    required={'Open','High','Low','Close','Spread'}
+    if not required.issubset(frame.columns):
+        raise ValueError('Niekompletne OHLC/Spread.')
+    rows=[]
+    for stamp,row in frame.iterrows():
+        if row[list(required)].isna().any():
+            continue
+        rows.append((source,epic,timeframe,stamp.isoformat(),
+            float(row.Open),float(row.High),float(row.Low),
+            float(row.Close),float(row.Spread)))
+    before=con.total_changes
+    con.executemany('''INSERT OR IGNORE INTO candle_history
+      (source,epic,timeframe,candle_utc,open,high,low,close,spread)
+      VALUES (?,?,?,?,?,?,?,?,?)''',rows)
+    con.commit()
+    return con.total_changes-before
+
+
+def load_candles(con, epic: str, source: str, timeframe: str, limit=20000):
+    """Read only the requested exact feed. Empty means no retained history."""
+    import pandas as pd
+    rows=con.execute('''SELECT candle_utc,open,high,low,close,spread
+      FROM candle_history WHERE epic=? AND source=? AND timeframe=?
+      ORDER BY candle_utc DESC LIMIT ?''',
+      (epic,source,timeframe,min(int(limit),100000))).fetchall()
+    if not rows:return pd.DataFrame()
+    df=pd.DataFrame(rows,columns=['Time','Open','High','Low','Close','Spread'])
+    df['Time']=pd.to_datetime(df.Time,utc=True)
+    return df.set_index('Time').sort_index()
