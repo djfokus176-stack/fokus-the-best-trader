@@ -21,3 +21,16 @@ jobs:
       - run: python -m pip freeze | grep -E '^(streamlit|pandas|numpy|plotly|requests|openai)=='
       - run: PYTHONPATH=. pytest -q
       - run: python -m compileall -q trader app.py healthcheck.py tests
+
+  lean-worker-import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: requirements-worker.txt
+      - run: python -m pip install -r requirements-worker.txt
+      - name: Worker loads without Streamlit, OpenAI or browser
+        run: python -m trader.worker --help
