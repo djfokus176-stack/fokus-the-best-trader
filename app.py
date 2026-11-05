@@ -997,6 +997,13 @@ with reports_tab:
                     file_name='FOKUS_PAPER_V3_POZYCJE.csv',mime='text/csv',key='paper_v3_export')
             else:
                 st.caption('Brak pozycji v3 dla tego instrumentu. Po skanie dopiero pełny setup generuje PENDING.')
+            rejected=[r for r in recent_scan_decisions(paper_db,200)
+                if r['source']=='Capital.com DEMO REST' and
+                   r['epic']==instrument and r['action']=='WAIT']
+            if rejected:
+                with st.expander('⛔ Odrzucone setupy / WAIT — powody i godziny'):
+                    st.dataframe(pd.DataFrame(rejected),hide_index=True,
+                        use_container_width=True)
             all_events=[e for e in recent_events(paper_db,200)
                 if any(p['trade_id']==e['trade_id'] for p in all_positions)]
             if all_events:
