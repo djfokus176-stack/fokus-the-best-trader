@@ -257,6 +257,9 @@ with st.sidebar:
         help='Wymaga interakcji z przeglądarką. Dźwięk dotyczy tylko nowych '
              'zdarzeń potwierdzonych w archiwum PAPER; przeglądarka może go zablokować. '
              'Nie oznacza rzeczywistych transakcji.')
+    if st.button('🔊 PRZETESTUJ DŹWIĘK (bez pozycji)',key='test_paper_sound'):
+        st.caption('Test dźwięku lokalnego, NIE otwiera PAPER ani zlecenia.')
+        st.audio(wav_notice('PAPER_OPEN'),format='audio/wav',autoplay=True)
     st.caption('AUTO-SKAN nie wykonuje zleceń. Płatne AI jest ręczne w CZAT AI; osobny worker może opcjonalnie uruchamiać limitowane komentarze GPT po włączeniu w GitHub.')
     st.markdown('---')
     with st.expander('🔑 KLUCZE API — TESTY / ZMIANY (już zapisane w Secrets)', expanded=False):
