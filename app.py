@@ -464,6 +464,19 @@ with market_tab:
                 st.warning('API odpowiedziało, ale ostatnia zamknięta świeca nie spełnia wymagań świeżości. Nie wyświetlam sygnału LONG/SHORT.')
         else:
             st.error('🛰️ SKAN: problem komunikacji z API — sprawdź dziennik prób poniżej.')
+    if actual_scan_this_rerun and last_record and (
+            last_record.get('bar_result')=='STALE_OR_BLOCKED'
+            or last_record.get('api_result')=='ERROR'):
+        # DATA_STALE is a THROTTLED system notification, not a trade signal.
+        if capital_env=='DEMO' and secret('PAPER_TELEGRAM_ALERTS_ENABLED','false').lower() in ('true','1','yes'):
+            try:
+                system_db=connect()
+                record_stale_event(system_db,'Capital.com DEMO REST',
+                    instrument,tf,last_record.get('error') or last_record.get('bar_result','DATA_STALE'))
+                dispatch_alerts(system_db,active_credential('TELEGRAM_BOT_TOKEN',secret,overrides),
+                    active_credential('TELEGRAM_CHAT_ID',secret,overrides),enabled=True)
+            except (OSError,sqlite3.Error,ValueError,TypeError):
+                st.warning('DATA_STALE: nie udało się zapisać/obsłużyć alertu Telegram.')
     with st.expander('🛠️ DIAGNOSTYKA AUTO-SKAN — HISTORIA PRÓB'):
         st.caption('To historia TYLKO tej sesji przeglądarki. Każdy wpis oznacza faktyczną próbę, nie automatyczną deklarację. Nie zapisuję haseł ani kluczy.')
         st.metric('Próby pobrania w tej sesji',st.session_state.get('_scan_attempt_count',0))
