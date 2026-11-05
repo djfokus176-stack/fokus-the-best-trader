@@ -937,6 +937,13 @@ with reports_tab:
                         st.error('Nie wykonano raportu CSV MTF: '+str(ex))
         csv_result=st.session_state.get('_csv_mtf_result')
         if csv_result:
+            current_file_sha=(hashlib.sha256(offline_csv.getvalue()).hexdigest()
+                              if offline_csv is not None else None)
+            if (current_file_sha!=csv_result['sha256'] or
+                csv_result['costs']!=(offline_spread,offline_slip)):
+                st.warning('⚠️ Plik CSV albo parametry kosztów zostały zmienione. Poprzedni raport ukryto — kliknij TEST OFFLINE ponownie, aby nie mieszać wyników różnych prób.')
+                csv_result=None
+        if csv_result:
             st.success(f"Raport offline: {csv_result['size']} świec M1; hash pliku SHA256: {csv_result['sha256'][:18]}…; agregaty pełne: {csv_result['counts']}.")
             st.caption('Podział 70/30 liczony PO rozgrzaniu 70 pełnych godzin H1. Reguły strategii identyczne; wariant Z MTF może odrzucać sygnały, ale nie otwiera ich sam. Każdy wariant ma własną, niepokrywającą się historię pozycji PAPER.')
             comp=csv_result['table']
