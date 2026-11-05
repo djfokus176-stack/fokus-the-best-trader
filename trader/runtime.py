@@ -11,8 +11,8 @@ def scan_delay_seconds(seconds: int) -> int:
         val = int(seconds)
     except (TypeError, ValueError):
         raise ValueError('Niepoprawny interwał odświeżania.')
-    if val not in (60, 120, 300):
-        raise ValueError('Dozwolone odświeżanie: 60, 120 lub 300 sekund.')
+    if val not in (5, 15, 30, 60, 120, 300):
+        raise ValueError('Dozwolone odświeżanie: 5, 15, 30, 60, 120 lub 300 sekund.')
     return val
 
 def current_feed_status(snap, source: str, now: datetime | None = None) -> tuple[bool, str, float | None]:
