@@ -424,7 +424,7 @@ auto_scan_heartbeat()
 
 # Independent, bounded source refresh even if the NEWS tab is not selected.
 # Never contact all five feeds on every 5-second candle redraw.
-if st.session_state.get('auto_news_active',False):
+if st.session_state.get('auto_news_active',False) and has_cap:
     refresh_news_state(st.session_state,
         fetch_news=lambda:fetch_headlines(timeout=2),
         fetch_calendar=lambda:fetch_bls_schedule(timeout=4))
