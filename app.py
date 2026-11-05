@@ -30,7 +30,7 @@ from trader.paper_lifecycle import (
     ensure_tables as ensure_paper_v3, queue_paper, progress_paper,
     active_position, recent_positions, recent_events)
 from trader.paper_display import annotate_open_paper,annotate_paper_history
-from trader.paper_sounds import unseen_paper_event,wav_notice,SOUND_EVENTS,alert_audio
+from trader.paper_sounds import new_paper_events,wav_notice,SOUND_EVENTS,alert_audio
 from trader.paper_reporting import daily_weekly,performance_by_policy
 from trader.remote_checkpoint import RemoteCheckpoint,remote_view_db,RemoteError,dump_state
 from trader.telegram_alerts import dispatch_alerts, record_stale_event
@@ -740,10 +740,25 @@ with market_tab:
                             st.caption('Punkty netto po modelowanym spreadzie i poślizgu; '
                                        'PAPER_OPEN odtworzony dopiero po zamknięciu świecy.')
                     active_audio=bool(st.session_state.get('paper_audio_enabled',False))
-                    prev_audio=st.session_state.get('_last_paper_audio_event')
-                    latest_audio,audio_event=unseen_paper_event(paper_events,prev_audio)
+                    # Establish a baseline, NOT a playback of old ledger events.
+                    # '__EMPTY__' makes a first future OPEN audible when archive
+                    # was empty at initial page load.
+                    if '_last_paper_audio_event' not in st.session_state:
+                        st.session_state['_last_paper_audio_event']=(
+                            paper_events[0].get('event_id') if paper_events else '__EMPTY__')
+                    prev_audio=st.session_state['_last_paper_audio_event']
+                    latest_audio,new_audio=new_paper_events(paper_events,prev_audio)
                     st.session_state['_last_paper_audio_event']=latest_audio
-                    if active_audio and audio_event:
+                    queued_audio=list(st.session_state.get('_paper_audio_pending',[]))
+                    if active_audio:
+                        queued_audio.extend(new_audio)
+                    else:
+                        queued_audio=[]
+                    # Events in one scan may be OPEN and CLOSE together: play
+                    # one alert per UI refresh, oldest first, never overlap.
+                    audio_event=queued_audio.pop(0) if active_audio and queued_audio else None
+                    st.session_state['_paper_audio_pending']=queued_audio[-30:]
+                    if audio_event:
                         kind=audio_event['kind']
                         st.info('🔔 '+SOUND_EVENTS[kind]+
                                 ' — zdarzenie PAPER, nie zlecenie rzeczywiste.')
