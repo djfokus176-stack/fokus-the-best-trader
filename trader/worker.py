@@ -143,21 +143,27 @@ def main(argv=None):
     args=parser.parse_args(argv)
     if args.interval<60:
         parser.error("Minimum scan interval is 60 seconds")
+    # Strict v4 safety: until the owner verifies Capital's UTC candle
+    # labeling on DEMO, collect candles and monitor existing PAPER ONLY.
+    # No new PENDING state may be created from an assumed bar clock.
+    candle_time_ok=os.getenv("FOKUS_CANDLE_TIME_CONFIRMED","").strip().lower()=="close"
     use_remote=configured()
     remote=RemoteCheckpoint.from_env() if use_remote else None
     db=connect() if not use_remote else None
     client=CapitalReadOnly(os.getenv("CAPITAL_API_KEY",""),
         os.getenv("CAPITAL_IDENTIFIER",os.getenv("CAPITAL_LOGIN","")),
         os.getenv("CAPITAL_PASSWORD",""),environment="DEMO")
+    if not candle_time_ok:
+        print("WAIT / CANDLE_TIME_UNVERIFIED: collecting DEMO candles, NEW PAPER SETUPS BLOCKED.",flush=True)
     while True:
         try:
             if use_remote:
                 message=remote_scan_once(remote,client,args.epic,args.tf,
-                    args.strategy,2.0,enable_setups=not args.disable_new_setups,
+                    args.strategy,2.0,enable_setups=(not args.disable_new_setups and candle_time_ok),
                     strict_macro=not args.skip_macro_calendar)
             else:
                 message=scan_once(client,args.epic,args.tf,args.strategy,2.0,db,
-                    enable_setups=not args.disable_new_setups,
+                    enable_setups=(not args.disable_new_setups and candle_time_ok),
                     strict_macro=not args.skip_macro_calendar,
                     telegram_token=os.getenv("TELEGRAM_BOT_TOKEN",""),
                     telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID",""),
