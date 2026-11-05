@@ -130,7 +130,7 @@ def parse_prices(payload: dict, *, quarantine_bad: bool = False) -> pd.DataFrame
                 if not (pd.notna(b) and pd.notna(a)):
                     raise ValueError('NaN ceny BID/ASK')
                 if b > a:
-                    raise ValueError('bid > ask')
+                    raise ValueError(f'{field}: bid > ask')
                 row[field] = (b + a) / 2
                 if field == 'Close':
                     row['Bid'] = b
@@ -203,7 +203,11 @@ def evaluate_snapshot(raw: pd.DataFrame, epic: str, resolution: str,
     quote_spread = float(raw.iloc[-1]['Spread'])  # newest/forming bar, never model history
     if quarantined:
         first=quarantined[0]
+        from collections import Counter
+        counts=Counter(x["issue"] for x in quarantined)
+        categories=", ".join(f"{k}={v}" for k,v in counts.most_common(4))
         reason=(f'DANE_WADLIWE: odrzucono {len(quarantined)} rekordów, '
+                f'przyczyny {categories}; '
                 f'np. {first["candle_utc"]}: {first["issue"]}. '
                 'Wykres tylko historyczny; LONG/SHORT zablokowane do czystego odczytu.')
     elif raw.index[-1] <= confirmed.index[-1]:
