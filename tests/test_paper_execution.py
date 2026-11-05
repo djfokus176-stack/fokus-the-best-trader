@@ -7,8 +7,8 @@ from trader.strategy import simulate_outcome
 def bars(open_price,high,low,n=3):
     idx=pd.date_range('2026-11-04',periods=n,freq='min',tz='UTC')
     return pd.DataFrame({
-        'Open':[open_price]*n,'High':[high]*n,'Low':[low]*n,
-        'Close':[open_price]*n},index=idx)
+        'Open':[float(open_price)]*n,'High':[float(high)]*n,'Low':[float(low)]*n,
+        'Close':[float(open_price)]*n},index=idx)
 
 @pytest.mark.parametrize('side,stop,target,high,low,expected',[
     ('LONG',98,102,102.1,99,1.40),
