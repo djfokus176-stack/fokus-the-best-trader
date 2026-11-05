@@ -27,7 +27,9 @@ CAPITAL_PASSWORD             (hasło Capital.com API DEMO)
 ```
 **Nie umieszczaj prawdziwego klucza Supabase w repozytorium, TXT, screenie, URL, otwartym JS ani w przeglądarce.** Nowoczesny klucz Secret jest przeznaczony wyłącznie na backend. Repo nie zawiera Twoich sekretów.
 
-**D. W GitHub Actions uruchom pojedynczy test ręczny.** W `Settings → Secrets and variables → Actions → Variables` ustaw `FOKUS_PAPER_WORKER_ENABLED=true` **dopiero** po konfiguracji kroku A–C. Następnie Actions → `FOKU$ PAPER v4 - scheduled DEMO scan (optional)` → `Run workflow`. Sprawdź status `CLOUD_CHECKPOINT_VERSION=1` i czy w Supabase `version` wzrosła. Gdy chcesz wyłączyć, zmień tę repo variable na `false`. Zaplanowane wywołania są BEST EFFORT co 5 minut — mogą się opóźniać.
+**D. Uruchom próbny skan tylko po konfiguracji — najpierw archiwizacja, potem PAPER.** W `Settings → Secrets and variables → Actions → Variables` ustaw `FOKUS_PAPER_WORKER_ENABLED=true` **dopiero** po konfiguracji kroku A–C. Następnie Actions → `FOKU$ PAPER v4 - scheduled DEMO scan (optional)` → `Run workflow`. Sprawdź status `CLOUD_CHECKPOINT_VERSION=1` i czy w Supabase `version` wzrosła. Gdy chcesz wyłączyć, zmień tę repo variable na `false`. Zaplanowane wywołania są BEST EFFORT co 5 minut — mogą się opóźniać.
+
+**Krytyczny bezpiecznik zegara:** dopóki nie zweryfikujesz `snapshotTimeUTC` na prawdziwych świecach DEMO, worker gromadzi OHLC, ale **NIE tworzy nowych pozycji PAPER**. W raporcie pracy pojawia się `CANDLE_TIME_UNVERIFIED` / `SETUPS_DISABLED`. Po porównaniu zegara API z wykresem brokera i potwierdzeniu, że timestamp jest godziną **ZAMKNIĘCIA**, możesz ustawić w GitHub Actions Variables `FOKUS_CANDLE_TIME_CONFIRMED=close`. **Nie ustawiaj tego w ciemno.** Jeśli broker opisuje czas OTWARCIA, najpierw trzeba dostosować przesunięcia czasu w silniku, a nie włączać setupy.
 
 **E. Streamlit Cloud → My Apps → FOKU$ → Settings → Secrets**, zachowaj istniejące klucze, dopisz:
 ```toml
