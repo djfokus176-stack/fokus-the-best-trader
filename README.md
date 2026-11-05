@@ -1,3 +1,37 @@
+# 🚀 FOKU$ THE BEST TRADER — PAPER v4: przygotowana chmura (NIE AKTYWOWANA)
+
+**Stan faktyczny:** do repozytorium dodano prywatny model bazy Supabase,
+checkpoint PAPER w wersji CAS, archiwum zamkniętych OHLC, worker z odczytem
+z chmury i zapisem po skanie, opcjonalny podgląd remote w Streamlit,
+opcjonalny workflow GitHub Actions co około 5 minut oraz przycisk
+diagnostyki czasu świec Capital.com.
+
+**Żaden z tych komponentów nie jest jeszcze podłączony do działającej,
+dedykowanej bazy projektu ani nie jest uruchomiony z rzeczywistymi
+kluczami użytkownika.** GitHub Actions jest domyślnie wyłączony zmienną
+`FOKUS_PAPER_WORKER_ENABLED`. Bez niej ani bez wymaganych Secrets
+nie uruchamia skanów. Zegar 5-minutowy GitHub Actions jest best-effort,
+nie jest usługą 24/7 co minutę.
+
+**Instrukcja jednorazowego uruchomienia:**
+[dokumentacja/PAPER_V4_SETUP.md](dokumentacja/PAPER_V4_SETUP.md)
+
+**Migracja SQL nowej, osobnej bazy:**
+[dokumentacja/supabase_paper_v4.sql](dokumentacja/supabase_paper_v4.sql)
+
+**Bezpieczeństwo:** bez realnych zleceń brokerskich, źródło DEMO,
+tryb remote panelu tylko do odczytu, oddzielna archiwizacja danych,
+blokada konfliktu wersji przy zapisie. Telegram cloud wyłączony,
+ponieważ dotychczasowy mechanizm nie gwarantuje deduplikacji po crashu
+pomiędzy wysłaniem a zapisem.
+
+**Otwarte ryzyka:** brak potwierdzenia na prawdziwym Capital.com,
+niezweryfikowana semantyka `snapshotTimeUTC`, brak wspólnego hostingu
+i bazy dopóki właściciel nie skonfiguruje osobnego Supabase, limit
+checkpointu JSON 2,5 MB. Testy syntetyczne ≠ dowód rentowności.
+
+---
+
 ## 🧪 PAPER v3 — pozycja PENDING → OPEN → SL/TP/TIMEOUT
 
 Dostępny nowy stan pozycji **tylko dla DEMO, wyłącznie PAPER**.
