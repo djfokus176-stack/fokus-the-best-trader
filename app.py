@@ -14,7 +14,7 @@ from trader.strategies_pro import decide_any, ALL_STRATEGIES
 from trader.mtf import TIMEFRAMES, LABELS, evaluate_timeframes, filter_mtf_decision
 from trader.research import chronological_report, rolling_oos, replay, stats
 from trader.news_radar import fetch_headlines, fetch_bls_schedule, macro_blackout
-from trader.storage import connect, archive, recent, recent_scan_decisions, audit_prior_paper_signals, paper_report, legacy_outcomes_count
+from trader.storage import connect, archive, recent, recent_scan_decisions, audit_prior_paper_signals, paper_report, legacy_outcomes_count, archive_candles, load_candles
 from trader.assistant import numeric_context, answer_ai
 from trader.visuals import historical_marks
 from trader.runtime import current_feed_status, scan_delay_seconds
@@ -399,6 +399,21 @@ with market_tab:
                 except (FeedError,ValueError):
                     market_status='UNKNOWN (status API niedostępny)'
             st.session_state['_market_status']=market_status
+            # Save each CLOSED Capital series without mixing EPIC, source or TF.
+            try:
+                history_db=connect()
+                candidates=(st.session_state.get('mtf_snapshots',{})
+                    if st.session_state.get('mtf_enabled',False) and csv is None
+                    else {tf:st.session_state.get('market_snap')})
+                saved=0
+                for saved_tf,saved_snap in candidates.items():
+                    if saved_snap is not None and saved_snap.epic==instrument:
+                        saved+=archive_candles(history_db,saved_snap.frame,
+                            instrument,saved_snap.source,saved_tf)
+                st.session_state['_last_candles_saved']=saved
+                st.session_state.pop('_history_write_error',None)
+            except (OSError,sqlite3.Error,ValueError) as ex:
+                st.session_state['_history_write_error']=type(ex).__name__
             record=scan_event(scan_trigger,previous_snap,obtained,
                               market_status=market_status,requested_utc=scan_requested)
             st.session_state['_scan_log']=append_scan_log(st.session_state.get('_scan_log'),record)
@@ -783,22 +798,28 @@ with reports_tab:
     if snap is None or len(snap.frame)<125:
         st.warning('Do raportu potrzeba >=125 zamkniętych świec. Najlepiej kilkadziesiąt tysięcy świec z wiarygodnego archiwum, a nie tylko 350 z REST.')
     else:
+        try:
+            saved_candles=load_candles(connect(),instrument,src,tf)
+        except (OSError,sqlite3.Error,ValueError):
+            saved_candles=pd.DataFrame()
+        research_frame=saved_candles if len(saved_candles)>len(snap.frame) else snap.frame
+        st.caption(f'Baza świec dla {instrument}/{tf}: {len(saved_candles)} lokalnie zapisanych zamkniętych świec; raport bada {len(research_frame)}.')
         x,y=st.columns(2)
         with x:
             research_spread=st.number_input('Spread w teście (pkt)',value=float(snap.spread),min_value=0.,max_value=10.,step=.1,key='research_spread')
         with y:
             research_slip=st.number_input('Poślizg na stronę (pkt)',value=.25,min_value=0.,max_value=5.,step=.05,key='research_slip')
-        st.caption(f'Badany zbiór: {len(snap.frame)} świec {tf}. CSV nie jest ceną wykonalną. Limit przyczynowego replay: maksimum 1 pozycja na raz.')
+        st.caption(f'Badany zbiór: {len(research_frame)} świec {tf}. CSV nie jest ceną wykonalną. Limit przyczynowego replay: maksimum 1 pozycja na raz.')
         if st.button('🔬 PRZELICZ WSZYSTKIE 6 STRATEGII / HOLDOUT',type='primary',key='research_run'):
             with st.spinner('Liczenie formacji i symulacji z uwzględnieniem kosztów...'):
                 try:
-                    result=chronological_report(snap.frame,ALL_STRATEGIES,
+                    result=chronological_report(research_frame,ALL_STRATEGIES,
                         spread=research_spread,slippage=research_slip,holding=20)
                     st.session_state['_latest_research']={'table':result,
-                        'signature':f'{src}|{instrument}|{tf}|{len(snap.frame)}|{snap.frame.index[-1]}'}
+                        'signature':f'{src}|{instrument}|{tf}|{len(research_frame)}|{research_frame.index[-1]}'}
                 except (ValueError,KeyError) as ex:
                     st.error('Błąd walidacji danych: '+str(ex))
-        current_sig=f'{src}|{instrument}|{tf}|{len(snap.frame)}|{snap.frame.index[-1]}'
+        current_sig=f'{src}|{instrument}|{tf}|{len(research_frame)}|{research_frame.index[-1]}'
         research=st.session_state.get('_latest_research')
         if research and research['signature']==current_sig:
             table=research['table']
@@ -808,7 +829,7 @@ with reports_tab:
             if int(table.n.sum())<30:
                 st.warning('Łącznie mniej niż 30 rozstrzygniętych transakcji w raportowanych sekcjach. To ZA MAŁO, by mówić o przewadze.')
             if st.button('🔁 KROCZĄCE OKNA OOS — WYBRANA STRATEGIA',key='rolling_run'):
-                folds=rolling_oos(snap.frame,strategy,spread=research_spread,slippage=research_slip)
+                folds=rolling_oos(research_frame,strategy,spread=research_spread,slippage=research_slip)
                 st.dataframe(folds,hide_index=True,use_container_width=True)
         else:
             st.info('Kliknij PRZELICZ. Wyniki nie są generowane automatycznie na każdej świecy.')
@@ -831,4 +852,6 @@ with reports_tab:
             st.info('Nie zapisano nowych rozliczonych transakcji PAPER v2.')
     except (OSError,sqlite3.Error) as ex:
         st.warning('Archiwum niedostępne: '+type(ex).__name__)
+    if st.session_state.get('_history_write_error'):
+        st.warning('Błąd zapisu lokalnego archiwum świec: '+st.session_state['_history_write_error'])
     st.warning('Ważne: lokalny SQLite w Streamlit Cloud nie jest trwałą bazą. Po ponownym wdrożeniu może zostać wyczyszczony. Do autentycznego gromadzenia historii latami potrzebna jest baza zewnętrzna.')
