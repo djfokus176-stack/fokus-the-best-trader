@@ -897,16 +897,19 @@ with settings_tab:
     with st.expander('🕒 AUDYT SNAPSHOTTIMEUTC — kiedy naprawdę zaczyna się świeca?'):
         st.warning('Konwencja OPEN/CLOSE z API Capital.com nadal NIE jest zweryfikowana. Diagnostyka pokazuje hipotezę opartą na czasach — nie certyfikuje prawdziwego wykonania.')
         if st.button('📡 PORÓWNAJ SUROWE OZNACZENIA CZASU (DEMO, GET ONLY)',key='raw_time_audit'):
-            diag_client=st.session_state.get('_capital_client')
-            if diag_client is None or getattr(diag_client,'environment','')!='DEMO':
-                st.error('Najpierw połącz Capital.com DEMO i wykonaj SKANUJ ŚWIECE. Nie pobieram LIVE w tej diagnostyce.')
+            st.session_state.pop('_last_raw_time_audit',None)
+            if capital_env!='DEMO' or not has_cap:
+                st.error('Wybierz Capital.com DEMO i upewnij się, że klucze API są dostępne. Diagnostyka nie odczytuje LIVE.')
             else:
                 try:
-                    raw=CapitalReadOnly(cap_api_key,cap_identifier,cap_password,environment='DEMO').raw_candle_time_diagnostic(instrument,'MINUTE')
-                    diag=inspect_labels(raw,'MINUTE')
-                    st.session_state['_last_raw_time_audit']=diag
-                except (FeedError,ValueError) as ex:
-                    st.error('Diagnostyka API: '+type(ex).__name__)
+                    # A new client avoids AttributeError caused by an old client
+                    # instance retained in Streamlit session_state after redeploy.
+                    fresh_demo=CapitalReadOnly(cap_api_key,cap_identifier,cap_password,environment='DEMO')
+                    raw=fresh_demo.raw_candle_time_diagnostic(instrument,'MINUTE')
+                    st.session_state['_last_raw_time_audit']=inspect_labels(raw,'MINUTE')
+                except (FeedError,ValueError,TypeError,AttributeError) as ex:
+                    st.error('Diagnostyka API DEMO nie zakończyła się poprawnie: '+type(ex).__name__+
+                             '. Szczegóły możesz sprawdzić w logach Streamlit; nie publikuj kluczy.')
         if st.session_state.get('_last_raw_time_audit'):
             st.json(st.session_state['_last_raw_time_audit'])
             st.caption('Porównaj ten wynik z zegarem i świecami brokera w przeglądarce. Nie wysyłaj na screenie kluczy ani poświadczeń.')
