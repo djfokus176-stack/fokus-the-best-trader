@@ -114,7 +114,13 @@ else:
 st.markdown('''<style>
 .stApp {background: #0c1020; color: #e7edf9;}
 [data-testid="stMetric"] {background: #171f35; padding: 16px; border: 1px solid #2f3c5c; border-radius: 10px;}
-.fokus {font-size: 2.0rem; font-weight: 800; color: #87c9ff; letter-spacing: 1px;}
+.fokus {font-size: 2.4rem; font-weight: 850; color: #88d9ff; letter-spacing: .7px; text-shadow: 0 0 20px #09608077;}
+div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlockBorderWrapper"] {border-color:#273857;}
+div[data-testid="stTabs"] button {font-weight:650; padding:13px 17px; border-radius:10px 10px 0 0;}
+div[data-testid="stButton"] button[kind="primary"] {background:#1558aa;border:1px solid #56bcff;color:white;font-weight:750;border-radius:11px;}
+section[data-testid="stSidebar"] {background:#0b162b;}
+[data-testid="stMetricValue"] {color:#9fe3ff;}
+div[data-testid="stAlert"] {border-radius:11px;}
 .tag {background:#21304b;color:#c8defd;padding:5px 12px;border-radius:20px;font-weight:bold;}
 </style>''',unsafe_allow_html=True)
 st.markdown('<div class="fokus">⚡ FOKU$ THE BEST TRADER</div>',unsafe_allow_html=True)
@@ -126,6 +132,20 @@ def secret(name,default=''):
     if os.getenv(name):return os.getenv(name).strip()
     try: return str(st.secrets.get(name,default)).strip()
     except (FileNotFoundError,KeyError):return default
+
+
+def manual_ai_request(question, payload):
+    # Per-browser session cost limiter, NOT a global API expenditure cap.
+    try:
+        limit=min(40,max(1,int(secret('OPENAI_MAX_CALLS_PER_SESSION','12'))))
+    except ValueError:
+        limit=12
+    count=int(st.session_state.get('_paid_ai_requests',0))
+    if count>=limit:
+        return f'LIMIT: wykorzystano {count}/{limit} ręcznych zapytań AI w tej sesji. Żadne kolejne zapytanie nie zostało wysłane.'
+    st.session_state['_paid_ai_requests']=count+1
+    return answer_ai(openai_api_key,secret('OPENAI_MODEL','gpt-5.4'),question,
+                     payload,effort=secret('OPENAI_REASONING_EFFORT','high'))
 
 with st.sidebar:
     st.header('⚙️ NOWE USTAWIENIA')
@@ -251,6 +271,7 @@ with st.sidebar:
             st.dataframe(st.session_state['epic_matches'],hide_index=True,use_container_width=True)
     else:
         st.warning('⚠️ Brak API Capital.com. Możesz analizować własny CSV.')
+    st.caption(f"🧠 AI: {st.session_state.get('_paid_ai_requests',0)} ręcznych zapytań w bieżącej sesji. Bez automatycznych opłat GPT.")
     st.info('Streamlit Cloud nie gwarantuje skanera działającego 24/7. Do tego potrzebny osobny worker na stale działającym hoście.')
 
 market_tab,dna_tab,mtf_tab,strategies_tab,lab_tab,news_tab,reports_tab,archive_tab,settings_tab=st.tabs([
@@ -528,7 +549,7 @@ with market_tab:
                     question=st.text_input('Co chcesz wyjaśnić?',value='Dlaczego WAIT/LONG/SHORT i co unieważniłoby setup?')
                     if st.button('Zapytaj AI o te świece'):
                         if st.session_state.get('ai_context'):
-                            st.write(answer_ai(openai_api_key,secret('OPENAI_MODEL','gpt-5.4'),question,st.session_state['ai_context'], effort=secret('OPENAI_REASONING_EFFORT','high')))
+                            st.write(manual_ai_request(question,st.session_state['ai_context']))
                         else:st.warning('AI wymaga wiarygodnego, aktualnego zestawu zamkniętych świec Capital.com.')
             else:
                 chart_slot.plotly_chart(fig,use_container_width=True)
@@ -753,8 +774,7 @@ with news_tab:
                     'source':x['źródło'],'url':x['url']} for x in news[:12]]
                 context['calendar_BLS']=[{'event':x['wydarzenie'],'datetime_utc':x['data_utc'].isoformat()} for x in events[:12]]
                 context['not_live_when_missing']=not bool(st.session_state.get('ai_context'))
-                st.write(answer_ai(openai_api_key,secret('OPENAI_MODEL','gpt-5.4'),
-                    q,context,effort=secret('OPENAI_REASONING_EFFORT','high')))
+                st.write(manual_ai_request(q,context))
 
 
 with reports_tab:
