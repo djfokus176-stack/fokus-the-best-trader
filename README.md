@@ -1,4 +1,4 @@
-# 🚀 FOKU$ THE BEST TRADER — v0.2
+# 🚀 FOKU$ THE BEST TRADER — v0.3 MASTER RESEARCH
 
 ## Wygodne logowanie bez wpisywania hasła co chwilę
 
