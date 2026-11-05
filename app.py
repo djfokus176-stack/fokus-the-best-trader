@@ -187,6 +187,7 @@ def paper_view_db():
         st.session_state['_paper_remote_meta']=payload.get('meta') or {}
         st.session_state['_paper_remote_auto_ai']=payload.get('auto_ai') or {}
         st.session_state['_paper_remote_candidates']=payload.get('candidate_feed') or []
+        st.session_state['_paper_remote_news']=payload.get('news_radar') or {}
         return db
     return connect()
 
@@ -443,6 +444,11 @@ with market_tab:
         if st.session_state.get('auto_scan_active'):
             st.success(f"🟢 LIVE CENA: co {st.session_state.get('auto_scan_period',5)} s • "
                        "świece/strategie: co najmniej 60 s • tylko otwarta strona")
+            st.caption('🧠 Ostatnia analiza zamkniętych świec (UTC): '+
+                str(st.session_state.get('last_scan_utc','JESZCZE BRAK'))+
+                ' | 📰 RSS: '+str(st.session_state.get('_news_read_utc','JESZCZE BRAK'))+
+                ' | BLS: '+('AKTUALNY' if calendar_is_current(st.session_state)
+                           else 'NIEPOTWIERDZONY'))
         else:
             st.info('⚪ TRYB RĘCZNY — nowe świece wymagają ponownego skanowania.')
     with col2:
@@ -1329,6 +1335,19 @@ with reports_tab:
                 else:
                     st.warning("Brak potwierdzonego skanu workera w chmurze. Cloud jest skonfigurowany, ale skaner mógł jeszcze nigdy nie wystartować.")
                 candidates=st.session_state.get('_paper_remote_candidates') or []
+                worker_news=st.session_state.get('_paper_remote_news') or {}
+                with st.expander('📰 NEWS RADAR WORKERA (BEZ PRZEGLĄDARKI)'):
+                    st.caption('Oficjalne RSS FED/BLS/BEA zbierane przez GitHub workera '
+                               'co około 15 minut, jeśli worker rzeczywiście się uruchamia. '
+                               'To nie jest osobna płatna analiza GPT.')
+                    st.write('Status:',worker_news.get('status','NIEURUCHOMIONY'),
+                             '| Ostatni odczyt UTC:',
+                             worker_news.get('last_fetch_utc','BRAK'))
+                    if worker_news.get('headlines'):
+                        st.dataframe(pd.DataFrame(worker_news['headlines'][:15]),
+                            hide_index=True,use_container_width=True)
+                    if worker_news.get('errors'):
+                        st.json(worker_news['errors'])
                 with st.expander('🔎 ARCHIWUM RADARU — SUROWE SYGNAŁY I POWODY BLOKAD',expanded=True):
                     st.caption('Nie są to pozycje PAPER ani zweryfikowane typy. Zapis z workera '
                                'na kolejnych zamkniętych świecach, również gdy decyzją jest WAIT.')
