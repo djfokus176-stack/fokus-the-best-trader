@@ -74,6 +74,24 @@ Bramka hasłowa chroni aplikację przed przypadkowym dostępem, ale **nie zastę
 
 **CAŁKOWICIE NOWY PROJEKT.** Nowe repo `fokus-the-best-trader`, nowe `app.py`, nowy moduł analityczny, nowe archiwum. ZERO integracji, push/pull czy użycia git remote `sp500-kolega-gemini`. Stary kod nie jest tu skopiowany.
 
+## 🧪 Odtwarzalny CSV M1 — wpływ filtra MTF na 6 strategii
+
+Dostępny w panelu **📈 RAPORTY → CSV M1 (OFFLINE)**. Porównuje sześć strategii
+przy stałym spreadzie i poślizgu, w wariantach **bez MTF / z MTF**, na
+chronologicznym podziale 70/30 **po** rozgrzewce 70 kompletnych godzin H1.
+Wyższe interwały M5/M15/H1 są jawnie wyliczane z M1 z oznaczeniami
+zamknięcia UTC (to nie są osobne szeregi Capital.com). Raport ma SHA256 CSV,
+tabelę veto MTF i eksport pojedynczych symulacji. Nie jest to dowód zysków.
+
+**Instrukcja formatu, wymagań i ograniczeń:** [dokumentacja/CSV_MTF_PAPER.md](dokumentacja/CSV_MTF_PAPER.md).
+
+**Testy:** w CI uruchamiamy osobno Python 3.11 i Python 3.12. W lokalnym
+środowisku niektóre ostrzeżenia NumPy/Streamlit mogą zależeć od innych
+wersji bibliotek. Zmiana w `trader/chart_tracker.py` zastępuje
+`pd.Timedelta` przez `datetime.timedelta` dla osi znacznika BOT.
+
+---
+
 ## Audyt UX — cache strzałek i czat (5 listopada 2026)
 
 - **Cache strzałek:** `trader/arrow_cache.py` używa Streamlit `st.cache_data`, z limitem 40 wpisów i TTL 30 min. Klucz obejmuje **całą zawartość** DataFrame zamkniętych świec oraz EPIC, źródło, TF, strategię i okno. Odświeżenie interfejsu bez zmiany danych może ponownie wykorzystać wynik; NOWA lub skorygowana świeca powoduje ponowne obliczenie. Nie gwarantujemy poprawy na wszystkich komputerach i rozmiarach historii.
