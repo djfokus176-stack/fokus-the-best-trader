@@ -36,6 +36,9 @@ def test_long_waits_for_next_closed_bar_and_then_tp(tmp_path):
     assert progress_paper(db,b1,"US500",SRC,"MINUTE")==[]
     live=active_position(db,"US500",SRC,"MINUTE")
     assert live["entry_executable"]==100.3
+    assert pd.Timestamp(live["entry_assumed_utc"])==T0
+    assert pd.Timestamp(live["opened_utc"])==T0+pd.Timedelta(minutes=1)
+    assert pd.Timestamp(live["entry_detected_utc"]).tzinfo is not None
     # Subsequent TP.
     b2=candles([[100,101,99,100.8],[100.8,102.3,100.5,102.1]])
     assert progress_paper(db,b2,"US500",SRC,"MINUTE")==["PAPER_CLOSE_TP"]
@@ -147,3 +150,31 @@ def test_bad_setup_geometry_or_finite_prevent_pending(tmp_path):
     ):
         assert queue_paper(db,"US500",SRC,"MINUTE",d,T0,.6) is None
     assert recent_positions(db)==[]
+
+
+def test_forward_migration_preserves_existing_position(tmp_path):
+    db=connect(tmp_path/"migration.sqlite3")
+    db.execute("""CREATE TABLE paper_positions_v3 (
+       trade_id TEXT PRIMARY KEY, epic TEXT NOT NULL,
+       source TEXT NOT NULL, timeframe TEXT NOT NULL, strategy TEXT NOT NULL,
+       side TEXT NOT NULL,setup_utc TEXT NOT NULL,setup_reason TEXT NOT NULL,
+       stop_mid REAL NOT NULL,target_mid REAL NOT NULL,
+       setup_spread REAL NOT NULL,slippage REAL NOT NULL,status TEXT NOT NULL,
+       opened_utc TEXT,closed_utc TEXT,entry_mid REAL,entry_executable REAL,
+       exit_mid REAL,exit_executable REAL,pnl_pts REAL,
+       bars_held INTEGER NOT NULL DEFAULT 0, close_reason TEXT DEFAULT '',
+       model_version TEXT DEFAULT 'v3_paper_close_only',
+       created_utc TEXT NOT NULL,updated_utc TEXT NOT NULL)""")
+    db.execute("""INSERT INTO paper_positions_v3
+       (trade_id,epic,source,timeframe,strategy,side,setup_utc,setup_reason,
+       stop_mid,target_mid,setup_spread,slippage,status,created_utc,updated_utc)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+       ('old','US500',SRC,'MINUTE','EMA TREND','LONG',T0.isoformat(),
+        'historical',98,102,.6,.25,'PENDING',T0.isoformat(),T0.isoformat()))
+    db.commit()
+    ensure_tables(db)
+    assert active_position(db,'US500',SRC,'MINUTE')['trade_id']=='old'
+    cols={r[1] for r in db.execute("PRAGMA table_info(paper_positions_v3)")}
+    assert {'entry_assumed_utc','entry_detected_utc'}.issubset(cols)
+    ensure_tables(db)
+    assert len(recent_positions(db))==1
