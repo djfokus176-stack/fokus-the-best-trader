@@ -59,9 +59,16 @@ def scan_once(client,epic,tf,strategy,max_spread,db, *,
     transitions=[]
     for resolution,snapshot in snapshots.items():
         if snapshot.good:
-            archived+=archive_candles(db,snapshot.frame,epic,snapshot.source,resolution)
+            # Local PAPER uses SQLite candle_history; remote PAPER has a
+            # dedicated Supabase OHLC table, not this ephemeral SQLite table.
+            if remote is None:
+                archived+=archive_candles(db,snapshot.frame,epic,snapshot.source,resolution)
             transitions.extend(progress_paper(db,snapshot.frame,epic,snapshot.source,
                                               resolution,max_holding=20))
+    if remote is not None:
+        # Persist OHLC before optional billable commentary. A failed cloud
+        # write aborts the scan instead of charging for an unsaved analysis.
+        archived=remote.upsert_candles(snapshots,epic)
     if strategy==AUTO_MODE:
         verdict,auto_votes=evaluate_auto(main.frame,main.spread,snapshots,
                                           asof=main.confirmed_utc,use_mtf=True)
@@ -105,8 +112,6 @@ def scan_once(client,epic,tf,strategy,max_spread,db, *,
                            main.spread,slippage=slippage,market_status=status)
     if telegram_enabled:
         dispatch_alerts(db,telegram_token,telegram_chat_id,enabled=True)
-    if remote is not None:
-        remote.upsert_candles(snapshots,epic)
     active=active_position(db,epic,main.source,tf)
     state=active["status"] if active else "NONE"
     return (f"{main.confirmed_utc.isoformat()} / {verdict.action} / "
@@ -137,7 +142,7 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
         status=scan_once(client,epic,tf,strategy,max_spread,db,
                          enable_setups=enable_setups,strict_macro=strict_macro,
                          calendar_fetch=calendar_fetch,telegram_enabled=False,
-                         reviewer=review_snapshot)
+                         remote=remote,reviewer=review_snapshot)
         payload=dump_state(db)
         if isinstance(auto_state,dict):
             payload["auto_ai"]=auto_state
