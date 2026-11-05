@@ -8,7 +8,7 @@ def test_marks_use_closed_prefixes(monkeypatch):
     def fake_decide(df, strategy, spread):
         seen.append((len(df), df.index[-1], spread))
         return Decision("LONG", strategy, "test", entry=float(df.Close.iloc[-1]))
-    monkeypatch.setattr(visuals, "decide", fake_decide)
+    monkeypatch.setattr(visuals, "decide_any", fake_decide)
     n = 82
     idx = pd.date_range("2026-11-04", periods=n, freq="min", tz="UTC")
     df = pd.DataFrame({"Open":range(n),"High":[k+1 for k in range(n)],
