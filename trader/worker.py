@@ -146,7 +146,10 @@ def main(argv=None):
     # Strict v4 safety: until the owner verifies Capital's UTC candle
     # labeling on DEMO, collect candles and monitor existing PAPER ONLY.
     # No new PENDING state may be created from an assumed bar clock.
-    candle_time_ok=os.getenv("FOKUS_CANDLE_TIME_CONFIRMED","").strip().lower()=="close"
+    # Capital REST raw candles look OPEN-labelled; market.candles shifts to
+    # CLOSE-time internally. Require explicit owner confirmation of "open".
+    # The old "close" value must NEVER enable new PAPER entries.
+    candle_time_ok=os.getenv("FOKUS_CANDLE_TIME_CONFIRMED","").strip().lower()=="open"
     use_remote=configured()
     remote=RemoteCheckpoint.from_env() if use_remote else None
     db=connect() if not use_remote else None
