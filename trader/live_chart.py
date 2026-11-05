@@ -57,6 +57,7 @@ def show_quote_preview(fig, preview, *, bars, visible_bars=30, auto_zoom=True):
     if preview is not None:
         rising=preview["Close"]>=preview["Open"]
         color="#26da93" if rising else "#ff4561"
+        provider_ohlc=preview.get("source")=="Capital.com /prices • bieżąca OHLC"
         fig.add_trace(go.Candlestick(
             x=[preview["time"]],open=[preview["Open"]],
             high=[preview["High"]],low=[preview["Low"]],close=[preview["Close"]],
@@ -64,14 +65,16 @@ def show_quote_preview(fig, preview, *, bars, visible_bars=30, auto_zoom=True):
                         "fillcolor":"rgba(38,218,147,0.55)"},
             decreasing={"line":{"color":"#ff4561","width":3},
                         "fillcolor":"rgba(255,69,97,0.55)"},
-            name="LIVE MID • niepełna świeca z próbek REST",
+            name=("LIVE /prices • świeca w trakcie (NIE PAPER)" if provider_ohlc
+                  else "LIVE MID • niepełna świeca z próbek REST"),
             hovertemplate=None,showlegend=True))
         fig.add_trace(go.Scatter(
             x=[preview["time"]],y=[preview["Close"]],
             mode="markers+text",text=["◀ LIVE (próbki)"],
             textposition="middle right",textfont={"color":color,"size":12},
             marker={"symbol":"circle","size":9,"color":color},
-            name="Bieżący MID (próbki co kilka sekund)",
+            name=("Bieżący MID /prices" if provider_ohlc else
+                  "Bieżący MID (próbki co kilka sekund)"),
             hovertemplate="Wstępny MID %{y:.2f}<br>Data próbki %{x}<extra></extra>"))
     if bars is not None and not bars.empty:
         n=max(15,min(int(visible_bars),len(bars)))

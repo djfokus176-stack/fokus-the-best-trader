@@ -593,22 +593,20 @@ with market_tab:
     elif st.session_state.get('last_feed_error'):
         st.error('❌ Ostatnia próba skanowania: '+st.session_state['last_feed_error'])
     if scheduled_live_quote and not actual_scan_this_rerun:
-        # A single quick /markets GET, never the heavy 350-bar OHLC endpoint.
-        # Never use these quote samples for trade decisions.
+        # Legacy v7 animated the current OHLC through Capital /prices.
+        # Fetch JUST TWO raw bars at 5s intervals for visual display,
+        # never adding provisional data to EMA, decisions or PAPER ledger.
         try:
             if '_capital_client' not in st.session_state:
                 st.session_state['_capital_client']=CapitalReadOnly(
                     cap_api_key,cap_identifier,cap_password,environment=capital_env)
             if time.monotonic()>=st.session_state.get('_quote_backoff_until',0):
-                quote=st.session_state['_capital_client'].market_quote(instrument)
-                st.session_state['_live_quote']=quote
-                st.session_state['_market_status']=quote.status
-                st.session_state['_live_quote_error']=None
-                st.session_state['_live_samples']=quote_sample(
-                    st.session_state.get('_live_samples'),quote,tf)
+                form=st.session_state['_capital_client'].forming_candle(instrument,tf)
+                st.session_state['_forming_preview']=form
+                st.session_state['_forming_read_at']=time.monotonic()
+                st.session_state['_forming_error']=None
         except (FeedError,ValueError) as ex:
-            st.session_state['_live_quote']=None
-            st.session_state['_live_quote_error']=str(ex)[:160]
+            st.session_state['_forming_error']=str(ex)[:180]
             if '429' in str(ex):
                 st.session_state['_quote_backoff_until']=time.monotonic()+60
     snap=st.session_state.get('market_snap')
@@ -685,19 +683,31 @@ with market_tab:
                 and st.session_state.get('auto_scan_active',False)
                 and src==f'Capital.com {capital_env} REST'
                 and (datetime.now(timezone.utc)-live_quote.received_utc).total_seconds()<=30)
-            if quote_current:
+            form=st.session_state.get('_forming_preview') or {}
+            form_current=bool(
+                form.get('epic')==instrument and form.get('environment')==capital_env
+                and form.get('timeframe')==tf
+                and st.session_state.get('auto_scan_active',False)
+                and src==f'Capital.com {capital_env} REST'
+                and time.monotonic()-st.session_state.get('_forming_read_at',-1e10)<=20
+                and form.get('time') is not None
+                and pd.Timestamp(form['time'])>pd.Timestamp(snap.confirmed_utc))
+            if form_current or quote_current:
                 q1,q2,q3,q4=st.columns(4)
-                q1.metric('⚡ BIEŻĄCY MID • REST',f'{live_quote.mid:.2f}')
-                q2.metric('BID',f'{live_quote.bid:.2f}')
-                q3.metric('OFFER',f'{live_quote.ask:.2f}')
-                q4.metric('BIEŻĄCY SPREAD',f'{live_quote.spread:.2f} pkt')
-                st.caption('⚡ Cena z bieżącego snapshotu Capital.com, '
-                           'nie pełna świeca ani wykonany kurs zlecenia. '
-                           'Czas brokera UTC: '+live_quote.update_utc.isoformat())
+                mid=float(form['Close']) if form_current else live_quote.mid
+                bid=float(form['bid']) if form_current else live_quote.bid
+                ask=float(form['ask']) if form_current else live_quote.ask
+                spread=float(form['spread']) if form_current else live_quote.spread
+                q1.metric('⚡ BIEŻĄCY MID • REST',f'{mid:.2f}')
+                q2.metric('BID',f'{bid:.2f}')
+                q3.metric('OFFER',f'{ask:.2f}')
+                q4.metric('BIEŻĄCY SPREAD',f'{spread:.2f} pkt')
+                st.caption('⚡ PODGLĄD NIEPEŁNEJ ŚWIECY Capital.com /prices' if form_current
+                    else '⚡ Podgląd notowania /markets. Nie jest to broker fill.')
             elif st.session_state.get('auto_scan_active',False):
-                detail=st.session_state.get('_live_quote_error') or (
-                    'Brak świeżego snapshotu BID/OFFER; rynek może być zamknięty '
-                    'lub czas dostawcy opóźniony.')
+                detail=(st.session_state.get('_forming_error')
+                        or st.session_state.get('_live_quote_error')
+                        or 'Brak nowej świecy: rynek może być zamknięty lub API opóźnione.')
                 st.warning('⚠️ LIVE: '+str(detail)[:210])
             if snap.quote_spread is not None:
                 st.caption(f'Spread najnowszej świecy (może być niezamknięta): {snap.quote_spread:.2f} pkt. Do logiki strategii używany jest spread świecy zamkniętej.')
@@ -716,16 +726,21 @@ with market_tab:
                         opacity=.55,annotation_text='Potwierdzony swing LOW')
             # No historical setup arrows. Add an explicitly non-tradable
             # forming candle built from sampled current BID/OFFER MID quotes.
-            preview=sampled_preview(st.session_state.get('_live_samples',[]),
-                         closed_time=snap.confirmed_utc) if quote_current else None
+            preview=(form if form_current else
+                sampled_preview(st.session_state.get('_live_samples',[]),
+                    closed_time=snap.confirmed_utc) if quote_current else None)
             show_quote_preview(fig,preview,bars=snap.frame,
                  visible_bars=st.session_state.get('chart_window_size',30),
                  auto_zoom=st.session_state.get('chart_price_autoscale',True))
             if preview is not None:
-                st.caption('🟢/🔴 Bieżąca świeca po PRAWEJ jest niepełna: '
-                    f'{preview["samples"]} próbek ceny MID z REST. '
-                    'Wysokie/niskie obejmują tylko odczytane próbki (nie wszystkie ticki). '
-                    'Nie liczy się do EMA, LONG/SHORT ani PAPER.')
+                if preview.get('source')=='Capital.com /prices • bieżąca OHLC':
+                    st.caption('🕯️ LIVE: tworząca się świeca z bieżących danych OHLC '
+                        'Capital.com /prices, odświeżanych co wybrane 5–300 s. '
+                        'Nie jest jeszcze zamknięta, nie liczy się do EMA, '
+                        'LONG/SHORT ani PAPER.')
+                else:
+                    st.caption('🕯️ LIVE: niepełna świeca z próbek BID/OFFER; '
+                        'nie jest wejściem, zleceniem ani zamkniętą świecą.')
             fig.update_layout(height=570,xaxis_rangeslider_visible=False,template='plotly_dark',
                               paper_bgcolor='#111a2d',plot_bgcolor='#111a2d',legend_orientation='h',
                               margin={'l':15,'r':15,'t':30,'b':10})
