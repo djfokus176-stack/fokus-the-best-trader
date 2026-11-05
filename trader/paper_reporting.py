@@ -59,3 +59,29 @@ def daily_weekly(db, source="Capital.com DEMO REST", epic=None):
     for name,group in all_rows.groupby("week",sort=True):
         w.append({"okres":name,**_metrics(group)})
     return pd.DataFrame(d),pd.DataFrame(w),_metrics(all_rows)
+
+
+
+def performance_by_policy(db, epic, source="Capital.com DEMO REST"):
+    """Separate experimental adaptive PAPER from baseline fixed exits."""
+    ensure_tables(db)
+    db.row_factory=sqlite3.Row
+    rows=db.execute("""SELECT exit_policy,status,pnl_pts FROM paper_positions_v3
+        WHERE epic=? AND source=?
+          AND status IN ('CLOSED_SL','CLOSED_TP','CLOSED_TIMEOUT')
+          AND pnl_pts IS NOT NULL""",(epic,source)).fetchall()
+    result={}
+    for row in rows:
+        policy=row["exit_policy"] or "fixed"
+        item=result.setdefault(policy,{"Wariant":policy,"Zamknięte":0,
+            "Dodatnie P&L":0,"Suma pkt":0.0,"Wyjścia SL":0})
+        item["Zamknięte"]+=1
+        item["Suma pkt"]+=float(row["pnl_pts"])
+        if float(row["pnl_pts"])>0:
+            item["Dodatnie P&L"]+=1
+        if row["status"]=="CLOSED_SL":
+            item["Wyjścia SL"]+=1
+    for r in result.values():
+        r["Suma pkt"]=round(r["Suma pkt"],2)
+        r["Skuteczność %"]=round(100*r["Dodatnie P&L"]/r["Zamknięte"],1)
+    return [result[k] for k in sorted(result)]

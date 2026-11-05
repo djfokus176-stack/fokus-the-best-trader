@@ -91,3 +91,25 @@ def test_non_demo_is_never_sent_to_ai():
         env={"FOKUS_AUTO_AI_ENABLED":"true","OPENAI_API_KEY":"testing"},
         call=lambda **kw: (_ for _ in ()).throw(AssertionError("non DEMO")))
     assert state["status"]=="SKIP_NON_DEMO_FEED"
+
+
+def test_raw_long_candidate_in_wait_gets_bounded_paid_research_review():
+    seen=[]
+    def fake(**kwargs):
+        seen.append(kwargs)
+        return answer()
+    env={"FOKUS_AUTO_AI_ENABLED":"true","OPENAI_API_KEY":"test",
+         "FOKUS_AUTO_AI_DAILY_LIMIT":"1",
+         "FOKUS_AUTO_AI_MONTHLY_LIMIT":"1"}
+    raw=[{"Strategia":"EMA TREND","Setup OHLC":"LONG",
+          "Po filtrze MTF":"WAIT","RR":1.7,"Powód":"MTF not ready"}]
+    state=review_closed_candle({},snapshot(),verdict("WAIT"),raw,[],
+        ["INCOMPLETE_MTF"],env=env,call=fake)
+    assert state["status"]=="SUCCESS"
+    assert len(seen)==1
+    assert '"unapproved_research_candidate_only": true' in seen[0]["input"]
+    assert seen[0]["model"]=="gpt-5.4-mini"
+    state=review_closed_candle(state,snapshot(5),verdict("WAIT"),raw,[],
+        ["INCOMPLETE_MTF"],env=env,call=fake)
+    assert state["status"]=="CALL_CAP_REACHED"
+    assert len(seen)==1
