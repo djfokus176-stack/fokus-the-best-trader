@@ -121,8 +121,12 @@ def scan_once(client,epic,tf,strategy,max_spread,db, *,
             pass  # A paid commentary failure must not alter PAPER accounting.
     queued=None
     if not reasons and verdict.action in ("LONG","SHORT"):
+        policy=os.getenv("FOKUS_PAPER_EXIT_POLICY","fixed").strip().lower()
+        if policy not in ("fixed","adaptive"):
+            policy="fixed"  # reject unknown policies rather than guessing
         queued=queue_paper(db,epic,main.source,tf,verdict,main.confirmed_utc,
-                           main.spread,slippage=slippage,market_status=status)
+                           main.spread,slippage=slippage,market_status=status,
+                           exit_policy=policy)
     if telegram_enabled:
         dispatch_alerts(db,telegram_token,telegram_chat_id,enabled=True)
     active=active_position(db,epic,main.source,tf)
@@ -147,9 +151,12 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
     """
     version,payload=remote.fetch()
     auto_state=payload.get("auto_ai",{})
+    candidates=payload.get("candidate_feed",[])
     def review_snapshot(snapshot,decision,votes,views,blockers):
-        nonlocal auto_state
+        nonlocal auto_state,candidates
         from .auto_ai import review_closed_candle
+        from .candidate_radar import append_candidate
+        candidates=append_candidate(candidates,snapshot,decision,votes,blockers)
         auto_state=review_closed_candle(auto_state,snapshot,decision,votes,views,blockers)
     db=sqlite3.connect(":memory:")
     try:
@@ -161,6 +168,8 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
         payload=dump_state(db)
         if isinstance(auto_state,dict):
             payload["auto_ai"]=auto_state
+        if isinstance(candidates,list):
+            payload["candidate_feed"]=candidates[-120:]
         payload["meta"]={
             "last_scan_utc":datetime.now(timezone.utc).isoformat(),
             "last_scan_summary":status[:350],
