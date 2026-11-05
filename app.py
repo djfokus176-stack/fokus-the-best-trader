@@ -16,7 +16,8 @@ from trader.research import chronological_report, rolling_oos, replay, stats
 from trader.news_radar import fetch_headlines, fetch_bls_schedule, macro_blackout
 from trader.storage import connect, archive, recent, recent_scan_decisions, audit_prior_paper_signals, paper_report, legacy_outcomes_count, archive_candles, load_candles
 from trader.assistant import numeric_context, answer_ai
-from trader.visuals import historical_marks
+from trader.arrow_cache import cached_historical_marks
+from trader.csv_data import read_ohlc_csv
 from trader.runtime import current_feed_status, scan_delay_seconds
 from trader.scan_monitor import scan_event, append_scan_log
 from trader.chat_ui import append_message, renderable_history, preview_context
@@ -136,8 +137,13 @@ def secret(name,default=''):
     except (FileNotFoundError,KeyError):return default
 
 
-def manual_ai_request(question, payload):
+def manual_ai_request(question, payload, effort=None):
     # Per-browser session cost limiter, NOT a global API expenditure cap.
+    if len(str(question).strip()) > 800:
+        return '⚠️ Pytanie przekracza limit 800 znaków. Skróć je. Zapytanie NIE zostało wysłane.'
+    selected_effort=effort or st.session_state.get('ai_effort_choice','medium')
+    if selected_effort not in ('medium','high'):
+        return 'Niepoprawny wysiłek AI (dozwolone medium/high). Zapytanie NIE zostało wysłane.'
     try:
         limit=min(40,max(1,int(secret('OPENAI_MAX_CALLS_PER_SESSION','12'))))
     except ValueError:
@@ -147,7 +153,7 @@ def manual_ai_request(question, payload):
         return f'LIMIT: wykorzystano {count}/{limit} ręcznych zapytań AI w tej sesji. Żadne kolejne zapytanie nie zostało wysłane.'
     st.session_state['_paid_ai_requests']=count+1
     return answer_ai(openai_api_key,secret('OPENAI_MODEL','gpt-5.4'),question,
-                     payload,effort=secret('OPENAI_REASONING_EFFORT','high'))
+                     payload,effort=selected_effort)
 
 with st.sidebar:
     st.header('⚙️ NOWE USTAWIENIA')
@@ -302,18 +308,7 @@ def auto_scan_heartbeat():
 auto_scan_heartbeat()
 
 def read_csv(file):
-    data=pd.read_csv(file)
-    expected={'Time','Open','High','Low','Close'}
-    if not expected.issubset(data.columns):raise ValueError('CSV wymaga kolumn Time,Open,High,Low,Close')
-    times=pd.to_datetime(data.Time,utc=True,errors='raise')
-    data=data.set_index(times).drop(columns=['Time']).sort_index()
-    for c in ['Open','High','Low','Close']:
-        data[c]=pd.to_numeric(data[c],errors='raise')
-    if len(data)<72 or data.index.has_duplicates:raise ValueError('Wymagane >=72 świeczki bez duplikatów')
-    if (data.High<data[['Open','Low','Close']].max(axis=1)).any() or (data.Low>data[['Open','High','Close']].min(axis=1)).any():
-        raise ValueError('Niespójne OHLC')
-    data['Spread']=0.6
-    return data
+    return read_ohlc_csv(file)
 
 with market_tab:
     col1,col2=st.columns([1,2])
@@ -352,7 +347,7 @@ with market_tab:
             st.session_state.pop('last_feed_error', None)
             if csv is not None:
                 raw=read_csv(csv)
-                st.session_state['market_snap']=evaluate_snapshot(raw,instrument,tf,max_spread=max_spread)
+                st.session_state['market_snap']=evaluate_snapshot(raw,instrument,tf,max_spread=max_spread,source='CSV NAUKA (NIE LIVE)')
                 st.session_state['source_override']='CSV NAUKA (NIE LIVE)'
             elif has_cap:
                 if '_capital_client' not in st.session_state:
@@ -498,7 +493,7 @@ with market_tab:
                     fig.add_hline(y=dna.swing_low,line_color='#7fbf98',line_dash='dot',
                         opacity=.55,annotation_text='Potwierdzony swing LOW')
             visible_bars=min(len(snap.frame),int(st.session_state.get('chart_window_size',120)))
-            marks=historical_marks(snap.frame,strategy,max_bars=visible_bars)
+            marks=cached_historical_marks(snap.frame,instrument,tf,src,strategy,visible_bars)
             for direction,symbol,color,yshift in [('LONG','triangle-up','#48db98',-1),('SHORT','triangle-down','#ff6e79',1)]:
                 match=marks[marks.action==direction]
                 if not match.empty:
@@ -572,7 +567,7 @@ with market_tab:
                 record_for_chart['scan_no']=st.session_state.get('_scan_attempt_count',0)
                 annotate_scan(fig,snap.frame,decision,record_for_chart,
                               bar_limit=st.session_state.get('chart_window_size',120),
-                              resolution=tf)
+                              resolution=tf,source=src)
                 chart_slot.plotly_chart(fig,use_container_width=True)
                 st.caption('🤖 Znacznik BOT przesuwa się wyłącznie na nową ZAMKNIĘTĄ świecę po faktycznym pobraniu danych. To odczyt co 60/120/300 s, nie streaming tickowy.')
                 if ready:
@@ -619,6 +614,10 @@ with chat_tab:
         st.warning('Brak zebranych danych OHLC. Możesz pytać ogólnie, lecz AI nie powinno wtedy udawać analizy wykresu.')
     if not openai_api_key:
         st.error('Brak OPENAI_API_KEY w Secrets — nie mogę uruchomić modelu.')
+    ai_effort=st.radio('🧠 Tryb analizy GPT-5.4',options=['medium','high'],
+        index=0,horizontal=True,key='ai_effort_choice',
+        help='medium = zwykle szybciej i mniej tokenów; high = głębsze rozumowanie, zwykle dłużej i drożej.')
+    st.caption('Domyślnie medium. Wyższy wysiłek kosztuje więcej tokenów. Rzeczywista cena zależy od aktualnej taryfy API; pokazujemy liczbę zużytych tokenów, a nie wymyśloną kwotę.')
     if st.button('🗑️ Wyczyść tę rozmowę',key='clear_fokus_ai_history'):
         st.session_state['_ai_messages']=[]
         st.rerun()
@@ -630,8 +629,8 @@ with chat_tab:
     with st.form('fokus_ai_chat_form',clear_on_submit=True):
         user_query=st.text_area('Napisz pytanie do bota:',
             placeholder='Dlaczego WAIT? Jak wygląda trend, EMA, SL/TP? Jakie są ryzyka?',
-            height=95)
-        sent=st.form_submit_button('🧠 WYŚLIJ PYTANIE DO GPT-5.4 HIGH',
+            height=95,max_chars=800)
+        sent=st.form_submit_button('🧠 WYŚLIJ PYTANIE DO GPT-5.4',
             type='primary',use_container_width=True)
     if sent:
         question=user_query.strip()
@@ -660,7 +659,7 @@ with chat_tab:
             with st.chat_message('assistant'):
                 st.markdown(result)
                 st.caption('Odpowiedź została zachowana w historii sesji.')
-    st.caption('Kosztowe wywołania OpenAI wykonujemy wyłącznie na kliknięcie. Sesja przeglądarki, nie trwała baza; po resecie serwera historia może zniknąć.')
+    st.caption('Zapytania OpenAI tylko po kliknięciu; dane o zużytych tokenach pojawiają się przy odpowiedzi, jeśli API je zwróci. Historia nie jest trwała — zwykły rerun zachowuje sesję, ale odświeżenie strony, nowe logowanie lub restart serwera mogą ją wyczyścić.')
 
 
 with dna_tab:
