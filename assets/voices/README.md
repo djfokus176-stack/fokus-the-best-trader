@@ -1,52 +1,37 @@
-# FOKU$ — własne głosy z ElevenLabs
+# FOKU$ — trzy głosy z Twoich nagrań ElevenLabs
 
-Ten folder jest docelową lokalizacją plików MP3 odtwarzanych w **FOKU$ THE BEST TRADER**.
+**Folder docelowy na GitHubie:** `assets/voices/`
 
-## Dokładne nazwy (małe litery)
+Trzy pliki przekazane przez właściciela:
+- `long.mp3` → **`open_long.mp3`** — głos „Otwarcie long” wyłącznie po zdarzeniu `PAPER_OPEN` z pozycją LONG; zielona strzałka w górę.
+- `short.mp3` → **`open_short.mp3`** — głos „Otwarcie short” wyłącznie po `PAPER_OPEN` z SHORT; czerwona strzałka w dół.
+- `zamknij.mp3` → **`close.mp3`** — wspólny głos „Zamknij” po `PAPER_CLOSE_TP`, `PAPER_CLOSE_SL` albo `PAPER_TIMEOUT`; zielony kwadrat na wykresie i rzeczywisty wynik PAPER w punktach.
 
-| Plik | Kiedy zagra | Tekst do wklejenia w ElevenLabs Text to Speech |
-|---|---|---|
-| `open_long.mp3` | PAPER_OPEN dla LONG | FOKUS. Otwarta symulowana pozycja LONG. |
-| `open_short.mp3` | PAPER_OPEN dla SHORT | FOKUS. Otwarta symulowana pozycja SHORT. |
-| `close_profit.mp3` | PAPER_CLOSE_TP | FOKUS. Pozycja testowa zamknięta. Take profit! |
-| `close_stop.mp3` | PAPER_CLOSE_SL, także gdy trailing SL zamknął z zyskiem | FOKUS. Pozycja testowa zamknięta przez stop loss. |
-| `close_timeout.mp3` | PAPER_TIMEOUT | FOKUS. Pozycja testowa zamknięta po limicie czasu. |
-| `move_stop.mp3` | PAPER_TRAIL_SL | FOKUS. Przesunięto stop loss pozycji testowej. |
-| `extend_target.mp3` | PAPER_EXTEND_TP | FOKUS. Podwyższono cel zysku pozycji testowej. |
+Uwaga: nie wystarczy wgrać archiwum ZIP jako pliku do repozytorium —
+**rozpakuj** otrzymaną paczkę i przeciągnij do tego folderu trzy pliki
+`open_long.mp3`, `open_short.mp3` i `close.mp3` (nie same ZIP).
+Nazwy muszą zgadzać się dokładnie. W GitHub kliknij **Add file → Upload files**
+oraz **Commit changes** na gałęzi `main`. W Streamlit po automatycznej
+aktualizacji naciśnij Ctrl+Shift+R, włącz dźwięki PAPER, wybierz „Głos
+ElevenLabs (nagrania MP3)” i użyj przycisku „PRZETESTUJ DŹWIĘK”.
 
-**Wszystkie** pliki muszą mieć dokładnie rozszerzenie `.mp3` i nazwy
-zgodne z tabelą (wielkość liter ma znaczenie). Zalecane krótkie nagrania
-1–4 sekundy, poniżej 2 MiB każde. Dowolny model głosu ElevenLabs, do
-którego użytkownik ma prawa/zgodę.
+**Ważne:** nagranie „Zamknij” brzmi jednakowo dla straty i zysku, ale
+znacznik na wykresie wyświetla +/− punkty i powód zamknięcia.
+W przyszłości można dodać osobne `close_profit.mp3`, `close_stop.mp3`,
+`close_timeout.mp3`, które nadpiszą `close.mp3` dla odpowiednich zdarzeń.
+Jeśli zabraknie głosu, odtwarzany jest ton WAV. Dodatkowe opcjonalne:
+`move_stop.mp3` i `extend_target.mp3`.
 
-## Jak wgrać
+Dźwięki są odtwarzane tylko dla *nowych zdarzeń rejestru PAPER*; pierwsze
+otwarcie aplikacji nie odgrywa poprzedniej historii. Jeśli na tej samej
+zamkniętej świecy powstają OPEN i CLOSE, grają kolejno przy następnych
+odświeżeniach, bez nakładania nagrań. Player przeglądarki może zablokować
+autoplay; kartę trzeba wcześniej aktywować.
 
-1. W ElevenLabs otwórz Text to Speech, wybierz lektora, wklej jeden tekst
-   z tabeli, wygeneruj audio i pobierz wynik jako **MP3**. Powtórz.
-2. Zmień nazwy siedmiu pobranych plików dokładnie jak w tabeli.
-3. Na GitHub w repozytorium `djfokus176-stack/fokus-the-best-trader`
-   otwórz folder `assets/voices`, kliknij **Add file → Upload files**,
-   przeciągnij pliki i zatwierdź **Commit changes**.
-4. W Streamlit odśwież aplikację (Ctrl+Shift+R). W bocznym panelu włącz
-   **DŹWIĘKI PAPER** i wybierz **Głos ElevenLabs (nagrania MP3)**.
-   Wybierz typ dźwięku i przetestuj przyciskiem testowym.
+PAPER to symulacja wykonania na danych zamkniętych świec, bez prawdziwych
+zleceń i bez gwarancji ceny. **Wykres nie pokazuje historycznych strzałek
+kandydatów**, a jedynie zarejestrowane pozycje PAPER.
 
-Nagrania są wgrane do repozytorium. Jeśli repozytorium jest publiczne,
-również nagrania stają się publiczne. **Nie przesyłaj tu kluczy ElevenLabs,
-API, tokenów ani cudzych nagrań bez zgody.**
-
-## Reguły bezpieczeństwa
-
-- Nie jest potrzebny żaden token ElevenLabs. To lokalne, gotowe nagrania.
-- Nagrania zastępują dźwięki tylko dla nowych zdarzeń PAPER w archiwum.
-  Po pierwszym włączeniu aplikacja nie odtwarza starych alarmów.
-- Gdy MP3 nie istnieje albo jest niepoprawny/za duży, program wraca
-  automatycznie do dotychczasowego tonu WAV.
-- Zdarzenie `PAPER_OPEN` jest rekonstrukcją z zamkniętej świecy,
-  a nie zleceniem u brokera.
-- Kwota/punkty P&L zmieniają się przy każdej transakcji. **Stały MP3
-  nie potrafi przeczytać zmiennej liczby punktów**. Liczba pojawia się
-  w tabeli i na wykresie. Dynamiczna mowa liczb wymaga oddzielnego
-  rozwiązania (TTS przeglądarkowy albo płatny ElevenLabs API).
-- Przeglądarka może zablokować autoplay; po kliknięciu testowym
-  sprawdź głośność systemu i aktywną kartę.
+Pliki MP3 są przechowywane w repozytorium; **jeśli repozytorium jest
+publiczne, nagrania również będą publiczne**. Nie umieszczaj tutaj
+sekretów ani kluczy API. Nie potrzeba ElevenLabs API do odtwarzania MP3.
