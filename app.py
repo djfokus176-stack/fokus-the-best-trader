@@ -1181,12 +1181,36 @@ with reports_tab:
     if snap is None or len(snap.frame)<125:
         st.warning('Do raportu potrzeba >=125 zamkniętych świec. Najlepiej kilkadziesiąt tysięcy świec z wiarygodnego archiwum, a nie tylko 350 z REST.')
     else:
-        try:
-            saved_candles=load_candles(connect(),instrument,src,tf)
-        except (OSError,sqlite3.Error,ValueError):
+        if remote_paper_view_enabled() and src=='Capital.com DEMO REST':
+            key=f'{instrument}|{tf}|{src}'
+            if st.button('☁️ POBIERZ DO 5000 ZAMKNIĘTYCH ŚWIEC Z TRWAŁEJ BAZY',
+                         key='cloud_ohlc_fetch'):
+                try:
+                    remote=RemoteCheckpoint(secret('FOKUS_SUPABASE_URL'),
+                                            secret('FOKUS_SUPABASE_SECRET_KEY'))
+                    cloud_df=remote.fetch_candles(instrument,tf,source=src,limit=5000)
+                    st.session_state['_cloud_ohlc']={'key':key,'frame':cloud_df}
+                    st.success(f'Wczytano {len(cloud_df)} zamkniętych świec z Supabase.')
+                except (RemoteError,ValueError,TypeError) as ex:
+                    st.session_state.pop('_cloud_ohlc',None)
+                    st.error('Nie udało się wczytać świec Cloud: '+type(ex).__name__)
+            cloud_cached=st.session_state.get('_cloud_ohlc') or {}
+            saved_candles=(cloud_cached.get('frame')
+                if cloud_cached.get('key')==key else None)
+            if saved_candles is None:
+                saved_candles=pd.DataFrame()
+            st.caption(f'Cloud OHLC: {len(saved_candles)} załadowanych świec; bez pobrania nadal testujemy tylko bieżący odczyt brokera.')
+        elif remote_paper_view_enabled():
             saved_candles=pd.DataFrame()
+            st.caption('Cloud history udostępniona tylko dla Capital DEMO. Nie mieszam z LIVE lub CSV.')
+        else:
+            try:
+                saved_candles=load_candles(connect(),instrument,src,tf)
+            except (OSError,sqlite3.Error,ValueError):
+                saved_candles=pd.DataFrame()
+            st.caption(f'Lokalnie zapisane OHLC dla {instrument}/{tf}: {len(saved_candles)} świec (niegwarantowana trwałość).')
         research_frame=saved_candles if len(saved_candles)>len(snap.frame) else snap.frame
-        st.caption(f'Baza świec dla {instrument}/{tf}: {len(saved_candles)} lokalnie zapisanych zamkniętych świec; raport bada {len(research_frame)}.')
+        st.caption(f'Wersja raportu: {len(research_frame)} potwierdzonych świec. To test PAPER, nie zysk realny.')
         x,y=st.columns(2)
         with x:
             research_spread=st.number_input('Spread w teście (pkt)',value=float(snap.spread),min_value=0.,max_value=10.,step=.1,key='research_spread')
