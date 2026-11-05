@@ -34,6 +34,7 @@ from trader.auth import capital_credentials, active_credential, test_capital_log
 from trader.access import access_configured, password_matches
 from trader.owner_auth import auth_mode, owner_email_configured, google_identity_matches, google_oidc_ready
 from trader.market_dna import analyze_market
+from trader.feed_audit import inspect_labels
 
 st.set_page_config(page_title='FOKU$ THE BEST TRADER',page_icon='📈',layout='wide')
 
@@ -856,15 +857,32 @@ with settings_tab:
     st.table(pd.DataFrame([
       (f'Capital.com {capital_env} REST / OHLC','Klucze dostępne' if has_cap else 'Brak kluczy',f'Status instrumentu: {st.session_state.get("_market_status","UNKNOWN")}'),
       ('OpenAI GPT','Klucz dostępny' if openai_api_key else 'Brak klucza','Ręczne zapytania: świece, dostarczone newsy, koszty API'),
-      ('Telegram','Klucze dostępne' if secret('TELEGRAM_BOT_TOKEN') and secret('TELEGRAM_CHAT_ID') else 'Nieskonfigurowany','Wysyłanie: jeszcze niezaimplementowane'),
-      ('Niezależny worker','Kod dostępny','Wymaga uruchomienia na własnym hoście 24/7'),
+      ('Telegram','Klucze dostępne' if secret('TELEGRAM_BOT_TOKEN') and secret('TELEGRAM_CHAT_ID') else 'Nieskonfigurowany','Lokalny PAPER: opt-in, remote worker: brak wysyłki do czasu trwałego outboxu'),
+      ('Niezależny worker','Kod v4 przygotowany','GitHub Actions co ~5 min po włączeniu; brak gwarantowanego hosta 24/7'),
       ('Uczenie strategii','CZĘŚCIOWO','Replay, holdout i rolling — BEZ samodzielnej zmiany progów i bez ML'),
       ('Wiadomości i kalendarz makro','CZĘŚCIOWO','FED/BLS/BEA RSS + kalendarz BLS, brak pełnego harmonogramu FOMC'),
       ('Trading DEMO/REAL','BLOKADA','Żadnych zleceń brokerskich, tylko odczyt i PAPER'),
       ('MTF M1/M5/M15/H1','AKTYWNY' if st.session_state.get('mtf_snapshots') else 'CZEKA','4 osobne serie, brak potwierdzenia = WAIT'),
-      ('Historia świec','LOKALNA','Deduplikowany SQLite, nie gwarantuje trwałości w Cloud'),
+      ('Historia świec','REMOTE OPTIONAL' if remote_paper_view_enabled() else 'LOKALNA','Dedykowany Supabase po konfiguracji; lokalny SQLite inaczej może zniknąć'),
+      ('PAPER remote','TRYB PODGLĄDU' if remote_paper_view_enabled() else 'WYŁĄCZONY','PAPER v4 remote jest TYLKO czytnikiem w tym panelu; zapisuje wyłącznie worker'),
     ],columns=['Element','Stan','Wyjaśnienie']))
     st.caption('Klucze podawaj w Secrets aplikacji, nigdy w publicznym GitHubie. API tutaj nie są trwale zapisywane w bazie.')
+    with st.expander('🕒 AUDYT SNAPSHOTTIMEUTC — kiedy naprawdę zaczyna się świeca?'):
+        st.warning('Konwencja OPEN/CLOSE z API Capital.com nadal NIE jest zweryfikowana. Diagnostyka pokazuje hipotezę opartą na czasach — nie certyfikuje prawdziwego wykonania.')
+        if st.button('📡 PORÓWNAJ SUROWE OZNACZENIA CZASU (DEMO, GET ONLY)',key='raw_time_audit'):
+            diag_client=st.session_state.get('_capital_client')
+            if diag_client is None or getattr(diag_client,'environment','')!='DEMO':
+                st.error('Najpierw połącz Capital.com DEMO i wykonaj SKANUJ ŚWIECE. Nie pobieram LIVE w tej diagnostyce.')
+            else:
+                try:
+                    raw=diag_client.raw_candle_time_diagnostic(instrument,'MINUTE')
+                    diag=inspect_labels(raw,'MINUTE')
+                    st.session_state['_last_raw_time_audit']=diag
+                except (FeedError,ValueError) as ex:
+                    st.error('Diagnostyka API: '+type(ex).__name__)
+        if st.session_state.get('_last_raw_time_audit'):
+            st.json(st.session_state['_last_raw_time_audit'])
+            st.caption('Porównaj ten wynik z zegarem i świecami brokera w przeglądarce. Nie wysyłaj na screenie kluczy ani poświadczeń.')
 
 
 
