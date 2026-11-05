@@ -168,9 +168,16 @@ def paper_view_db():
         # Uses only Streamlit SERVER Secrets, after owner login.
         # Remote database is read-only for the dashboard; worker is
         # the one authoritative writer. Never fallback to local silently.
-        remote=RemoteCheckpoint(secret('FOKUS_SUPABASE_URL'),
-                                secret('FOKUS_SUPABASE_SECRET_KEY'))
-        version,payload=remote.fetch()
+        cached=st.session_state.get('_paper_remote_read_cache')
+        now=time.monotonic()
+        if cached is not None and now-cached["received"]<15:
+            version,payload=cached["version"],cached["payload"]
+        else:
+            remote=RemoteCheckpoint(secret('FOKUS_SUPABASE_URL'),
+                                    secret('FOKUS_SUPABASE_SECRET_KEY'))
+            version,payload=remote.fetch()
+            st.session_state['_paper_remote_read_cache']={
+                "received":now,"version":version,"payload":payload}
         db=sqlite3.connect(':memory:')
         from trader.remote_checkpoint import restore_state
         restore_state(db,payload)
