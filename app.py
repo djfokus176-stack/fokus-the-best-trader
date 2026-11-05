@@ -28,7 +28,7 @@ from trader.paper_lifecycle import (
     active_position, recent_positions, recent_events)
 from trader.paper_display import annotate_open_paper
 from trader.paper_reporting import daily_weekly
-from trader.remote_checkpoint import RemoteCheckpoint,remote_view_db,RemoteError
+from trader.remote_checkpoint import RemoteCheckpoint,remote_view_db,RemoteError,dump_state
 from trader.telegram_alerts import dispatch_alerts, record_stale_event
 from trader.auth import capital_credentials, active_credential, test_capital_login, test_openai_model, test_telegram_token
 from trader.access import access_configured, password_matches
@@ -1078,6 +1078,12 @@ with reports_tab:
                     f"Profit factor: {summary['profit_factor'] if summary['profit_factor'] is not None else 'BRAK MIARODAJNEJ STRATY'}")
             if summary['liczba']<30:
                 st.warning('Mała próba (<30 zamkniętych PAPER v3) — NIE ma dowodu rentowności.')
+            st.download_button('💾 POBIERZ PEŁNY BACKUP PAPER v3 (JSON, bez sekretów)',
+                data=json.dumps(dump_state(paper_db),ensure_ascii=False,
+                    indent=2).encode('utf-8'),
+                file_name='FOKUS_PAPER_V3_BACKUP.json',
+                mime='application/json',key='paper_full_json_backup',
+                help='Obejmuje pełne pozycje i zdarzenia z aktualnego źródła: remote albo lokalne. To kopia wrażliwej historii inwestycyjnej — przechowuj prywatnie.')
             if all_positions:
                 st.markdown('**Pozycje PENDING / OPEN / CLOSED / INVALIDATED**')
                 st.dataframe(pd.DataFrame(all_positions),hide_index=True,use_container_width=True)
