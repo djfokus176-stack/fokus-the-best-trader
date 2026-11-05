@@ -81,6 +81,13 @@ def scan_once(client,epic,tf,strategy,max_spread,db, *,
         verdict,views=filter_mtf_decision(verdict,snapshots,asof=main.confirmed_utc)
     fresh,why,_=current_feed_status(main,main.source)
     reasons=[]
+    # Report WHY a gate blocked the scan. Never log credentials or tokens.
+    diagnostics=[]
+    for resolution in TIMEFRAMES:
+        if resolution in errors:
+            diagnostics.append(f"{resolution}:FETCH_ERROR:{str(errors[resolution])[:100]}")
+        elif resolution in snapshots and not snapshots[resolution].good:
+            diagnostics.append(f"{resolution}:BAD_SNAPSHOT:{str(snapshots[resolution].reason)[:100]}")
     if not enable_setups:
         reasons.append("SETUPS_DISABLED")
     if status!="TRADEABLE":
@@ -89,6 +96,9 @@ def scan_once(client,epic,tf,strategy,max_spread,db, *,
         reasons.append("DATA_STALE")
     if errors or not all(v.ready for v in views):
         reasons.append("INCOMPLETE_MTF")
+        for view in views:
+            if not view.ready:
+                diagnostics.append(f"{view.timeframe}:MTF_NOT_READY:{str(view.reason)[:90]}")
     if strict_macro:
         try:
             calendar=calendar_fetch()
@@ -98,8 +108,11 @@ def scan_once(client,epic,tf,strategy,max_spread,db, *,
                 blackout,_=macro_blackout(calendar)
                 if blackout:
                     reasons.append("MACRO_BLACKOUT")
-        except (OSError,ValueError,TimeoutError,FeedError,TypeError):
+        except (OSError,ValueError,TimeoutError,FeedError,TypeError) as exc:
             reasons.append("MACRO_CALENDAR_UNAVAILABLE")
+            code=getattr(getattr(exc,"response",None),"status_code",None)
+            diagnostics.append("BLS_CALENDAR:"+type(exc).__name__+
+                               (f":HTTP{code}" if code else ""))
     # Optional AI is commentary only. It cannot change verdict, gates or orders.
     if reviewer is not None:
         try:
@@ -117,7 +130,9 @@ def scan_once(client,epic,tf,strategy,max_spread,db, *,
     return (f"{main.confirmed_utc.isoformat()} / {verdict.action} / "
             f"QUEUE={'YES' if queued else 'NO'} / ACTIVE={state} / "
             f"EVENTS={','.join(transitions) or '-'} / CANDLES={archived} / "
-            f"GATES={','.join(reasons) or 'OK'} / {verdict.reason}")
+            f"GATES={','.join(reasons) or 'OK'} / "
+            f"DIAGNOSTICS={' | '.join(diagnostics)[:700] or '-'} / "
+            f"{verdict.reason}")
 
 
 def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
