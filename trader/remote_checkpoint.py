@@ -114,6 +114,42 @@ class RemoteCheckpoint:
             raise RemoteError("Supabase potwierdził inną wersję checkpointu")
         return int(expected_version)+1
 
+    def fetch_candles(self,epic,timeframe,source="Capital.com DEMO REST",
+                      limit=5000):
+        """Owner-side read-only durable OHLC, page through 1000-row API limits."""
+        import pandas as pd
+        if source!="Capital.com DEMO REST" or timeframe not in (
+                "MINUTE","MINUTE_5","MINUTE_15","HOUR"):
+            raise RemoteError("Cloud research supports Capital DEMO OHLC only")
+        limit=min(5000,max(1,int(limit)))
+        all_rows=[]
+        for offset in range(0,limit,1000):
+            batch_size=min(1000,limit-offset)
+            r=self._call("GET","fokus_closed_candles",
+                params={"source":"eq."+source,"epic":"eq."+epic,
+                    "timeframe":"eq."+timeframe,
+                    "select":"candle_utc,open,high,low,close,spread",
+                    "order":"candle_utc.desc","limit":batch_size,"offset":offset})
+            try:batch=r.json()
+            except (ValueError,TypeError):
+                raise RemoteError("Błędny cloud OHLC JSON") from None
+            if not isinstance(batch,list):
+                raise RemoteError("Nieoczekiwane OHLC z bazy")
+            all_rows+=batch
+            if len(batch)<batch_size:
+                break
+        if not all_rows:
+            return pd.DataFrame()
+        frame=pd.DataFrame(all_rows)
+        frame["Time"]=pd.to_datetime(frame.pop("candle_utc"),utc=True)
+        frame=frame.rename(columns={"open":"Open","high":"High","low":"Low",
+                      "close":"Close","spread":"Spread"}).set_index("Time").sort_index()
+        for col in ("Open","High","Low","Close","Spread"):
+            frame[col]=pd.to_numeric(frame[col],errors="raise")
+        if frame.index.has_duplicates or frame[["Open","High","Low","Close","Spread"]].isna().any().any():
+            raise RemoteError("Niespójne lub zduplikowane świece w cloud")
+        return frame
+
     def upsert_candles(self,snapshots,epic,max_per_tf=350):
         # Backfill the most recent closed bars; primary key guarantees
         # deduplication when worker repeats the same candle.
