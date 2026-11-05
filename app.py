@@ -6,6 +6,7 @@ import sqlite3
 import os
 import time
 from datetime import datetime, timezone
+from dataclasses import replace as dataclass_replace
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -238,7 +239,7 @@ with st.sidebar:
     st.toggle('🔄 AUTO-SKAN — tylko gdy aplikacja otwarta',value=_early_secret('AUTO_SCAN_DEFAULT','true').lower() in ('true','1','yes'),key='auto_scan_active',
         help='Ocenia zamknięte świece co najmniej co 60 sekund. Nie jest usługą działającą 24/7.')
     st.selectbox('⏱️ Częstotliwość AUTO-SKAN (aktywna strona)',
-        options=(5,15,30,60,120,300),index=0,
+        options=(5,15,30,60,120,300),index=3,
         format_func=lambda secs: f'co {secs} sekund' if secs < 60 else f'co {secs // 60} min',
         key='auto_scan_period',
         help='Ręcznie wybierasz jak często odpytywać Capital.com DEMO i oceniać 6 strategii. '
@@ -464,7 +465,8 @@ with market_tab:
                     else {tf:st.session_state.get('market_snap')})
                 saved=0
                 for saved_tf,saved_snap in candidates.items():
-                    if saved_snap is not None and saved_snap.epic==instrument:
+                    if (saved_snap is not None and saved_snap.good
+                            and saved_snap.epic==instrument):
                         saved+=archive_candles(history_db,saved_snap.frame,
                             instrument,saved_snap.source,saved_tf)
                 st.session_state['_last_candles_saved']=saved
@@ -480,16 +482,28 @@ with market_tab:
                 error=f'{type(ex).__name__}: {str(ex)}',requested_utc=scan_requested)
             st.session_state['_scan_log']=append_scan_log(st.session_state.get('_scan_log'),record)
             st.session_state['_scan_last_result']=record
-            st.session_state.pop('market_snap', None)
+            if previous_snap is not None:
+                st.session_state['market_snap']=dataclass_replace(previous_snap,
+                    good=False,reason='POPRZEDNI ODCZYT / NIEAKTUALNE: '+str(ex)[:160])
+                st.warning('Pokazuję ostatni wykres, ale dane NIE są aktualne. '
+                           'Nowe sygnały i wejścia PAPER są zablokowane.')
+            else:
+                st.session_state.pop('market_snap', None)
             st.session_state.pop('ai_context', None)
             st.session_state['last_feed_error'] = str(ex)
-            st.error('❌ Nie udało się pobrać świec: '+str(ex))
+            st.error('❌ Nie udało się pobrać poprawnych świec: '+str(ex))
         except Exception as ex:
             record=scan_event(scan_trigger,previous_snap,None,
                 error=f'Błąd aplikacji: {type(ex).__name__}',requested_utc=scan_requested)
             st.session_state['_scan_log']=append_scan_log(st.session_state.get('_scan_log'),record)
             st.session_state['_scan_last_result']=record
-            st.session_state.pop('market_snap', None)
+            if previous_snap is not None:
+                st.session_state['market_snap']=dataclass_replace(previous_snap,
+                    good=False,reason='POPRZEDNI ODCZYT / BŁĄD APLIKACJI')
+                st.warning('Pozostawiono ostatni wykres — dane NIE są aktualne, '
+                           'nowe sygnały są zablokowane.')
+            else:
+                st.session_state.pop('market_snap', None)
             st.session_state.pop('ai_context', None)
             st.session_state['last_feed_error'] = f'Błąd aplikacji: {type(ex).__name__}'
             st.error('❌ Błąd pobierania danych: '+type(ex).__name__)
@@ -501,19 +515,26 @@ with market_tab:
         st.caption("Ostatnia próba odczytu (UTC): "+st.session_state['last_scan_utc'])
     last_record=st.session_state.get('_scan_last_result')
     if last_record:
-        if last_record['api_result']=='OK':
+        if last_record['api_result'] in ('OK','PARTIAL_DATA'):
             status_description='NOWA ŚWIECA' if last_record['new_candle'] else 'BRAK NOWEJ ŚWIECY'
             if last_record['bar_result']=='STALE_OR_BLOCKED':
                 status_description='DANE NIEAKTUALNE / BLOKADA SYGNAŁÓW'
+            elif last_record['bar_result']=='DATA_QUARANTINED':
+                status_description='ODRZUCONO WADLIWĄ ŚWIECĘ / WAIT'
             st.info(f"🛰️ SKAN #{st.session_state.get('_scan_attempt_count',0)} | "
-                f"wyzwalacz: {last_record['trigger']} | API: OK | "
+                f"wyzwalacz: {last_record['trigger']} | "
+                f"dane: {'CZĘŚCIOWO WADLIWE' if last_record['api_result']=='PARTIAL_DATA' else 'OK'} | "
                 f"wynik: {status_description} | rynek: {last_record['market_status']}")
             if last_record['market_status']=='CLOSED':
                 st.warning('Capital.com zgłasza CLOSED: prawdopodobnie przerwa lub zamknięty instrument. Skaner może działać poprawnie, ale nie ma nowych zamkniętych świec. Pozostaje WAIT.')
             elif last_record['bar_result']=='STALE_OR_BLOCKED':
-                st.warning('API odpowiedziało, ale ostatnia zamknięta świeca nie spełnia wymagań świeżości. Nie wyświetlam sygnału LONG/SHORT.')
+                st.warning('Odczyt nie spełnia wymagań świeżości. Bez sygnału LONG/SHORT.')
+            elif last_record['bar_result']=='DATA_QUARANTINED':
+                st.warning('API odpowiedziało, ale zawierało wadliwe rekordy BID/ASK lub OHLC. '
+                           'Wykres z poprawnych świec pozostaje widoczny; nowe sygnały zablokowane.')
         else:
-            st.error('🛰️ SKAN: problem komunikacji z API — sprawdź dziennik prób poniżej.')
+            st.error('🛰️ SKAN: nieudany odczyt lub błędne dane; '
+                     'to nie musi być problem komunikacji. Sprawdź dziennik prób.')
     if actual_scan_this_rerun and last_record and (
             last_record.get('bar_result')=='STALE_OR_BLOCKED'
             or last_record.get('api_result')=='ERROR'):
@@ -538,6 +559,9 @@ with market_tab:
     if snap is not None:
         if snap.epic!=instrument or snap.resolution!=tf:
             st.warning('Zmieniono instrument lub interwał: wykonaj NOWY SKAN przed decyzją.')
+        if not snap.good:
+            st.warning('⚠️ WYKRES ARCHIWALNY / WAIT: '+str(snap.reason)[:280]+
+                       ' Nie używaj tych danych do nowej decyzji.')
         else:
             st.select_slider('🔎 Powiększenie wykresu — liczba ostatnich świec',
                 options=[60,90,120,180,240,350],value=120,key='chart_window_size')
