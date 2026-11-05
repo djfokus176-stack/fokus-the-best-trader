@@ -628,7 +628,7 @@ with market_tab:
                                 f"modelowany fill BID/ASK + poślizg: {current_paper['entry_executable']:.2f}. "
                                 f"Założony czas OPEN: {current_paper.get('entry_assumed_utc') or 'BRAK / STARY ZAPIS'}; "
                                 f"wykryte przez skaner: {current_paper.get('entry_detected_utc') or 'BRAK / STARY ZAPIS'}. "
-                                "Nie było rzeczywistego wykonania zlecenia."))
+                                "Nie było rzeczywistego wykonania zlecenia.")))
                 else:
                     st.caption('🧪 Pozycja PAPER v3: BRAK AKTYWNEJ. Historyczne strzałki są wyłącznie układami, nie zrealizowanymi transakcjami.')
                 if current_paper and current_paper['timeframe']!=tf:
