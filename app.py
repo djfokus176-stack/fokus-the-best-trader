@@ -497,19 +497,32 @@ with market_tab:
                 if dna.swing_low is not None:
                     fig.add_hline(y=dna.swing_low,line_color='#7fbf98',line_dash='dot',
                         opacity=.55,annotation_text='Potwierdzony swing LOW')
-            marks=historical_marks(snap.frame,strategy,max_bars=110)
+            visible_bars=min(len(snap.frame),int(st.session_state.get('chart_window_size',120)))
+            marks=historical_marks(snap.frame,strategy,max_bars=visible_bars)
             for direction,symbol,color,yshift in [('LONG','triangle-up','#48db98',-1),('SHORT','triangle-down','#ff6e79',1)]:
                 match=marks[marks.action==direction]
                 if not match.empty:
                     fig.add_trace(go.Scatter(x=match.time,y=match.price,mode='markers',
                         marker={'symbol':symbol,'size':15,'color':color},
                         name=f'{direction} • historyczny PAPER',
-                        hovertemplate=f'{direction} • historyczny setup<extra></extra>'))
+                        hovertemplate=f'{direction} • HISTORYCZNY setup PAPER<br>Czas: %{{x|%d.%m.%Y %H:%M UTC}}<br>Cena MID: %{{y:.2f}}<extra></extra>'))
             fig.update_layout(height=570,xaxis_rangeslider_visible=False,template='plotly_dark',
                               paper_bgcolor='#111a2d',plot_bgcolor='#111a2d',legend_orientation='h',
                               margin={'l':15,'r':15,'t':30,'b':10})
             chart_slot=st.empty()
-            st.caption(f'Historyczne strzałki PAPER (hipotetyczne setupy): {len(marks)}. Brak strzałek oznacza brak pełnego sygnału w testowanym fragmencie. Strzałki NIE oznaczają zrealizowanych transakcji.')
+            st.caption(f'Historyczne setupy PAPER strategii {strategy}: {len(marks)} w ostatnich {visible_bars} zamkniętych świecach. Strzałki NIE oznaczają zrealizowanych transakcji i nie uwzględniają historycznej walidacji MTF/makro.')
+            if marks.empty:
+                st.info(f'🔎 W wybranym oknie {visible_bars} świec strategia {strategy} nie wykryła pełnego setupu. To normalny wynik WAIT, nie awaria wykresu. Zwiększ okno lub wybierz inną strategię.')
+            else:
+                st.markdown(f'**📍 Znalezione strzałki:** 🟢 LONG {int((marks.action=="LONG").sum())} | 🔴 SHORT {int((marks.action=="SHORT").sum())}')
+                with st.expander('📋 TABELA STRZAŁEK — godzina, kierunek, cena, powód'):
+                    hits=marks.sort_values('time',ascending=False).copy()
+                    hits['time']=pd.to_datetime(hits['time'],utc=True).dt.strftime('%Y-%m-%d %H:%M:%S UTC')
+                    hits['price']=hits['price'].round(2)
+                    hits=hits.rename(columns={'time':'Godzina świecy','action':'LONG/SHORT',
+                                              'price':'Cena MID','reason':'Warunek strategii'})
+                    st.dataframe(hits,hide_index=True,use_container_width=True)
+                st.caption('Tabela i trójkąty są wyliczone z dokładnie tych samych sygnałów historycznych.')
             st.caption('Wykres ze świec MID, nie cena wykonalna BID/ASK. Najnowsza świeca API została wykluczona z oceny strategii.')
             if current_ready:
                 st.success('✅ FEED AKTUALNY: '+current_reason)
