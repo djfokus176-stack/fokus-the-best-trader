@@ -175,6 +175,7 @@ def paper_view_db():
         restore_state(db,payload)
         st.session_state['_paper_remote_version']=version
         st.session_state['_paper_remote_meta']=payload.get('meta') or {}
+        st.session_state['_paper_remote_auto_ai']=payload.get('auto_ai') or {}
         return db
     return connect()
 
@@ -238,7 +239,7 @@ with st.sidebar:
         help='Ocenia zamknięte świece co najmniej co 60 sekund. Nie jest usługą działającą 24/7.')
     st.session_state['auto_scan_period']=300
     st.caption('⏲️ Automatyczne pobieranie świec co 5 minut (300 sekund), tylko gdy ta strona jest otwarta.')
-    st.caption('AUTO-SKAN nie wykonuje zleceń. GPT-5.4 HIGH uruchamiasz osobno — płatne zapytania nie są wysyłane automatycznie.')
+    st.caption('AUTO-SKAN nie wykonuje zleceń. Płatne AI jest ręczne w CZAT AI; osobny worker może opcjonalnie uruchamiać limitowane komentarze GPT po włączeniu w GitHub.')
     st.markdown('---')
     with st.expander('🔑 KLUCZE API — TESTY / ZMIANY (już zapisane w Secrets)', expanded=False):
         st.caption('Wpisz tylko pola, które chcesz zmienić. Puste pola korzystają z zapisanych Streamlit Secrets. Wpisane tutaj dane żyją wyłącznie w tej sesji przeglądarki.')
@@ -325,7 +326,7 @@ with st.sidebar:
             st.dataframe(st.session_state['epic_matches'],hide_index=True,use_container_width=True)
     else:
         st.warning('⚠️ Brak API Capital.com. Możesz analizować własny CSV.')
-    st.caption(f"🧠 AI: {st.session_state.get('_paid_ai_requests',0)} ręcznych zapytań w bieżącej sesji. Bez automatycznych opłat GPT.")
+    st.caption(f"🧠 AI: {st.session_state.get('_paid_ai_requests',0)} ręcznych zapytań w sesji. Opcjonalne automatyczne analizy workera są rozliczane i limitowane osobno.")
     st.info('Streamlit Cloud nie gwarantuje skanera działającego 24/7. Do tego potrzebny osobny worker na stale działającym hoście.')
 
 market_tab,chat_tab,dna_tab,mtf_tab,strategies_tab,lab_tab,news_tab,reports_tab,archive_tab,settings_tab=st.tabs([
@@ -884,7 +885,7 @@ with settings_tab:
     st.subheader('🔐 INTEGRACJE I PRAWDZIWY STAN')
     st.table(pd.DataFrame([
       (f'Capital.com {capital_env} REST / OHLC','Klucze dostępne' if has_cap else 'Brak kluczy',f'Status instrumentu: {st.session_state.get("_market_status","UNKNOWN")}'),
-      ('OpenAI GPT','Klucz dostępny' if openai_api_key else 'Brak klucza','Ręczne zapytania: świece, dostarczone newsy, koszty API'),
+      ('OpenAI GPT','Klucz dostępny' if openai_api_key else 'Brak klucza','Czat: ręcznie. Worker GitHub: osobny opt-in i limity płatnych komentarzy; bez zleceń'),
       ('Telegram','Klucze dostępne' if secret('TELEGRAM_BOT_TOKEN') and secret('TELEGRAM_CHAT_ID') else 'Nieskonfigurowany','Lokalny PAPER: opt-in, remote worker: brak wysyłki do czasu trwałego outboxu'),
       ('Niezależny worker','Kod v4 przygotowany','GitHub Actions co ~5 min po włączeniu; brak gwarantowanego hosta 24/7'),
       ('Uczenie strategii','CZĘŚCIOWO','Replay, holdout i rolling — BEZ samodzielnej zmiany progów i bez ML'),
@@ -1103,6 +1104,15 @@ with reports_tab:
                         st.warning("Nieznany format czasu ostatniego skanu workera.")
                 else:
                     st.warning("Brak potwierdzonego skanu workera w chmurze. Cloud jest skonfigurowany, ale skaner mógł jeszcze nigdy nie wystartować.")
+                auto_ai=st.session_state.get('_paper_remote_auto_ai') or {}
+                if auto_ai:
+                    with st.expander('🤖 AUTOMATYCZNY GPT — OSTATNIA ANALIZA WORKERA (PAPER)'):
+                        st.caption(f"Status: {auto_ai.get('status','BRAK')} | Model: {auto_ai.get('model','BRAK')} | Dzisiaj: {auto_ai.get('daily_calls',0)} wywołań | Miesiąc: {auto_ai.get('monthly_calls',0)} wywołań")
+                        st.caption(f"Ostatnia analiza UTC: {auto_ai.get('last_report_utc','BRAK')} | Świeca: {auto_ai.get('last_report_candle','BRAK')} | Sygnał: {auto_ai.get('last_action','BRAK')}")
+                        st.markdown(auto_ai.get('last_report') or 'Brak zapisanego komentarza GPT. Sprawdź opt-in, klucz workera i limity wywołań.')
+                        st.caption('AI komentuje dane DEMO; nie widzi screenshotu, nie składa zleceń i nie omija blokad. Limity wywołań nie są limitem kwotowym faktury.')
+                else:
+                    st.caption('🤖 Automatyczny GPT: brak zapisanych analiz. Domyślnie wyłączony; wymaga osobnego klucza i opt-in w GitHub Actions.')
             else:
                 st.caption('Lokalna historia PAPER v3; w Streamlit Cloud może zniknąć podczas redeploy.')
             all_positions=[p for p in recent_positions(paper_db,200)
