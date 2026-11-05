@@ -32,5 +32,5 @@ jobs:
           cache: 'pip'
           cache-dependency-path: requirements-worker.txt
       - run: python -m pip install -r requirements-worker.txt
-      - name: Worker loads without Streamlit, OpenAI or browser
+      - name: Worker loads without Streamlit or browser (OpenAI optional)
         run: python -m trader.worker --help
