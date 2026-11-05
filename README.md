@@ -1,3 +1,27 @@
+## 🧪 PAPER v3 — pozycja PENDING → OPEN → SL/TP/TIMEOUT
+
+Dostępny nowy stan pozycji **tylko dla DEMO, wyłącznie PAPER**.
+Bot czeka na ukończenie kolejnej świecy po sygnale i dopiero potem
+**retrospektywnie** symuluje fill na jej OPEN. To nie jest natychmiastowe
+zlecenie ani rzeczywista cena do wykonania. Pozycja przechodzi przez
+`PENDING`, `OPEN`, `CLOSED_SL`, `CLOSED_TP`, `CLOSED_TIMEOUT` lub
+`INVALIDATED`; przy lukach nie zgadujemy wyników. Na wykresie linie
+ENTRY/SL/TP pojawiają się tylko dla pozycji w stanie `OPEN`.
+
+W **RAPORTY** są dziennik zdarzeń, odrzucone WAIT, raporty dzienne i
+tygodniowe. Powiadomienia Telegram to opcja:
+`PAPER_TELEGRAM_ALERTS_ENABLED = true` w Streamlit Secrets oraz
+`TELEGRAM_BOT_TOKEN` i `TELEGRAM_CHAT_ID`.
+Alerty są wyłączone domyślnie. Deduplikacja ogranicza próby wysyłki do
+jednej na event_id, ale może utracić wiadomość przy błędzie sieci.
+
+**Pełny opis i ograniczenia:** [dokumentacja/PAPER_V3_LIFECYCLE.md](dokumentacja/PAPER_V3_LIFECYCLE.md).
+Nie istnieje jeszcze serwer 24/7 ani zewnętrzna trwała baza, a stary worker
+nie został podłączony do v3. Lokalne SQLite w Community Cloud może zniknąć
+po restarcie lub wdrożeniu. Prawdziwe API właściciela nie było testowane.
+
+---
+
 # 🚀 FOKU$ THE BEST TRADER — v0.3 MASTER RESEARCH
 
 ## Wygodne logowanie bez wpisywania hasła co chwilę
