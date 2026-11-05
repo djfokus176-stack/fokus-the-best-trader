@@ -13,6 +13,7 @@ import streamlit as st
 from trader.market import CapitalReadOnly, FeedError, evaluate_snapshot, PERIOD
 from trader.strategy import indicators, backtest
 from trader.strategies_pro import decide_any, ALL_STRATEGIES
+from trader.ema50_wave import STRATEGY_NAME as WAVE_NAME
 from trader.auto_strategy import AUTO_MODE, evaluate_auto
 from trader.mtf import TIMEFRAMES, LABELS, evaluate_timeframes, filter_mtf_decision
 from trader.research import chronological_report, rolling_oos, replay, stats
@@ -236,10 +237,15 @@ with st.sidebar:
             st.session_state.pop(k, None)
     st.session_state['_prev_capital_env'] = capital_env
     tf=st.selectbox('Interwał',['MINUTE','MINUTE_5','MINUTE_15','HOUR'],format_func=lambda x:{'MINUTE':'M1','MINUTE_5':'M5','MINUTE_15':'M15','HOUR':'H1'}[x])
-    strategy=st.selectbox('Tryb analizy / strategia', (AUTO_MODE,)+ALL_STRATEGIES, index=0,
+    strategy=st.selectbox('Tryb analizy / strategia', (AUTO_MODE,)+ALL_STRATEGIES+(WAVE_NAME,), index=0,
         help='AUTO ocenia sześć hipotez na tym samym wykresie. Wymaga min. dwóch zgodnych i kompletnych M1/M5/M15/H1; konflikt = WAIT. Nie jest to model uczący się ani zlecenie.')
     if strategy==AUTO_MODE:
         st.caption('🤖 AUTO: 6 strategii, minimum 2 zgodne, brak przeciwnego LONG/SHORT, obowiązkowy filtr MTF. Własna ocena PAPER, nie autotrading.')
+    elif strategy==WAVE_NAME:
+        st.caption('🔬 EMA50 WAVE: wariant porównawczy zasad starego bota, '
+                   'bez kopiowania jego archiwum ani fałszywych wejść. '
+                   'PAPER OPEN rysuje tylko niezależny worker, po przejściu '
+                   'wszystkich blokad i ustawieniu trybu w GitHub Actions.')
     st.toggle('🧭 Potwierdzenie M1/M5/M15/H1 (veto)',value=True,key='mtf_enabled',
         help='Bot nie pokaże nowego LONG/SHORT gdy nie ma 4 zgodnych i świeżych odczytów.')
     st.caption('Każda strategia jest HIPOTEZĄ PAPER, nie potwierdzonym systemem zarobkowym.')
@@ -738,6 +744,16 @@ with market_tab:
                                 'na tej zamkniętej świecy — nie generuję fikcyjnego typu.')
                     with st.expander('📊 AUTO — WSZYSTKIE 6 STRATEGII I BLOKADY'):
                         st.dataframe(pd.DataFrame(auto_audit),hide_index=True,use_container_width=True)
+                    shadow=decide_any(snap.frame,WAVE_NAME,spread=snap.spread)
+                    mtf_shadow,_=filter_mtf_decision(
+                        shadow,st.session_state.get('mtf_snapshots',{}),
+                        asof=snap.confirmed_utc)
+                    st.markdown('#### 🔬 EMA50 WAVE — PORÓWNANIE ZE STARYM BOTEM')
+                    st.caption('Siódmy, niezależny podgląd porównawczy; '
+                               'nie liczy się do sześciu strategii AUTO, '
+                               'nie tworzy zlecenia i nie rysuje strzałki.')
+                    st.info(f'Surowy: {shadow.action} | Po MTF: {mtf_shadow.action} '
+                            f'| Powód: {mtf_shadow.reason}')
                 else:
                     decision=decide_any(snap.frame,strategy,spread=snap.spread)
                     if ready and st.session_state.get('mtf_enabled',False):

@@ -7,16 +7,19 @@ from __future__ import annotations
 import math
 import pandas as pd
 from .strategy import Decision, decide, indicators
+from .ema50_wave import STRATEGY_NAME as WAVE_NAME,wave_decision
 
 LEGACY = ("DRUGA FALA", "EMA TREND")
 EXTRA = ("LIQUIDITY SWEEP", "BREAKOUT RETEST", "EMA PULLBACK", "VOLATILITY BREAKOUT")
-ALL_STRATEGIES = LEGACY + EXTRA
+ALL_STRATEGIES = LEGACY + EXTRA  # unchanged conservative AUTO consensus
 
 
 def decide_any(frame: pd.DataFrame, strategy="DRUGA FALA", spread:float=.6,
                min_rr:float=1.35) -> Decision:
     if strategy in LEGACY:
         return decide(frame,strategy,spread=spread,min_rr=min_rr)
+    if strategy == WAVE_NAME:
+        return wave_decision(frame,spread=spread,min_rr=min_rr)
     if strategy not in EXTRA:
         return Decision("WAIT",strategy,"Nieznana strategia: brak sygnału.")
     if frame is None or len(frame)<85 or spread<0 or not math.isfinite(spread):
