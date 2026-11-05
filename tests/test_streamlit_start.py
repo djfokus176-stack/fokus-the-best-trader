@@ -60,10 +60,10 @@ def test_google_mode_without_oauth_secrets_is_locked(monkeypatch):
     assert len(app.tabs)==0
 
 
-def test_owner_defaults_to_auto_six_and_five_minute_page_scan(monkeypatch):
+def test_owner_defaults_to_auto_six_and_one_minute_page_scan(monkeypatch):
     from streamlit.testing.v1 import AppTest
     from trader.auto_strategy import AUTO_MODE
-    pw="test-owner-auto-five-minutes"
+    pw="test-owner-auto-one-minute"
     monkeypatch.setenv("APP_ACCESS_PASSWORD",pw)
     monkeypatch.setenv("APP_AUTH_MODE","password")
     a=AppTest.from_file(APP,default_timeout=40).run()
@@ -73,4 +73,4 @@ def test_owner_defaults_to_auto_six_and_five_minute_page_scan(monkeypatch):
     assert not a.exception,[str(x.message) for x in a.exception]
     chosen=[x for x in a.selectbox if "Tryb analizy / strategia" in x.label]
     assert len(chosen)==1 and chosen[0].value==AUTO_MODE
-    assert a.session_state["auto_scan_period"]==300
+    assert a.session_state["auto_scan_period"]==60
