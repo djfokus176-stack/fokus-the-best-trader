@@ -44,6 +44,11 @@ def ensure_tables(db):
        model_version TEXT NOT NULL DEFAULT 'v3_paper_close_only',
        created_utc TEXT NOT NULL, updated_utc TEXT NOT NULL
     )""")
+    # Forward-only migration: don't rewrite or erase historical PAPER v3 data.
+    existing={r[1] for r in db.execute("PRAGMA table_info(paper_positions_v3)")}
+    for column in ("entry_assumed_utc","entry_detected_utc"):
+        if column not in existing:
+            db.execute(f"ALTER TABLE paper_positions_v3 ADD COLUMN {column} TEXT")
     db.execute("""CREATE UNIQUE INDEX IF NOT EXISTS uq_paper_one_active
        ON paper_positions_v3(source,epic,timeframe)
        WHERE status IN ('PENDING','OPEN')""")
@@ -198,12 +203,22 @@ def progress_paper(db, frame, epic, source, timeframe, max_holding=20):
             slip=float(pos["slippage"])
             filled=(open_mid+half+slip if pos["side"]=="LONG"
                     else open_mid-half-slip)
+            # On a CLOSE-time index, the next bar opens at t_setup, but
+            # this OPEN price is observed only when the bar closes at first_t.
+            # Never present the reconstructed OPEN as a real-time executable quote.
+            assumed_open_utc=_utc(t_setup)
+            recognized_utc=_now()
             db.execute("""UPDATE paper_positions_v3 SET status='OPEN',opened_utc=?,
-                entry_mid=?,entry_executable=?,updated_utc=? WHERE trade_id=?""",
-                (_utc(first_t),open_mid,filled,_now(),tid))
+                entry_mid=?,entry_executable=?,entry_assumed_utc=?,
+                entry_detected_utc=?,updated_utc=? WHERE trade_id=?""",
+                (_utc(first_t),open_mid,filled,assumed_open_utc,
+                 recognized_utc,recognized_utc,tid))
             pos.update(status="OPEN",opened_utc=_utc(first_t),
-                       entry_mid=open_mid,entry_executable=filled)
-            _emit(db,tid,"PAPER_OPEN",_utc(first_t),"Symulowane wykonanie na OPEN następnej zamkniętej świecy, BID/ASK + poślizg.")
+                       entry_mid=open_mid,entry_executable=filled,
+                       entry_assumed_utc=assumed_open_utc,
+                       entry_detected_utc=recognized_utc)
+            _emit(db,tid,"PAPER_OPEN",_utc(first_t),
+                  "Retrospektywny OPEN MID następnej świecy; wykryty dopiero po jej zamknięciu.")
             events.append("PAPER_OPEN")
             loop=closed
             prev=t_setup
