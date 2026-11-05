@@ -116,7 +116,15 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
         status=scan_once(client,epic,tf,strategy,max_spread,db,
                          enable_setups=enable_setups,strict_macro=strict_macro,
                          calendar_fetch=calendar_fetch,telegram_enabled=False)
-        new_version=remote.save(version,dump_state(db))
+        payload=dump_state(db)
+        payload["meta"]={
+            "last_scan_utc":datetime.now(timezone.utc).isoformat(),
+            "last_scan_summary":status[:350],
+            "source":"Capital.com DEMO REST",
+            "timeframe":tf,"epic":epic,
+            "worker":"GitHub Actions or foreground process",
+            "telegram_remote":"DISABLED"}
+        new_version=remote.save(version,payload)
         return status+f" / CLOUD_CHECKPOINT_VERSION={new_version} / TELEGRAM_REMOTE=DISABLED"
     finally:
         db.close()
