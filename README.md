@@ -1,3 +1,36 @@
+## 🤖 AUTO — 6 STRATEGII i 5-minutowy skan (PAPER, bez zleceń)
+
+Domyślny tryb w terminalu: **AUTO — 6 STRATEGII**. Na dokładnie
+tych samych zamkniętych świecach co wykres ocenia niezależnie:
+DRUGA FALA, EMA TREND, LIQUIDITY SWEEP, BREAKOUT RETEST,
+EMA PULLBACK i VOLATILITY BREAKOUT.
+
+**Deterministyczny filtr badawczy:** przynajmniej **2 zgodne**
+setupy LONG lub SHORT, brak choćby jednego przeciwnego surowego
+setupu oraz obowiązkowe w AUTO aktualne potwierdzenie M1/M5/M15/H1.
+Brak tych warunków → **WAIT**, a tabela pokazuje wszystkie
+6 ocen i powody. Gdy kilka zgodnych strategii pozostanie, wybór
+kandydata jest deterministyczny po deklarowanym RR (nie po
+zweryfikowanej przewadze). To nie model ML, nie samouczenie, nie
+prawdopodobieństwo wygranej ani automatyczne zlecenie brokerskie.
+
+AUTO-SKAN **co 300 sekund (5 minut)**, wyłącznie przy otwartej
+sesji przeglądarki Streamlit; historyczne strzałki AUTO są
+przeliczeniem OHLC **bez pełnego historycznego MTF/makro** i nie
+są rozliczonymi pozycjami. Osobny worker GitHub Actions też ma
+harmonogram około 5 minut, ale jest opt-in i pozostaje
+wyłączony bez konfiguracji właściciela. Przestój internetu,
+Streamlit Cloud, GitHub Actions lub broker API oznacza brak
+gwarancji pracy ciągłej. Telegram i automatyczne płatne wywołania
+OpenAI są wyłączone.
+
+**Bramka zegara API**: nowe pozycje PAPER nie są tworzone,
+dopóki użytkownik nie potwierdzi OPEN-label timestampów
+Capital.com w dwóch odczytach i wykresie brokera
+(`FOKUS_CANDLE_TIME_CONFIRMED=open`). Nie ustawiaj w ciemno.
+
+---
+
 # 🚀 FOKU$ THE BEST TRADER — PAPER v4: przygotowana chmura (NIE AKTYWOWANA)
 
 **Stan faktyczny:** do repozytorium dodano prywatny model bazy Supabase,
