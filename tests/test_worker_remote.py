@@ -8,6 +8,13 @@ from trader.strategy import Decision
 from trader.paper_lifecycle import queue_paper
 import pandas as pd
 
+@pytest.fixture(autouse=True)
+def no_external_rss_requests_in_tests(monkeypatch):
+    # Worker regularly reads OFFICIAL headlines, but CI must not call the web.
+    monkeypatch.setattr(worker,"fetch_headlines",lambda **kwargs:(
+        [{"źródło":"FED","data_utc":"2026-11-05T20:00:00+00:00",
+          "tytuł":"Economic review","url":"https://www.federalreserve.gov/"}],{}))
+
 
 class Checkpoint:
     def __init__(self):
