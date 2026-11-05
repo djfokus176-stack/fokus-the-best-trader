@@ -95,10 +95,18 @@ def queue_paper(db, epic, source, timeframe, decision, signal_utc,
         return None
     if timeframe not in PERIOD or decision.action not in ("LONG","SHORT"):
         return None
-    if not all(x is not None and math.isfinite(float(x))
-               for x in (decision.stop,decision.target,spread,slippage)):
+    try:
+        values=[float(x) for x in
+                (decision.entry,decision.stop,decision.target,spread,slippage)]
+    except (TypeError,ValueError,OverflowError):
         return None
+    if not all(math.isfinite(x) for x in values):
+        return None
+    entry,stop,target,spread,slippage=values
     if spread<0 or slippage<0:
+        return None
+    if not ((stop<entry<target) if decision.action=="LONG"
+            else (target<entry<stop)):
         return None
     ensure_tables(db)
     stamp=_utc(signal_utc)
