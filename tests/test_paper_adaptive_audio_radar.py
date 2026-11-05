@@ -111,7 +111,7 @@ def test_visible_chart_has_entry_and_exit_pnl_from_positions():
       "pnl_pts":2.4}]
     annotate_paper_history(fig,positions,"US500",SRC,"MINUTE")
     assert len(fig.data)==2
-    assert any("PAPER SHORT" in (t.name or "") for t in fig.data)
+    assert any("OTWARCIE SHORT" in (t.name or "") for t in fig.data)
     assert any("2.40 pkt" in str(t.text) for t in fig.data)
     assert len(go.Figure().data)==0
 
@@ -186,3 +186,37 @@ def test_short_adaptive_can_bank_profit_on_reversal_without_future_leak(tmp_path
     closed=recent_positions(db)[0]
     assert closed["pnl_pts"]>0
     assert closed["status"]=="CLOSED_SL"
+
+
+
+def test_markers_are_real_paper_only_and_have_requested_shape():
+    fig=go.Figure()
+    rows=[
+      {"trade_id":"long-id","epic":"US500","source":SRC,"timeframe":"MINUTE",
+       "side":"LONG","status":"CLOSED_SL","opened_utc":T0.isoformat(),
+       "entry_mid":100.5,"closed_utc":(T0+pd.Timedelta(minutes=2)).isoformat(),
+       "exit_mid":99.1,"pnl_pts":-2.1},
+      {"trade_id":"short-id","epic":"US500","source":SRC,"timeframe":"MINUTE",
+       "side":"SHORT","status":"OPEN",
+       "opened_utc":(T0+pd.Timedelta(minutes=3)).isoformat(),
+       "entry_mid":101.2},
+      {"trade_id":"pending-id","epic":"US500","source":SRC,"timeframe":"MINUTE",
+       "side":"LONG","status":"PENDING","setup_utc":T0.isoformat()},
+    ]
+    annotate_paper_history(fig,rows,"US500",SRC,"MINUTE")
+    assert len(fig.data)==3  # LONG OPEN, LONG CLOSE, SHORT OPEN
+    assert [trace.marker.symbol for trace in fig.data]==[
+      "triangle-up","square","triangle-down"]
+    assert [trace.marker.color for trace in fig.data]==[
+      "#3de59a","#3de59a","#ff425d"]
+    assert "ZAMKNIJ -2.10 pkt" in fig.data[1].text[0]
+    assert fig.data[1].textfont.color=="#ff6575"  # not green 'profit'
+    assert len(fig.layout.shapes)==0
+
+
+def test_chart_source_does_not_draw_historical_setup_arrows():
+    from pathlib import Path
+    source=(Path(__file__).resolve().parents[1]/"app.py").read_text(encoding="utf-8")
+    assert "cached_historical_marks(" not in source
+    assert "annotate_scan(" not in source
+    assert "annotate_paper_history(fig," in source

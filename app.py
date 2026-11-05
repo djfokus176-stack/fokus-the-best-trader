@@ -20,17 +20,15 @@ from trader.mtf_replay import compare_mtf_on_m1_csv
 from trader.news_radar import fetch_headlines, fetch_bls_schedule, macro_blackout
 from trader.storage import connect, archive, recent, recent_scan_decisions, audit_prior_paper_signals, paper_report, legacy_outcomes_count, archive_candles, load_candles
 from trader.assistant import numeric_context, answer_ai
-from trader.arrow_cache import cached_historical_marks
 from trader.csv_data import read_ohlc_csv
 from trader.runtime import current_feed_status, scan_delay_seconds
 from trader.scan_monitor import scan_event, append_scan_log
 from trader.chat_ui import append_message, renderable_history, preview_context
-from trader.chart_tracker import annotate_scan
 from trader.paper_lifecycle import (
     ensure_tables as ensure_paper_v3, queue_paper, progress_paper,
     active_position, recent_positions, recent_events)
 from trader.paper_display import annotate_open_paper,annotate_paper_history
-from trader.paper_sounds import unseen_paper_event,wav_notice,SOUND_EVENTS,alert_audio
+from trader.paper_sounds import new_paper_events,wav_notice,SOUND_EVENTS,alert_audio
 from trader.paper_reporting import daily_weekly,performance_by_policy
 from trader.remote_checkpoint import RemoteCheckpoint,remote_view_db,RemoteError,dump_state
 from trader.telegram_alerts import dispatch_alerts, record_stale_event
@@ -257,15 +255,15 @@ with st.sidebar:
         help='Wymaga interakcji z przeglądarką. Dźwięk dotyczy tylko nowych '
              'zdarzeń potwierdzonych w archiwum PAPER; przeglądarka może go zablokować. '
              'Nie oznacza rzeczywistych transakcji.')
-    st.radio('🎙️ Rodzaj alertów PAPER',('Tony','Głos ElevenLabs (nagrania MP3)'),
+    st.radio('🎙️ Rodzaj alertów PAPER',('Głos ElevenLabs (nagrania MP3)','Tony'),
         horizontal=True,key='paper_audio_mode',
         help='Własne krótkie pliki MP3 z assets/voices w repozytorium. '
              'Bez dodatkowych zapytań do ElevenLabs; brakujący klip zastępuje ton.')
     sound_preview={
         'Otwarcie LONG':('PAPER_OPEN','LONG'),
         'Otwarcie SHORT':('PAPER_OPEN','SHORT'),
-        'Zamknięcie z zyskiem':('PAPER_CLOSE_TP',None),
-        'Stop loss':('PAPER_CLOSE_SL',None),
+        'Zamknij — głos ogólny':('PAPER_CLOSE_TP',None),
+        'Stop loss / Zamknij':('PAPER_CLOSE_SL',None),
         'Zamknięcie po czasie':('PAPER_TIMEOUT',None),
         'Przesunięcie SL':('PAPER_TRAIL_SL',None),
         'Wydłużenie TP':('PAPER_EXTEND_TP',None),
@@ -616,32 +614,16 @@ with market_tab:
                 if dna.swing_low is not None:
                     fig.add_hline(y=dna.swing_low,line_color='#7fbf98',line_dash='dot',
                         opacity=.55,annotation_text='Potwierdzony swing LOW')
-            visible_bars=min(len(snap.frame),int(st.session_state.get('chart_window_size',120)))
-            marks=cached_historical_marks(snap.frame,instrument,tf,src,strategy,visible_bars)
-            for direction,symbol,color,yshift in [('LONG','triangle-up','#48db98',-1),('SHORT','triangle-down','#ff6e79',1)]:
-                match=marks[marks.action==direction]
-                if not match.empty:
-                    fig.add_trace(go.Scatter(x=match.time,y=match.price,mode='markers',
-                        marker={'symbol':symbol,'size':15,'color':color},
-                        name=f'{direction} • historyczny PAPER',
-                        hovertemplate=f'{direction} • HISTORYCZNY setup PAPER<br>Czas: %{{x|%d.%m.%Y %H:%M UTC}}<br>Cena MID: %{{y:.2f}}<extra></extra>'))
+            # No historical backfilled arrows. Only actual archived PAPER
+            # OPEN/CLOSED positions are allowed to draw trade markers.
             fig.update_layout(height=570,xaxis_rangeslider_visible=False,template='plotly_dark',
                               paper_bgcolor='#111a2d',plot_bgcolor='#111a2d',legend_orientation='h',
                               margin={'l':15,'r':15,'t':30,'b':10})
             chart_slot=st.empty()
-            st.caption(f'Historyczne setupy PAPER w trybie {strategy}: {len(marks)} w ostatnich {visible_bars} zamkniętych świecach. W trybie AUTO to tylko konsensus historycznych reguł OHLC, BEZ wstecznej walidacji MTF/makro. Strzałki NIE oznaczają transakcji.')
-            if marks.empty:
-                st.info(f'🔎 W wybranym oknie {visible_bars} świec strategia {strategy} nie wykryła pełnego setupu. To normalny wynik WAIT, nie awaria wykresu. Zwiększ okno lub wybierz inną strategię.')
-            else:
-                st.markdown(f'**📍 Znalezione strzałki:** 🟢 LONG {int((marks.action=="LONG").sum())} | 🔴 SHORT {int((marks.action=="SHORT").sum())}')
-                with st.expander('📋 TABELA STRZAŁEK — godzina, kierunek, cena, powód'):
-                    hits=marks.sort_values('time',ascending=False).copy()
-                    hits['time']=pd.to_datetime(hits['time'],utc=True).dt.strftime('%Y-%m-%d %H:%M:%S UTC')
-                    hits['price']=hits['price'].round(2)
-                    hits=hits.rename(columns={'time':'Godzina świecy','action':'LONG/SHORT',
-                                              'price':'Cena MID','reason':'Warunek strategii'})
-                    st.dataframe(hits,hide_index=True,use_container_width=True)
-                st.caption('Tabela i trójkąty są wyliczone z dokładnie tych samych sygnałów historycznych.')
+            st.caption('⬆️ Zielona strzałka = bot otworzył PAPER LONG; '
+                       '⬇️ czerwona = PAPER SHORT; 🟩 kwadrat = bot zamknął PAPER. '
+                       'NIE pokazuję strzałek historycznych formacji. '
+                       'Bez zatwierdzonej pozycji PAPER nie ma strzałki.')
             st.caption('Wykres ze świec MID, nie cena wykonalna BID/ASK. Najnowsza świeca API została wykluczona z oceny strategii.')
             if current_ready:
                 st.success('✅ FEED AKTUALNY: '+current_reason)
@@ -756,10 +738,25 @@ with market_tab:
                             st.caption('Punkty netto po modelowanym spreadzie i poślizgu; '
                                        'PAPER_OPEN odtworzony dopiero po zamknięciu świecy.')
                     active_audio=bool(st.session_state.get('paper_audio_enabled',False))
-                    prev_audio=st.session_state.get('_last_paper_audio_event')
-                    latest_audio,audio_event=unseen_paper_event(paper_events,prev_audio)
+                    # Establish a baseline, NOT a playback of old ledger events.
+                    # '__EMPTY__' makes a first future OPEN audible when archive
+                    # was empty at initial page load.
+                    if '_last_paper_audio_event' not in st.session_state:
+                        st.session_state['_last_paper_audio_event']=(
+                            paper_events[0].get('event_id') if paper_events else '__EMPTY__')
+                    prev_audio=st.session_state['_last_paper_audio_event']
+                    latest_audio,new_audio=new_paper_events(paper_events,prev_audio)
                     st.session_state['_last_paper_audio_event']=latest_audio
-                    if active_audio and audio_event:
+                    queued_audio=list(st.session_state.get('_paper_audio_pending',[]))
+                    if active_audio:
+                        queued_audio.extend(new_audio)
+                    else:
+                        queued_audio=[]
+                    # Events in one scan may be OPEN and CLOSE together: play
+                    # one alert per UI refresh, oldest first, never overlap.
+                    audio_event=queued_audio.pop(0) if active_audio and queued_audio else None
+                    st.session_state['_paper_audio_pending']=queued_audio[-30:]
+                    if audio_event:
                         kind=audio_event['kind']
                         st.info('🔔 '+SOUND_EVENTS[kind]+
                                 ' — zdarzenie PAPER, nie zlecenie rzeczywiste.')
@@ -792,17 +789,14 @@ with market_tab:
                                 f"wykryte przez skaner: {current_paper.get('entry_detected_utc') or 'BRAK / STARY ZAPIS'}. "
                                 "Nie było rzeczywistego wykonania zlecenia.")))
                 else:
-                    st.caption('🧪 Pozycja PAPER v3: BRAK AKTYWNEJ. Historyczne strzałki są wyłącznie układami, nie zrealizowanymi transakcjami.')
+                    st.caption('🧪 Brak aktywnej pozycji PAPER. Nie rysuję historycznych LONG/SHORT jako wejść.')
                 if current_paper and current_paper['timeframe']!=tf:
                     st.warning(f"Pozycja PAPER v3 działa na {current_paper['timeframe']}, nie na aktualnym {tf}. Linie poziomów są ukryte, żeby nie mieszać interwałów. Włącz MTF i AUTO-SKAN, aby odświeżać również pierwotny interwał.")
                 annotate_open_paper(fig,current_paper if current_paper and current_paper['timeframe']==tf else None)
                 annotate_paper_history(fig,locals().get('paper_rows',[]),
                     instrument,src,tf)
-                record_for_chart=dict(st.session_state.get('_scan_last_result') or {})
-                record_for_chart['scan_no']=st.session_state.get('_scan_attempt_count',0)
-                annotate_scan(fig,snap.frame,decision,record_for_chart,
-                              bar_limit=st.session_state.get('chart_window_size',120),
-                              resolution=tf,source=src)
+                # No BUY/SELL-looking historical scan markers. Trade chart is
+                # restricted to verified PAPER OPEN/CLOSED ledger events.
                 chart_slot.plotly_chart(fig,use_container_width=True)
                 st.caption('🤖 BOT ocenia zamknięte świece z wykresu według wybranego interwału odświeżania (5–300 s), tylko gdy strona jest otwarta. Bez streamingu ticków i zleceń.')
                 if ready:

@@ -57,3 +57,32 @@ def test_unsupported_kind_returns_no_voice():
     assert sorted(VOICE_FILES)==sorted([
         "PAPER_CLOSE_TP","PAPER_CLOSE_SL","PAPER_TIMEOUT",
         "PAPER_TRAIL_SL","PAPER_EXTEND_TP"])
+
+
+def test_shared_close_mp3_covers_take_profit_stop_loss_and_timeout(tmp_path):
+    from trader.paper_sounds import new_paper_events
+    recording=b"ID3"+b"three voice file"*10
+    (tmp_path/"close.mp3").write_bytes(recording)
+    for event in ("PAPER_CLOSE_TP","PAPER_CLOSE_SL","PAPER_TIMEOUT"):
+        data,mime,mode=alert_audio(event,voice_enabled=True,directory=tmp_path)
+        assert (data,mime,mode)==(recording,"audio/mpeg","VOICE")
+    # Event-specific clip can still override shared 'Zamknij'.
+    special=b"ID3"+b"take profit"*12
+    (tmp_path/"close_profit.mp3").write_bytes(special)
+    assert alert_audio("PAPER_CLOSE_TP",voice_enabled=True,directory=tmp_path)[0]==special
+    assert alert_audio("PAPER_CLOSE_SL",voice_enabled=True,directory=tmp_path)[0]==recording
+
+
+def test_open_and_close_same_scan_play_separately_in_chronological_queue():
+    from trader.paper_sounds import new_paper_events
+    opened={"event_id":"opened","kind":"PAPER_OPEN","trade_id":"one"}
+    closed={"event_id":"closed","kind":"PAPER_CLOSE_TP","trade_id":"one"}
+    # The database returns newest-first and the listener was already armed
+    last,new=new_paper_events([closed,opened],"__EMPTY__")
+    assert last=="closed"
+    assert [e["kind"] for e in new]==["PAPER_OPEN","PAPER_CLOSE_TP"]
+    last,new=new_paper_events([closed,opened],last)
+    assert not new
+    # Existing prior events are not replayed on initial page load.
+    assert new_paper_events([closed,opened],None)==("closed",[])
+    assert new_paper_events([],"__EMPTY__")==("__EMPTY__",[])
