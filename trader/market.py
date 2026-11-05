@@ -157,6 +157,23 @@ class CapitalReadOnly:
         except ValueError as ex:
             raise FeedError(f'Niepoprawny JSON API: {ex}') from ex
 
+    def raw_candle_time_diagnostic(self, epic='US500', resolution='MINUTE', count=8):
+        """Owner-triggered read-only diagnostic: INCLUDE latest possibly forming bar.
+
+        Does not send orders, does not store authentication headers and
+        does not modify candle closed/open assumptions in the trading engine.
+        """
+        if resolution not in PERIOD or not epic.replace('_','').isalnum():
+            raise FeedError('Niepoprawny interwał/instrument diagnostyki')
+        try:
+            r=self.session.get(f'{self.base_url}/api/v1/prices/{epic}',
+                params={'resolution':resolution,'max':min(20,max(4,int(count)))},
+                headers=self.headers(),timeout=12)
+            r.raise_for_status()
+            return parse_prices(r.json())
+        except requests.RequestException as ex:
+            raise FeedError(http_error_message(ex,'Diagnostyka timestampów',epic)) from ex
+
     def market_state(self, epic: str = 'US500') -> str:
         """Read-only instrument status; do not infer trading hours from the clock."""
         if not epic.replace('_','').isalnum():
