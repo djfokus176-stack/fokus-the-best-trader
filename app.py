@@ -1183,6 +1183,24 @@ with reports_tab:
                         st.warning("Nieznany format czasu ostatniego skanu workera.")
                 else:
                     st.warning("Brak potwierdzonego skanu workera w chmurze. Cloud jest skonfigurowany, ale skaner mógł jeszcze nigdy nie wystartować.")
+                candidates=st.session_state.get('_paper_remote_candidates') or []
+                with st.expander('🔎 ARCHIWUM RADARU — SUROWE SYGNAŁY I POWODY BLOKAD',expanded=True):
+                    st.caption('Nie są to pozycje PAPER ani zweryfikowane typy. Zapis z workera '
+                               'na kolejnych zamkniętych świecach, również gdy decyzją jest WAIT.')
+                    if candidates:
+                        rows=[]
+                        for item in reversed(candidates[-30:]):
+                            votes=item.get('raw_candidates') or []
+                            rows.append({
+                                'Świeca UTC':item.get('candle_utc'),
+                                'Decyzja':item.get('decision'),
+                                'Kandydaci surowi':', '.join(
+                                    v.get('direction','')+' '+v.get('strategy','') for v in votes) or 'BRAK',
+                                'Blokady':', '.join(item.get('blockers') or []) or 'BRAK',
+                            })
+                        st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True)
+                    else:
+                        st.info('Brak zapisanej historii kandydatów — worker uzupełni ją przy następnym poprawnym skanie.')
                 auto_ai=st.session_state.get('_paper_remote_auto_ai') or {}
                 if auto_ai:
                     with st.expander('🤖 AUTOMATYCZNY GPT — OSTATNIA ANALIZA WORKERA (PAPER)'):
