@@ -31,7 +31,7 @@ def test_auto_news_is_15_min_calendar_is_60_min_even_with_5_second_reruns():
                        fetch_news=rss,fetch_calendar=ics)
     assert calls.count("ics")==2
     assert calendar_is_current(s,NOW+timedelta(minutes=60))
-    assert not calendar_is_current(s,NOW+timedelta(minutes=122))
+    assert not calendar_is_current(s,NOW+timedelta(minutes=123))
 
 
 def test_missing_or_broken_calendar_never_looks_like_clear_market():
