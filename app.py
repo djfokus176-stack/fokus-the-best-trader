@@ -1,6 +1,7 @@
-"""FOKU$ THE BEST TRADER v0.2 — wholly new Streamlit research dashboard."""
+"""FOKU$ THE BEST TRADER — owner-only PAPER market research terminal."""
 from __future__ import annotations
 import hashlib
+import json
 import sqlite3
 import os
 import time
