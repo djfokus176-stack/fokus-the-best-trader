@@ -70,3 +70,57 @@ def wav_notice(kind,rate=12000):
         w.setframerate(rate)
         w.writeframes(frames)
     return stream.getvalue()
+
+
+# Prerecorded ElevenLabs clips are optional static MP3 assets:
+# NO ElevenLabs API key, no extra generation costs at alert time.
+# Asset filenames are a fixed allowlist; trade metadata never becomes a path.
+from pathlib import Path
+
+VOICE_DIR=Path(__file__).resolve().parents[1]/"assets"/"voices"
+VOICE_FILES={
+    "PAPER_CLOSE_TP":"close_profit.mp3",
+    "PAPER_CLOSE_SL":"close_stop.mp3",
+    "PAPER_TIMEOUT":"close_timeout.mp3",
+    "PAPER_TRAIL_SL":"move_stop.mp3",
+    "PAPER_EXTEND_TP":"extend_target.mp3",
+}
+
+
+def voice_filename(kind, side=None):
+    """Return the fixed voice clip for an actual archived PAPER event."""
+    if kind=="PAPER_OPEN":
+        return {"LONG":"open_long.mp3","SHORT":"open_short.mp3"}.get(side)
+    return VOICE_FILES.get(kind)
+
+
+def voice_clip(kind, side=None, *, directory=None):
+    """Load an optional local MP3; no network or arbitrary path access.
+
+    Missing/invalid files fall back to the existing event-specific WAV tone.
+    Each clip is limited to 2 MiB to avoid memory spikes on Streamlit Cloud.
+    """
+    filename=voice_filename(kind,side)
+    if not filename:
+        return None
+    directory=VOICE_DIR if directory is None else Path(directory)
+    path=directory/filename
+    try:
+        if not path.is_file() or not (0<path.stat().st_size<=2*1024*1024):
+            return None
+        data=path.read_bytes()
+        # MP3 frame sync or an ID3 tag; avoid playing random text as audio.
+        if data[:3]!=b"ID3" and not (len(data)>2 and data[0]==255 and data[1]&224==224):
+            return None
+        return data
+    except OSError:
+        return None
+
+
+def alert_audio(kind, side=None, *, voice_enabled=False, directory=None):
+    """Return audio bytes, MIME type and actual mode used (VOICE or TONE)."""
+    if voice_enabled:
+        mp3=voice_clip(kind,side,directory=directory)
+        if mp3 is not None:
+            return mp3,"audio/mpeg","VOICE"
+    return wav_notice(kind),"audio/wav","TONE"

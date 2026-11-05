@@ -30,7 +30,7 @@ from trader.paper_lifecycle import (
     ensure_tables as ensure_paper_v3, queue_paper, progress_paper,
     active_position, recent_positions, recent_events)
 from trader.paper_display import annotate_open_paper,annotate_paper_history
-from trader.paper_sounds import unseen_paper_event,wav_notice,SOUND_EVENTS
+from trader.paper_sounds import unseen_paper_event,wav_notice,SOUND_EVENTS,alert_audio
 from trader.paper_reporting import daily_weekly,performance_by_policy
 from trader.remote_checkpoint import RemoteCheckpoint,remote_view_db,RemoteError,dump_state
 from trader.telegram_alerts import dispatch_alerts, record_stale_event
@@ -257,9 +257,28 @@ with st.sidebar:
         help='Wymaga interakcji z przeglądarką. Dźwięk dotyczy tylko nowych '
              'zdarzeń potwierdzonych w archiwum PAPER; przeglądarka może go zablokować. '
              'Nie oznacza rzeczywistych transakcji.')
+    st.radio('🎙️ Rodzaj alertów PAPER',('Tony','Głos ElevenLabs (nagrania MP3)'),
+        horizontal=True,key='paper_audio_mode',
+        help='Własne krótkie pliki MP3 z assets/voices w repozytorium. '
+             'Bez dodatkowych zapytań do ElevenLabs; brakujący klip zastępuje ton.')
+    sound_preview={
+        'Otwarcie LONG':('PAPER_OPEN','LONG'),
+        'Otwarcie SHORT':('PAPER_OPEN','SHORT'),
+        'Zamknięcie z zyskiem':('PAPER_CLOSE_TP',None),
+        'Stop loss':('PAPER_CLOSE_SL',None),
+        'Zamknięcie po czasie':('PAPER_TIMEOUT',None),
+        'Przesunięcie SL':('PAPER_TRAIL_SL',None),
+        'Wydłużenie TP':('PAPER_EXTEND_TP',None),
+    }
+    test_choice=st.selectbox('🎧 Sprawdź nagranie',tuple(sound_preview),key='paper_sound_preview')
     if st.button('🔊 PRZETESTUJ DŹWIĘK (bez pozycji)',key='test_paper_sound'):
-        st.caption('Test dźwięku lokalnego, NIE otwiera PAPER ani zlecenia.')
-        st.audio(wav_notice('PAPER_OPEN'),format='audio/wav',autoplay=True)
+        sound_kind,sound_side=sound_preview[test_choice]
+        audio,mime,used=alert_audio(sound_kind,sound_side,
+            voice_enabled=st.session_state.get('paper_audio_mode')=='Głos ElevenLabs (nagrania MP3)')
+        st.caption('Test '+('GŁOSU ELEVENLABS' if used=='VOICE' else 'TONU')+
+                   ', NIE otwiera PAPER ani zlecenia. '
+                   'Jeśli nie ma pliku MP3, odtwarzam ton zastępczy.')
+        st.audio(audio,format=mime,autoplay=True)
     st.caption('AUTO-SKAN nie wykonuje zleceń. Płatne AI jest ręczne w CZAT AI; osobny worker może opcjonalnie uruchamiać limitowane komentarze GPT po włączeniu w GitHub.')
     st.markdown('---')
     with st.expander('🔑 KLUCZE API — TESTY / ZMIANY (już zapisane w Secrets)', expanded=False):
@@ -744,7 +763,15 @@ with market_tab:
                         kind=audio_event['kind']
                         st.info('🔔 '+SOUND_EVENTS[kind]+
                                 ' — zdarzenie PAPER, nie zlecenie rzeczywiste.')
-                        st.audio(wav_notice(kind),format='audio/wav',autoplay=True)
+                        side=next((row.get('side') for row in paper_rows
+                            if row.get('trade_id')==audio_event.get('trade_id')),None)
+                        audio,mime,used=alert_audio(kind,side,
+                            voice_enabled=st.session_state.get('paper_audio_mode')==
+                                           'Głos ElevenLabs (nagrania MP3)')
+                        if used=='TONE' and st.session_state.get('paper_audio_mode')==\
+                                'Głos ElevenLabs (nagrania MP3)':
+                            st.caption('🔉 Nie znaleziono przypisanego MP3 — odtwarzam ton.')
+                        st.audio(audio,format=mime,autoplay=True)
                     current_paper=active_position(db_v3,instrument,src,tf)
                 except (OSError, sqlite3.Error,ValueError,RemoteError) as ex:
                     st.error('❌ Silnik PAPER/REMOTE: '+type(ex).__name__+'; brak zdalnego odczytu, nie wyświetlam starej pozycji jako aktualnej.')
