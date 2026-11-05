@@ -314,7 +314,15 @@ class CapitalReadOnly:
                 params={'resolution':resolution,'max':2},
                 headers=self.headers(),timeout=8)
             r.raise_for_status()
-            raw=parse_prices(r.json())
+            payload=r.json()
+            items=payload.get("prices") if isinstance(payload,dict) else None
+            if not isinstance(items,list) or not items:
+                raise FeedError("Brak świec API do podglądu LIVE")
+            # The previous bar may be corrupt while the latest is valid.
+            # Never let a bad PREVIOUS bar suppress the actual live preview.
+            # But if the latest is bad, do not use an older bar as LIVE.
+            latest=max(items,key=lambda it:pd.Timestamp(it["snapshotTimeUTC"]))
+            raw=parse_prices({"prices":[latest]})
         except requests.RequestException as exc:
             raise FeedError(http_error_message(exc,'Świeca bieżąca',epic)) from exc
         if raw.empty:
