@@ -14,7 +14,7 @@ import sqlite3
 import time
 from .market import CapitalReadOnly,FeedError,PERIOD
 from .mtf import fetch_all_timeframes,filter_mtf_decision,TIMEFRAMES
-from .news_radar import fetch_bls_schedule,macro_blackout
+from .news_radar import fetch_bls_schedule,macro_blackout,fetch_headlines
 from .runtime import current_feed_status
 from .storage import connect,archive_candles
 from .strategies_pro import ALL_STRATEGIES,decide_any
@@ -156,6 +156,25 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
     version,payload=remote.fetch()
     auto_state=payload.get("auto_ai",{})
     candidates=payload.get("candidate_feed",[])
+    news_feed=dict(payload.get("news_radar") or {})
+    utc=datetime.now(timezone.utc)
+    last=news_feed.get("last_fetch_utc")
+    try:
+        elapsed=(utc-datetime.fromisoformat(last)).total_seconds() if last else 1e20
+    except (ValueError,TypeError):
+        elapsed=1e20
+    if elapsed>=900 or elapsed<0:
+        news_feed["last_fetch_utc"]=utc.isoformat()
+        try:
+            headlines,source_errors=fetch_headlines(timeout=3)
+            news_feed["headlines"]=headlines[:30]
+            news_feed["errors"]=dict(source_errors)
+            news_feed["status"]=("OK" if headlines and not source_errors
+                  else "PARTIAL" if headlines else "NO_DATA")
+        except (OSError,ValueError,TypeError) as exc:
+            news_feed["status"]="ERROR_"+type(exc).__name__
+            news_feed["errors"]={"worker":type(exc).__name__}
+            news_feed["headlines"]=[]
     def review_snapshot(snapshot,decision,votes,views,blockers):
         nonlocal auto_state,candidates
         from .auto_ai import review_closed_candle
@@ -169,7 +188,8 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
                 "Setup OHLC":wave.action,"Po filtrze MTF":"NIE WYLICZANO (SHADOW)",
                 "RR":wave.rr,"Powód":wave.reason})
         candidates=append_candidate(candidates,snapshot,decision,research_votes,blockers)
-        auto_state=review_closed_candle(auto_state,snapshot,decision,votes,views,blockers)
+        auto_state=review_closed_candle(auto_state,snapshot,decision,votes,views,
+                                      blockers,news_context=news_feed)
     db=sqlite3.connect(":memory:")
     try:
         restore_state(db,payload)
@@ -182,11 +202,15 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             payload["auto_ai"]=auto_state
         if isinstance(candidates,list):
             payload["candidate_feed"]=candidates[-120:]
+        payload["news_radar"]=news_feed
         payload["meta"]={
             "last_scan_utc":datetime.now(timezone.utc).isoformat(),
             "last_scan_summary":status[:350],
             "source":"Capital.com DEMO REST",
             "timeframe":tf,"epic":epic,
+            "strategy":strategy,
+            "news_status":news_feed.get("status","NO_DATA"),
+            "news_last_fetch_utc":news_feed.get("last_fetch_utc"),
             "worker":"GitHub Actions or foreground process",
             "telegram_remote":"DISABLED"}
         new_version=remote.save(version,payload)

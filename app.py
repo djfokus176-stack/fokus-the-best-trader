@@ -24,6 +24,7 @@ from trader.assistant import numeric_context, answer_ai
 from trader.csv_data import read_ohlc_csv
 from trader.runtime import current_feed_status, scan_delay_seconds
 from trader.live_chart import quote_sample,sampled_preview,show_quote_preview
+from trader.auto_news import refresh_news_state,calendar_is_current
 from trader.scan_monitor import scan_event, append_scan_log
 from trader.chat_ui import append_message, renderable_history, preview_context
 from trader.paper_lifecycle import (
@@ -186,6 +187,7 @@ def paper_view_db():
         st.session_state['_paper_remote_meta']=payload.get('meta') or {}
         st.session_state['_paper_remote_auto_ai']=payload.get('auto_ai') or {}
         st.session_state['_paper_remote_candidates']=payload.get('candidate_feed') or []
+        st.session_state['_paper_remote_news']=payload.get('news_radar') or {}
         return db
     return connect()
 
@@ -259,6 +261,11 @@ with st.sidebar:
         help='Odświeża dostępny snapshot BID/OFFER Capital.com, NIE pobiera całego okna '
              'OHLC i NIE otwiera pozycji. Nowe pełne świece i strategie M1 są '
              'sprawdzane najczęściej co 60 sekund.')
+    st.toggle('📰 AUTO RADAR NEWS/MACRO (RSS co 15 min, BLS co 60 min)',
+       value=_early_secret('FOKUS_AUTO_NEWS_ENABLED','true').lower() in ('true','1','yes','on'),
+       key='auto_news_active',
+       help='Oficjalne źródła FED/BLS/BEA. Nie wywołuje płatnego GPT. '
+            'W aktywnej sesji Streamlit, niezależnie od osobnego workera.')
     st.caption('⚡ Bieżąca cena co '+str(st.session_state['auto_scan_period'])+
                ' s • pełny odczyt świec najczęściej co 60 s (M1). '
                'Osobny worker PAPER GitHub pozostaje na swoim harmonogramie.')
@@ -416,6 +423,13 @@ def auto_scan_heartbeat():
 
 auto_scan_heartbeat()
 
+# Independent, bounded source refresh even if the NEWS tab is not selected.
+# Never contact all five feeds on every 5-second candle redraw.
+if st.session_state.get('auto_news_active',False) and has_cap:
+    refresh_news_state(st.session_state,
+        fetch_news=lambda:fetch_headlines(timeout=2),
+        fetch_calendar=lambda:fetch_bls_schedule(timeout=4))
+
 def read_csv(file):
     return read_ohlc_csv(file)
 
@@ -430,6 +444,11 @@ with market_tab:
         if st.session_state.get('auto_scan_active'):
             st.success(f"🟢 LIVE CENA: co {st.session_state.get('auto_scan_period',5)} s • "
                        "świece/strategie: co najmniej 60 s • tylko otwarta strona")
+            st.caption('🧠 Ostatnia analiza zamkniętych świec (UTC): '+
+                str(st.session_state.get('last_scan_utc','JESZCZE BRAK'))+
+                ' | 📰 RSS: '+str(st.session_state.get('_news_read_utc','JESZCZE BRAK'))+
+                ' | BLS: '+('AKTUALNY' if calendar_is_current(st.session_state)
+                           else 'NIEPOTWIERDZONY'))
         else:
             st.info('⚪ TRYB RĘCZNY — nowe świece wymagają ponownego skanowania.')
     with col2:
@@ -761,11 +780,15 @@ with market_tab:
                             decision,st.session_state.get('mtf_snapshots',{}),
                             asof=snap.confirmed_utc)
                 if ready:
-                    blackout,note=macro_blackout(st.session_state.get('_macro_calendar',[]))
-                    if blackout:
-                        from dataclasses import replace as _replace
-                        decision=_replace(decision,action='WAIT',entry=None,
-                            stop=None,target=None,rr=None,reason=note)
+                    if not calendar_is_current(st.session_state):
+                        decision=dataclass_replace(decision,action='WAIT',entry=None,
+                           stop=None,target=None,rr=None,
+                           reason='Brak aktualnego kalendarza BLS. WAIT do weryfikacji źródła.')
+                    else:
+                        blackout,note=macro_blackout(st.session_state.get('_macro_calendar',[]))
+                        if blackout:
+                            decision=dataclass_replace(decision,action='WAIT',entry=None,
+                                stop=None,target=None,rr=None,reason=note)
                 if not ready: decision.action='WAIT';decision.reason='Brak zweryfikowanego, świeżego feedu LIVE/DEMO — tylko analiza historyczna'
                 banner=f"{decision.action} | {strategy} | {decision.reason}"
                 if decision.action=='LONG':
@@ -790,7 +813,27 @@ with market_tab:
                     db_v3=paper_view_db()
                     ensure_paper_v3(db_v3)
                     if remote_paper_view_enabled():
-                        st.caption('☁️ PAPER REMOTE VIEW: pozycje z trwałego checkpointu workera. Ten terminal nie zapisuje nowych pozycji PAPER — jeden writer w GitHub Actions.')
+                        st.caption('☁️ PAPER REMOTE VIEW: pozycje z trwałego checkpointu workera. '
+                                   'Ten terminal nie zapisuje nowych pozycji PAPER.')
+                        meta=st.session_state.get('_paper_remote_meta') or {}
+                        stamp=meta.get('last_scan_utc')
+                        try:
+                            worker_age=(datetime.now(timezone.utc)-
+                                datetime.fromisoformat(stamp)).total_seconds() if stamp else None
+                        except (ValueError,TypeError):
+                            worker_age=None
+                        if worker_age is None:
+                            st.error('🔴 WORKER GH: brak potwierdzonego skanu w bazie.')
+                        elif worker_age>15*60:
+                            st.error(f'🔴 WORKER GH NIEAKTUALNY — ostatni skan {worker_age/60:.0f} min temu. '
+                                     'Samo odświeżanie wykresu NIE otworzy pozycji PAPER!')
+                        else:
+                            st.success(f'🟢 WORKER GH: zapis {worker_age/60:.1f} min temu.')
+                        st.caption('🤖 Strategia workera: '+
+                            str(meta.get('strategy','BRAK DANYCH / starszy checkpoint')))
+                        if meta.get('last_scan_summary'):
+                            st.caption('Ostatni wynik workera (bez sekretów): '+
+                                str(meta['last_scan_summary'])[:350])
                     if (not remote_paper_view_enabled() and actual_scan_this_rerun
                             and snap.good and src=='Capital.com DEMO REST'):
                         # Process all available broker TFs so switching M1/M5/H1
@@ -1227,18 +1270,18 @@ with strategies_tab:
 
 with news_tab:
     st.subheader('📰 RADAR MAKRO — OFICJALNE ŹRÓDŁA FED / BLS / BEA')
-    st.caption('Nagłówki RSS i kalendarz publikacji BLS. Bez scrapingowania kont osobistych i bez automatycznych płatnych zapytań GPT.')
-    if st.button('🌐 POBIERZ WIADOMOŚCI I KALENDARZ BLS',type='primary',key='fetch_official_news'):
-        headlines,feed_errors=fetch_headlines()
-        st.session_state['_headlines']=headlines
-        st.session_state['_news_feed_errors']=feed_errors
-        st.session_state['_news_read_utc']=datetime.now(timezone.utc).isoformat()
-        try:
-            st.session_state['_macro_calendar']=fetch_bls_schedule()
-            st.session_state['_calendar_error']=None
-        except Exception as ex:
-            st.session_state['_macro_calendar']=[]
-            st.session_state['_calendar_error']=type(ex).__name__
+    st.caption('Oficjalne RSS FED/BLS/BEA automatycznie co 15 minut; '
+               'kalendarz BLS co godzinę, gdy aplikacja otwarta. '
+               'GPT nie jest odpalany automatycznie przez ten przełącznik.')
+    if st.button('🌐 ODŚWIEŻ WIADOMOŚCI I KALENDARZ TERAZ',type='primary',
+                 key='fetch_official_news'):
+        refresh_news_state(st.session_state,force=True,
+            fetch_news=lambda:fetch_headlines(timeout=2),
+            fetch_calendar=lambda:fetch_bls_schedule(timeout=4))
+    st.caption('Stan automatycznego radaru: '+str(st.session_state.get('_news_status','NIE URUCHOMIONO'))+
+               ' | RSS UTC: '+str(st.session_state.get('_news_read_utc','BRAK'))+
+               ' | kalendarz UTC: '+str(st.session_state.get('_calendar_success_utc','BRAK'))+
+               ' | BLS: '+('OK' if calendar_is_current(st.session_state) else 'NIEDOSTĘPNY'))
     if st.session_state.get('_news_read_utc'):
         st.caption('Ostatni udany/podjęty skan źródeł (UTC): '+st.session_state['_news_read_utc'])
     events=st.session_state.get('_macro_calendar',[])
@@ -1257,7 +1300,8 @@ with news_tab:
         st.dataframe(pd.DataFrame(news[:45]),use_container_width=True,hide_index=True,
             column_config={'url':st.column_config.LinkColumn('Oficjalny link')})
     else:
-        st.info('Brak pobranych wiadomości — kliknij przycisk. Nie pokazuję fikcyjnych nagłówków.')
+        st.info('Nie pobrano oficjalnych wiadomości. Sprawdź AUTO RADAR '
+                'i błędy źródeł; nie pokazuję fikcyjnych nagłówków.')
     if st.session_state.get('_news_feed_errors'):
         with st.expander('Niedostępne źródła RSS (uczciwy status)'):
             st.json(st.session_state['_news_feed_errors'])
@@ -1311,6 +1355,19 @@ with reports_tab:
                 else:
                     st.warning("Brak potwierdzonego skanu workera w chmurze. Cloud jest skonfigurowany, ale skaner mógł jeszcze nigdy nie wystartować.")
                 candidates=st.session_state.get('_paper_remote_candidates') or []
+                worker_news=st.session_state.get('_paper_remote_news') or {}
+                with st.expander('📰 NEWS RADAR WORKERA (BEZ PRZEGLĄDARKI)'):
+                    st.caption('Oficjalne RSS FED/BLS/BEA zbierane przez GitHub workera '
+                               'co około 15 minut, jeśli worker rzeczywiście się uruchamia. '
+                               'To nie jest osobna płatna analiza GPT.')
+                    st.write('Status:',worker_news.get('status','NIEURUCHOMIONY'),
+                             '| Ostatni odczyt UTC:',
+                             worker_news.get('last_fetch_utc','BRAK'))
+                    if worker_news.get('headlines'):
+                        st.dataframe(pd.DataFrame(worker_news['headlines'][:15]),
+                            hide_index=True,use_container_width=True)
+                    if worker_news.get('errors'):
+                        st.json(worker_news['errors'])
                 with st.expander('🔎 ARCHIWUM RADARU — SUROWE SYGNAŁY I POWODY BLOKAD',expanded=True):
                     st.caption('Nie są to pozycje PAPER ani zweryfikowane typy. Zapis z workera '
                                'na kolejnych zamkniętych świecach, również gdy decyzją jest WAIT.')
