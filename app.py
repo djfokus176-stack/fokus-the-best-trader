@@ -237,8 +237,8 @@ with st.sidebar:
     max_spread=st.slider('Maksymalny spread (pkt)',.2,5.0,2.0,.1)
     st.toggle('🔄 AUTO-SKAN — tylko gdy aplikacja otwarta',value=_early_secret('AUTO_SCAN_DEFAULT','true').lower() in ('true','1','yes'),key='auto_scan_active',
         help='Ocenia zamknięte świece co najmniej co 60 sekund. Nie jest usługą działającą 24/7.')
-    st.session_state['auto_scan_period']=300
-    st.caption('⏲️ Automatyczne pobieranie świec co 5 minut (300 sekund), tylko gdy ta strona jest otwarta.')
+    st.session_state['auto_scan_period']=60
+    st.caption('⏲️ Terminal odświeża zamknięte świece co 60 sekund, gdy aplikacja jest otwarta. Osobny worker GitHub działa co około 5 minut.')
     st.caption('AUTO-SKAN nie wykonuje zleceń. Płatne AI jest ręczne w CZAT AI; osobny worker może opcjonalnie uruchamiać limitowane komentarze GPT po włączeniu w GitHub.')
     st.markdown('---')
     with st.expander('🔑 KLUCZE API — TESTY / ZMIANY (już zapisane w Secrets)', expanded=False):
@@ -334,12 +334,12 @@ market_tab,chat_tab,dna_tab,mtf_tab,strategies_tab,lab_tab,news_tab,reports_tab,
     '🧪 LABORATORIUM','📰 NEWS / MAKRO','📈 RAPORTY',
     '📚 ARCHIWUM','⚙️ STATUS / API'])
 
-@st.fragment(run_every="300s")
+@st.fragment(run_every="60s")
 def auto_scan_heartbeat():
     """A page-open-only timer that triggers a full rerun for scan & archiving."""
     if not st.session_state.get('auto_scan_active',False):
         return
-    interval=scan_delay_seconds(st.session_state.get('auto_scan_period',300))
+    interval=scan_delay_seconds(st.session_state.get('auto_scan_period',60))
     tick=time.monotonic()
     previous=st.session_state.get('_last_auto_pulse')
     if previous is None:
@@ -362,7 +362,7 @@ with market_tab:
     with col1:
         csv=st.file_uploader('Opcjonalnie własne dane OHLC CSV (wyłącznie do nauki / replay)',type=['csv'])
         load=st.button('🔄 SKANUJ ŚWIECE',type='primary',use_container_width=True)
-        st.caption('Przy otwarciu strony wykonuję jedną próbę pobrania. AUTO-SKAN ponawia odczyt co 5 minut (300 s), wyłącznie gdy strona jest otwarta.')
+        st.caption('AUTO-SKAN: nowa próba pobrania świec co 60 s, gdy strona jest otwarta. GitHub Actions: osobno, około co 5 min.')
         if st.session_state.get('auto_scan_active'):
             st.success(f"🟢 AUTO-SKAN WŁĄCZONY: co {st.session_state.get('auto_scan_period',60)} s (tylko aktywna sesja przeglądarki)")
         else:
@@ -695,7 +695,7 @@ with market_tab:
                               bar_limit=st.session_state.get('chart_window_size',120),
                               resolution=tf,source=src)
                 chart_slot.plotly_chart(fig,use_container_width=True)
-                st.caption('🤖 BOT ocenia ten sam zbiór zamkniętych świec co wykres. Aktualizacja co 5 minut przy otwartej stronie, bez streamingu ticków i bez zleceń.')
+                st.caption('🤖 BOT ocenia te same zamknięte świece co wykres. Odświeżanie co 60 sekund przy otwartej stronie, bez streamingu ticków i zleceń.')
                 if ready:
                     payload=numeric_context(snap.frame,decision,instrument,tf,snap.spread)
                     st.session_state['ai_context']=payload
