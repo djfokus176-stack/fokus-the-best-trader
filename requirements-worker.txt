@@ -1,5 +1,6 @@
-# Minimal pinned dependencies for PAPER worker, no Streamlit/OpenAI/Plotly.
+# Minimal pinned dependencies for PAPER worker; OpenAI only used on explicit opt-in.
 # Existing full terminal and pytest continue to use requirements.txt.
 pandas==2.3.3
 numpy==2.4.6
 requests==2.34.2
+openai==2.54.0
