@@ -23,6 +23,12 @@ from trader.runtime import current_feed_status, scan_delay_seconds
 from trader.scan_monitor import scan_event, append_scan_log
 from trader.chat_ui import append_message, renderable_history, preview_context
 from trader.chart_tracker import annotate_scan
+from trader.paper_lifecycle import (
+    ensure_tables as ensure_paper_v3, queue_paper, progress_paper,
+    active_position, recent_positions, recent_events)
+from trader.paper_display import annotate_open_paper
+from trader.paper_reporting import daily_weekly
+from trader.telegram_alerts import dispatch_alerts, record_stale_event
 from trader.auth import capital_credentials, active_credential, test_capital_login, test_openai_model, test_telegram_token
 from trader.access import access_configured, password_matches
 from trader.owner_auth import auth_mode, owner_email_configured, google_identity_matches, google_oidc_ready
@@ -331,7 +337,8 @@ with market_tab:
         st.info(f'🔄 Pierwsza próba pobrania świec z Capital.com {capital_env}...')
     scheduled_scan = bool(st.session_state.pop('_scheduled_scan',False)
         and st.session_state.get('auto_scan_active',False) and has_cap and csv is None)
-    if load or auto_scan or scheduled_scan:
+    actual_scan_this_rerun=bool(load or auto_scan or scheduled_scan)
+    if actual_scan_this_rerun:
         scan_trigger='MANUAL' if load else ('STARTUP' if auto_scan else 'AUTO')
         scan_requested=datetime.now(timezone.utc)
         previous_snap=st.session_state.get('market_snap')
@@ -561,9 +568,43 @@ with market_tab:
                     m2.metric('Stop (symulacja)',f'{decision.stop:.2f}')
                     m3.metric('Cel (symulacja)',f'{decision.target:.2f}')
                     m4.metric('RR szac. netto',f'{decision.rr:.2f}')
-                    # Lines belong to the CURRENT evaluated decision, not last archived trade.
-                    for name,value in [('Wejście',decision.entry),('SL',decision.stop),('TP',decision.target)]:
-                        fig.add_hline(y=value,annotation_text=name)
+                    st.caption('To kandydat SETUP. Linie zarezerwowane są dla pozycji, która naprawdę przeszła w OPEN w silniku PAPER v3.')
+                current_paper=None
+                try:
+                    db_v3=connect()
+                    ensure_paper_v3(db_v3)
+                    if actual_scan_this_rerun and snap.good and src=='Capital.com DEMO REST':
+                        changes=progress_paper(db_v3,snap.frame,instrument,src,tf,
+                                              max_holding=20)
+                        if ready and decision.action in ('LONG','SHORT'):
+                            paper_id=queue_paper(db_v3,instrument,src,tf,decision,
+                                snap.confirmed_utc,snap.spread,slippage=.25,
+                                market_status=market_status)
+                            if paper_id:
+                                st.caption(f'🧪 Nowy PENDING PAPER v3: {paper_id[:10]} — wejście dopiero na OPEN kolejnej zamkniętej świecy.')
+                        if changes:
+                            st.caption('PAPER v3: '+', '.join(changes))
+                        if secret('PAPER_TELEGRAM_ALERTS_ENABLED','false').lower() in ('true','1','yes'):
+                            token=active_credential('TELEGRAM_BOT_TOKEN',secret,overrides)
+                            chat_id=active_credential('TELEGRAM_CHAT_ID',secret,overrides)
+                            alert_result=dispatch_alerts(db_v3,token,chat_id,enabled=True)
+                            if alert_result.get('failed'):
+                                st.warning(f"Telegram: {alert_result['failed']} alertów miało błąd dostarczenia i nie będzie automatycznie ponawianych.")
+                    current_paper=active_position(db_v3,instrument,src,tf)
+                except (OSError, sqlite3.Error,ValueError) as ex:
+                    st.error('❌ Silnik pozycji PAPER v3: '+type(ex).__name__+'; nie zakładam, że otwarto pozycję.')
+                if current_paper:
+                    st.markdown('### 🧪 AKTYWNA SYMULACJA PAPER v3')
+                    st.info(
+                        f"Status: **{current_paper['status']}** | {current_paper['side']} "
+                        f"| {current_paper['strategy']} | ID: {current_paper['trade_id'][:10]} "
+                        f"| SL MID {current_paper['stop_mid']:.2f} | TP MID {current_paper['target_mid']:.2f}. "
+                        +('Wejście dopiero po następnej ZAMKNIĘTEJ świecy — nie było jeszcze wykonania.'
+                          if current_paper['status']=='PENDING'
+                          else f"Wejście wykonawcze (symulowane BID/ASK): {current_paper['entry_executable']:.2f}."))
+                else:
+                    st.caption('🧪 Pozycja PAPER v3: BRAK AKTYWNEJ. Historyczne strzałki są wyłącznie układami, nie zrealizowanymi transakcjami.')
+                annotate_open_paper(fig,current_paper)
                 record_for_chart=dict(st.session_state.get('_scan_last_result') or {})
                 record_for_chart['scan_no']=st.session_state.get('_scan_attempt_count',0)
                 annotate_scan(fig,snap.frame,decision,record_for_chart,
