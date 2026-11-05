@@ -164,3 +164,25 @@ def test_policy_reports_do_not_merge_adaptive_with_fixed(tmp_path):
     assert len(result)==2
     assert {r["Wariant"] for r in result}=={"fixed","adaptive"}
     assert sum(r["Zamknięte"] for r in result)==2
+
+
+def test_short_adaptive_can_bank_profit_on_reversal_without_future_leak(tmp_path):
+    db=connect(tmp_path/"short.sqlite")
+    _open(db,side="SHORT")
+    rows=_frame([[100,100.4,99.6,100],
+                 [100,100,96.7,96.8]])
+    events=progress_paper(db,rows,"US500",SRC,"MINUTE")
+    assert events==["PAPER_OPEN","PAPER_TRAIL_SL","PAPER_EXTEND_TP"]
+    active=recent_positions(db)[0]
+    assert active["stop_mid"]<102
+    assert active["target_mid"]<96
+    assert active["status"]=="OPEN"
+    # Next CLOSED bar retrospectively crosses the NEW stop; not same bar.
+    rows=_frame([[100,100.4,99.6,100],
+                 [100,100,96.7,96.8],
+                 [96.8,98.5,96.5,97.9]])
+    events=progress_paper(db,rows,"US500",SRC,"MINUTE")
+    assert events==["PAPER_CLOSE_SL"]
+    closed=recent_positions(db)[0]
+    assert closed["pnl_pts"]>0
+    assert closed["status"]=="CLOSED_SL"
