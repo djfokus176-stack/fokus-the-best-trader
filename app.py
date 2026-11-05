@@ -20,12 +20,10 @@ from trader.mtf_replay import compare_mtf_on_m1_csv
 from trader.news_radar import fetch_headlines, fetch_bls_schedule, macro_blackout
 from trader.storage import connect, archive, recent, recent_scan_decisions, audit_prior_paper_signals, paper_report, legacy_outcomes_count, archive_candles, load_candles
 from trader.assistant import numeric_context, answer_ai
-from trader.arrow_cache import cached_historical_marks
 from trader.csv_data import read_ohlc_csv
 from trader.runtime import current_feed_status, scan_delay_seconds
 from trader.scan_monitor import scan_event, append_scan_log
 from trader.chat_ui import append_message, renderable_history, preview_context
-from trader.chart_tracker import annotate_scan
 from trader.paper_lifecycle import (
     ensure_tables as ensure_paper_v3, queue_paper, progress_paper,
     active_position, recent_positions, recent_events)
