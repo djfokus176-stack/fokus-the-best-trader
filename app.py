@@ -19,6 +19,8 @@ from trader.assistant import numeric_context, answer_ai
 from trader.visuals import historical_marks
 from trader.runtime import current_feed_status, scan_delay_seconds
 from trader.scan_monitor import scan_event, append_scan_log
+from trader.chat_ui import append_message, renderable_history, preview_context
+from trader.chart_tracker import annotate_scan
 from trader.auth import capital_credentials, active_credential, test_capital_login, test_openai_model, test_telegram_token
 from trader.access import access_configured, password_matches
 from trader.owner_auth import auth_mode, owner_email_configured, google_identity_matches, google_oidc_ready
@@ -274,8 +276,8 @@ with st.sidebar:
     st.caption(f"🧠 AI: {st.session_state.get('_paid_ai_requests',0)} ręcznych zapytań w bieżącej sesji. Bez automatycznych opłat GPT.")
     st.info('Streamlit Cloud nie gwarantuje skanera działającego 24/7. Do tego potrzebny osobny worker na stale działającym hoście.')
 
-market_tab,dna_tab,mtf_tab,strategies_tab,lab_tab,news_tab,reports_tab,archive_tab,settings_tab=st.tabs([
-    '📊 TERMINAL','🧬 MARKET DNA','🧭 M1–H1','🎯 STRATEGIE',
+market_tab,chat_tab,dna_tab,mtf_tab,strategies_tab,lab_tab,news_tab,reports_tab,archive_tab,settings_tab=st.tabs([
+    '📊 TERMINAL','🤖 CZAT AI','🧬 MARKET DNA','🧭 M1–H1','🎯 STRATEGIE',
     '🧪 LABORATORIUM','📰 NEWS / MAKRO','📈 RAPORTY',
     '📚 ARCHIWUM','⚙️ STATUS / API'])
 
@@ -291,6 +293,8 @@ def auto_scan_heartbeat():
         st.session_state['_last_auto_pulse']=tick
         return
     if tick-previous >= interval-2:
+        if st.session_state.get('_ai_busy',False):
+            return  # Never interrupt the current manually paid AI request.
         st.session_state['_last_auto_pulse']=tick
         st.session_state['_scheduled_scan']=True
         st.rerun(scope='app')
@@ -469,6 +473,8 @@ with market_tab:
         if snap.epic!=instrument or snap.resolution!=tf:
             st.warning('Zmieniono instrument lub interwał: wykonaj NOWY SKAN przed decyzją.')
         else:
+            st.select_slider('🔎 Powiększenie wykresu — liczba ostatnich świec',
+                options=[60,90,120,180,240,350],value=120,key='chart_window_size')
             c1,c2,c3,c4=st.columns(4)
             c1.metric('ŹRÓDŁO',src)
             c2.metric('OSTATNIA ZAMKNIĘTA',snap.confirmed_utc.strftime('%H:%M:%S UTC') if snap.confirmed_utc else 'BRAK')
@@ -549,10 +555,17 @@ with market_tab:
                     # Lines belong to the CURRENT evaluated decision, not last archived trade.
                     for name,value in [('Wejście',decision.entry),('SL',decision.stop),('TP',decision.target)]:
                         fig.add_hline(y=value,annotation_text=name)
+                record_for_chart=dict(st.session_state.get('_scan_last_result') or {})
+                record_for_chart['scan_no']=st.session_state.get('_scan_attempt_count',0)
+                annotate_scan(fig,snap.frame,decision,record_for_chart,
+                              bar_limit=st.session_state.get('chart_window_size',120),
+                              resolution=tf)
                 chart_slot.plotly_chart(fig,use_container_width=True)
+                st.caption('🤖 Znacznik BOT przesuwa się wyłącznie na nową ZAMKNIĘTĄ świecę po faktycznym pobraniu danych. To odczyt co 60/120/300 s, nie streaming tickowy.')
                 if ready:
                     payload=numeric_context(snap.frame,decision,instrument,tf,snap.spread)
                     st.session_state['ai_context']=payload
+                    st.session_state['_last_ai_context']=dict(payload)
                     key=hashlib.sha256(f'{src}|{instrument}|{tf}|{strategy}|{snap.confirmed_utc.isoformat()}|{decision.action}'.encode()).hexdigest()
                     try:
                         db=connect()
@@ -563,18 +576,78 @@ with market_tab:
                         if reviewed:st.caption(f'Audyt zakończył {len(reviewed)} wcześniejszych symulacji PAPER.')
                     except (OSError, sqlite3.Error) as ex:
                         st.error('Nie zapisano archiwum PAPER: '+type(ex).__name__)
-                else:st.session_state.pop('ai_context',None)
-                with st.expander('🧠 ASYSTENT AI — PRZECZYTAJ LICZBOWY WYKRES'):
-                    question=st.text_input('Co chcesz wyjaśnić?',value='Dlaczego WAIT/LONG/SHORT i co unieważniłoby setup?')
-                    if st.button('Zapytaj AI o te świece'):
-                        if st.session_state.get('ai_context'):
-                            st.write(manual_ai_request(question,st.session_state['ai_context']))
-                        else:st.warning('AI wymaga wiarygodnego, aktualnego zestawu zamkniętych świec Capital.com.')
+                else:
+                    # Do not use stale data for a new trade signal, but keep the
+                    # last numerical snapshot available for labeled historical AI.
+                    if st.session_state.get('ai_context'):
+                        st.session_state['_last_ai_context']=dict(st.session_state['ai_context'])
+                    st.session_state.pop('ai_context',None)
+                st.info('🤖 Rozmowa z AI jest teraz w osobnej zakładce **CZAT AI**. Odpowiedzi pozostają widoczne po kolejnym automatycznym skanie.')
             else:
                 chart_slot.plotly_chart(fig,use_container_width=True)
                 st.warning('Wykres dostępny, ale jest mniej niż 70 zamkniętych świec — brak sygnału.')
     else:
         st.warning('Nie ma danych. Włącz odczyt Capital.com lub dodaj własny CSV edukacyjny. Nie pokazuję fikcyjnych sygnałów.')
+
+
+with chat_tab:
+    st.subheader('🤖 FOKU$ AI — ROZMOWA O WYKRESIE')
+    st.caption('Model OpenAI analizuje ostatnie ZAMKNIĘTE świece i ich wskaźniki. Odpowiedzi zapamiętywane są w tej sesji i nie znikają przy AUTO-SKANIE.')
+    chat_payload=st.session_state.get('ai_context') or st.session_state.get('_last_ai_context')
+    if chat_payload:
+        context_info=preview_context(chat_payload)
+        st.info(f"Źródło do rozmowy: {context_info['instrument']} | "
+                f"świeca: {context_info['candle']} | "
+                f"decyzja: {context_info['decision']} | "
+                f"liczba przekazanych świec: {context_info['n_candles']}.")
+        if not st.session_state.get('ai_context'):
+            st.warning('To OSTATNI ZAPISANY KONTEKST, a nie bieżąca analiza LIVE. AI powinno traktować go jako historię.')
+    else:
+        st.warning('Brak zebranych danych OHLC. Możesz pytać ogólnie, lecz AI nie powinno wtedy udawać analizy wykresu.')
+    if not openai_api_key:
+        st.error('Brak OPENAI_API_KEY w Secrets — nie mogę uruchomić modelu.')
+    if st.button('🗑️ Wyczyść tę rozmowę',key='clear_fokus_ai_history'):
+        st.session_state['_ai_messages']=[]
+        st.rerun()
+    for turn in renderable_history(st.session_state.get('_ai_messages')):
+        with st.chat_message(turn['role']):
+            st.markdown(turn['content'])
+            st.caption('Kontekst świecy: '+turn.get('market_candle_utc','BRAK')+
+                       ' · zapis: '+turn.get('time_utc','BRAK'))
+    with st.form('fokus_ai_chat_form',clear_on_submit=True):
+        user_query=st.text_area('Napisz pytanie do bota:',
+            placeholder='Dlaczego WAIT? Jak wygląda trend, EMA, SL/TP? Jakie są ryzyka?',
+            height=95)
+        sent=st.form_submit_button('🧠 WYŚLIJ PYTANIE DO GPT-5.4 HIGH',
+            type='primary',use_container_width=True)
+    if sent:
+        question=user_query.strip()
+        if not question:
+            st.warning('Najpierw wpisz pytanie.')
+        elif not openai_api_key:
+            st.error('Najpierw skonfiguruj OpenAI API w Streamlit Secrets.')
+        else:
+            with st.spinner('🧠 GPT analizuje liczby — odpowiedź zostanie zapisana w historii...'):
+                st.session_state['_ai_busy']=True
+                try:
+                    result=manual_ai_request(question,dict(chat_payload or {
+                        'instrument':instrument,
+                        'resolution':tf,
+                        'last_closed_utc':'BRAK — brak danych',
+                        'last_12_closed_candles':[],
+                        'note':'Brak danych live. Nie wolno wnioskować o bieżącym kierunku.'
+                    }))
+                finally:
+                    st.session_state['_ai_busy']=False
+            candle_id=(chat_payload or {}).get('last_closed_utc','BRAK')
+            st.session_state['_ai_messages']=append_message(
+                st.session_state.get('_ai_messages'),"user",question,candle_id)
+            st.session_state['_ai_messages']=append_message(
+                st.session_state['_ai_messages'],"assistant",result,candle_id)
+            with st.chat_message('assistant'):
+                st.markdown(result)
+                st.caption('Odpowiedź została zachowana w historii sesji.')
+    st.caption('Kosztowe wywołania OpenAI wykonujemy wyłącznie na kliknięcie. Sesja przeglądarki, nie trwała baza; po resecie serwera historia może zniknąć.')
 
 
 with dna_tab:
@@ -797,7 +870,20 @@ with news_tab:
                     'source':x['źródło'],'url':x['url']} for x in news[:12]]
                 context['calendar_BLS']=[{'event':x['wydarzenie'],'datetime_utc':x['data_utc'].isoformat()} for x in events[:12]]
                 context['not_live_when_missing']=not bool(st.session_state.get('ai_context'))
-                st.write(manual_ai_request(q,context))
+                st.session_state['_ai_busy']=True
+                with st.spinner('🧠 OpenAI analizuje dostarczone wiadomości i świece...'):
+                    try:
+                        reply=manual_ai_request(q,context)
+                    finally:
+                        st.session_state['_ai_busy']=False
+                st.session_state['_ai_messages']=append_message(
+                    st.session_state.get('_ai_messages'),"user",q,
+                    context.get('last_closed_utc'))
+                st.session_state['_ai_messages']=append_message(
+                    st.session_state['_ai_messages'],"assistant",reply,
+                    context.get('last_closed_utc'))
+                st.write(reply)
+                st.caption('Pełna historia tej rozmowy pozostaje w zakładce 🤖 CZAT AI.')
 
 
 with reports_tab:
