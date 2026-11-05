@@ -41,7 +41,7 @@ Kod testuje wysyłkę z **mockiem**, nie rzeczywistym tokenem. Nie testowano wys
 ## Nie jest zrobione i czego NIE wolno twierdzić
 1. **Brak rzeczywistych wejść w momencie OPEN.** Silnik czeka na zakończenie kolejnej świecy i dopiero wtedy wstecznie przypisuje papierowy fill. To nie jest usługa rzeczywistej egzekucji ani system zaleceń dla live tradingu.
 2. **Brak trwałego hostingu 24/7 i zewnętrznej bazy.** SQLite jest stanem odtwarzalnym **na tym samym dysku**, ale Community Cloud może go wyczyścić przy restarcie/redeploy. Nie jest jeszcze gwarantowaną trwałą pamięcią w chmurze.
-3. **Worker zewnętrzny nie jest jeszcze zintegrowany z nowym v3.** Stara ścieżka `trader/worker.py` nadal ma osobną logikę archiwum v2. Pełny cykl PAPER v3 działa obecnie poprzez **skany w otwartej aplikacji Streamlit**.
+3. **Worker PAPER v3 jest zintegrowany w kodzie, ale NIE jest wdrożony jako usługa 24/7.** `python -m trader.worker --once` uruchamia jedną próbę skanowania DEMO i zapisuje te same tabele pozycji PAPER v3. Bez osobnego hostingu proces nie działa po zamknięciu przeglądarki; baza worker/Streamlit musi być wspólna i trwała, aby widzieć te same rekordy. Worker wymaga 4 kompletnych TF i (domyślnie) dostępnego kalendarza BLS do utworzenia nowych setupów.
 4. **Brak sprawdzenia na prawdziwym kluczu Capital.com / Telegram.** Testy odtwarzają zachowanie za pomocą danych kontrolowanych i mocków. Produkcyjna poprawność i terminowość alertów wymagają sprawdzenia u właściciela.
 5. **Brak tick-level BID/ASK i rzeczywistego spreadu podczas każdego wyjścia**. Model stosuje spread z chwili sygnału i stały poślizg 0,25 pkt na stronę, który może odbiegać od wykonania u brokera.
 6. **Brak dowodu rentowności**. Wyniki PAPER, nawet pozytywne, nie gwarantują dodatniej oczekiwanej wartości strategii na rynku rzeczywistym.
@@ -49,3 +49,15 @@ Kod testuje wysyłkę z **mockiem**, nie rzeczywistym tokenem. Nie testowano wys
 ### Sprawdzenie w terminalu
 
 Otwórz `https://fokus-the-best-trader.streamlit.app/`, zachowaj dotychczasowe hasło i klucze Capital.com DEMO. Włącz AUTO-SKAN oraz MTF. Przy setupie pojawi się `PENDING`, a po kolejnym **zamkniętym** barze stanie się `OPEN` lub `INVALIDATED`. W **RAPORTY** dostępna jest historia. Telegram pozostaw wyłączony, dopóki nie będziesz chciał otrzymywać wiadomości PAPER.
+
+
+## Uzupełnienie audytu — krok w stronę PAPER v4 (bez hostingu)
+
+- **MID kontra fill:** wykres osobno oznacza `PAPER ENTRY MID (OHLC)` i `PAPER FILL BID/ASK (MODEL)`, a także SL i TP. MID służy jako poziom referencyjny, fill uwzględnia spread i poślizg. W PENDING nie ma żadnych poziomów aktywnej pozycji.
+- **Dwa czasy wejścia:** `entry_assumed_utc` to teoretyczny OPEN kolejnej świecy przy **założeniu, że indeks OHLC to czas zamknięcia**; `entry_detected_utc` to faktyczny czas serwera, kiedy skaner otrzymał zamkniętą świecę i rozpoznał wpis. `opened_utc` pozostaje starszym polem czasu zamknięcia użytym do sekwencji OHLC. Migracja bazy dodaje nowe pola bez kasowania rekordów v3.
+- **Konwencja API Capital.com:** oficjalny opis `snapshotTimeUTC` nie rozstrzyga wyraźnie OPEN kontra CLOSE. Czas nie został zweryfikowany z feedem użytkownika. Dla tego powodu `entry_assumed_utc` jest oznaczone jako **założenie**, a nie potwierdzony moment wykonania.
+- **Worker v3:** `python -m trader.worker --once` lub `python -m trader.worker --interval 65`, tylko DEMO, nie korzysta z endpointów zleceń, domyślnie wymaga potwierdzonego MTF i odczytanego kalendarza BLS. Parametr `--disable-new-setups` pozwala uruchomić tylko rozliczanie istniejących pozycji. Wyjątkowe `--skip-macro-calendar` usuwa tylko filtr BLS i nie zapewnia ochrony przed FOMC/BEA; nie używać do ocen inwestycyjnych.
+- **Raport pełny:** dzienne i tygodniowe statystyki korzystają z **wszystkich zamkniętych pozycji dostępnych w SQLite**, bez wcześniejszego limitu 1000. Lista tabelaryczna ostatnich pozycji w UI pozostaje celowo limitowana.
+- **Prawdziwe BID/ASK w czasie SL/TP:** nie jest wdrożone: nadal stały spread od momentu sygnału i stały poślizg. Samo rozdzielenie cen MID/fill NIE zmienia modelu wykonania.
+- **Telegram:** nadal jedna próba wysłania per event_id, nie gwarancja dostarczenia. Kontrolowanych retry/delivery acknowledgements nie wdrożono.
+- **Trwałe dane:** zewnętrznej bazy ani usługi 24/7 **nie uruchomiono**. Worker na osobnym serwerze ze swoim SQLite i panel Streamlit Cloud z własnym SQLite to **dwie różne historie**. Nie prezentować ich jako wspólnego systemu.
