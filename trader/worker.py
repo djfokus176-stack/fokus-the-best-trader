@@ -19,6 +19,7 @@ from .runtime import current_feed_status
 from .storage import connect,archive_candles
 from .strategies_pro import ALL_STRATEGIES,decide_any
 from .auto_strategy import AUTO_MODE,evaluate_auto
+from .ema50_wave import STRATEGY_NAME as WAVE_NAME
 from .paper_lifecycle import ensure_tables,progress_paper,queue_paper,active_position
 from .telegram_alerts import dispatch_alerts,record_stale_event
 from .remote_checkpoint import (RemoteCheckpoint, configured, dump_state,
@@ -77,8 +78,11 @@ def scan_once(client,epic,tf,strategy,max_spread,db, *,
             decide_any(main.frame,ALL_STRATEGIES[0],spread=main.spread),
             snapshots,asof=main.confirmed_utc)
     else:
-        verdict=decide_any(main.frame,strategy,spread=main.spread)
-        verdict,views=filter_mtf_decision(verdict,snapshots,asof=main.confirmed_utc)
+        candidate=decide_any(main.frame,strategy,spread=main.spread)
+        verdict,views=filter_mtf_decision(candidate,snapshots,asof=main.confirmed_utc)
+        auto_votes=[{"Strategia":strategy,"Setup OHLC":candidate.action,
+                     "Po filtrze MTF":verdict.action,"RR":candidate.rr,
+                     "Powód":verdict.reason if verdict.action!=candidate.action else candidate.reason}]
     fresh,why,_=current_feed_status(main,main.source)
     reasons=[]
     # Report WHY a gate blocked the scan. Never log credentials or tokens.
@@ -116,7 +120,7 @@ def scan_once(client,epic,tf,strategy,max_spread,db, *,
     # Optional AI is commentary only. It cannot change verdict, gates or orders.
     if reviewer is not None:
         try:
-            reviewer(main,verdict,auto_votes if strategy==AUTO_MODE else [],views,reasons)
+            reviewer(main,verdict,auto_votes,views,reasons)
         except Exception:
             pass  # A paid commentary failure must not alter PAPER accounting.
     queued=None
@@ -156,7 +160,15 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
         nonlocal auto_state,candidates
         from .auto_ai import review_closed_candle
         from .candidate_radar import append_candidate
-        candidates=append_candidate(candidates,snapshot,decision,votes,blockers)
+        # Keep the original 6-vote AUTO consensus unchanged; evaluate an
+        # independent legacy-inspired comparator for transparent research.
+        research_votes=list(votes)
+        if strategy==AUTO_MODE:
+            wave=decide_any(snapshot.frame,WAVE_NAME,spread=snapshot.spread)
+            research_votes.append({"Strategia":WAVE_NAME+" • SHADOW",
+                "Setup OHLC":wave.action,"Po filtrze MTF":"NIE WYLICZANO (SHADOW)",
+                "RR":wave.rr,"Powód":wave.reason})
+        candidates=append_candidate(candidates,snapshot,decision,research_votes,blockers)
         auto_state=review_closed_candle(auto_state,snapshot,decision,votes,views,blockers)
     db=sqlite3.connect(":memory:")
     try:
@@ -189,7 +201,8 @@ def main(argv=None):
     parser.add_argument("--interval",type=int,default=65)
     parser.add_argument("--epic",default=os.getenv("CAPITAL_EPIC","US500"))
     parser.add_argument("--tf",choices=list(TIMEFRAMES),default="MINUTE")
-    parser.add_argument("--strategy",choices=[AUTO_MODE,*ALL_STRATEGIES],default=AUTO_MODE)
+    parser.add_argument("--strategy",choices=[AUTO_MODE,*ALL_STRATEGIES,WAVE_NAME],
+                        default=os.getenv("FOKUS_PAPER_STRATEGY",AUTO_MODE))
     parser.add_argument("--disable-new-setups",action="store_true")
     parser.add_argument("--skip-macro-calendar",action="store_true",
                         help="Research only! Removes BLS blackout veto, not recommended.")
