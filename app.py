@@ -124,6 +124,16 @@ else:
                     st.error('Niepoprawne hasło.' if fails < 5 else 'Niepoprawne hasło (wiele prób).')
         st.stop()
 
+# Drop pre-deploy market client/snapshot objects; their candle clock may be
+# OPEN-labelled instead of the new internal CLOSE-labelled convention.
+_CLOCK_SCHEMA='capital-open-to-close-2026-11-v1'
+if st.session_state.get('_capital_clock_schema')!=_CLOCK_SCHEMA:
+    for k in ('_capital_client','market_snap','mtf_snapshots','_mtf_due',
+              'mtf_errors','initial_scan_attempted','source_override',
+              'ai_context','_last_raw_time_audit','_scan_last_result'):
+        st.session_state.pop(k,None)
+    st.session_state['_capital_clock_schema']=_CLOCK_SCHEMA
+
 st.markdown('''<style>
 .stApp {background: #0c1020; color: #e7edf9;}
 [data-testid="stMetric"] {background: #171f35; padding: 16px; border: 1px solid #2f3c5c; border-radius: 10px;}
@@ -626,7 +636,11 @@ with market_tab:
                         for scan_tf,scan_snap in available.items():
                             changes.extend(progress_paper(db_v3,scan_snap.frame,
                                 instrument,src,scan_tf,max_holding=20))
-                        if ready and decision.action in ('LONG','SHORT'):
+                        candle_clock_confirmed=secret(
+                            'FOKUS_CANDLE_TIME_CONFIRMED','').strip().lower()=='open'
+                        if ready and decision.action in ('LONG','SHORT') and not candle_clock_confirmed:
+                            st.warning('🕒 PAPER: nowy setup zablokowany. Czas świecy API wygląda na OPEN, ale wymaga potwierdzenia. Nie ustawiaj close.')
+                        if ready and decision.action in ('LONG','SHORT') and candle_clock_confirmed:
                             paper_id=queue_paper(db_v3,instrument,src,tf,decision,
                                 snap.confirmed_utc,snap.spread,slippage=.25,
                                 market_status=market_status)
