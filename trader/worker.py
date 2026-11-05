@@ -1,45 +1,132 @@
-"""Independent foreground PAPER scanner. Run on a persistent host for continuous monitoring."""
+"""External foreground PAPER v3 scanner — never sends any broker order.
+
+Run on an independently provisioned persistent host to scan while no browser
+is open. Merely storing this file on GitHub does not schedule it 24/7.
+
+Important: broker candle timestamp convention is UNVERIFIED by documentation.
+We do not backfill fictitious real fills. The lifecycle remains hypothetical.
+"""
+from __future__ import annotations
+import argparse
+from datetime import datetime,timezone
 import os
 import time
-import hashlib
-import argparse
-from datetime import datetime, timezone
-from .market import CapitalReadOnly, FeedError
-from .strategy import decide
-from .storage import connect, archive, audit_prior_paper_signals
+from .market import CapitalReadOnly,FeedError,PERIOD
+from .mtf import fetch_all_timeframes,filter_mtf_decision,TIMEFRAMES
+from .news_radar import fetch_bls_schedule,macro_blackout
+from .runtime import current_feed_status
+from .storage import connect,archive_candles
+from .strategies_pro import ALL_STRATEGIES,decide_any
+from .paper_lifecycle import ensure_tables,progress_paper,queue_paper,active_position
+from .telegram_alerts import dispatch_alerts,record_stale_event
 
 
-def scan_once(client, epic, tf, strategy, max_spread, db):
-    snap = client.candles(epic,tf,max_spread=max_spread)
-    if not snap.good:
-        return 'WAIT / DATA_STALE: '+snap.reason
-    result = decide(snap.frame,strategy,spread=snap.spread)
-    stamp = snap.confirmed_utc.isoformat()
-    key = hashlib.sha256(f'{epic}|{tf}|{strategy}|{stamp}|{result.action}'.encode()).hexdigest()
-    is_new = archive(db,key,stamp,epic,snap.source,tf,result,spread=snap.spread)
-    audit_prior_paper_signals(db,snap.frame,epic,snap.source,tf,snap.spread)
-    return f'{stamp} {result.action} ({"NOWE" if is_new else "DUPLIKAT"}) {result.reason}'
+def scan_once(client,epic,tf,strategy,max_spread,db, *,
+              slippage=.25,enable_setups=True,strict_macro=True,
+              calendar_fetch=fetch_bls_schedule,telegram_token="",
+              telegram_chat_id="",telegram_enabled=False):
+    """One accountable v3 scan, using Capital DEMO + closed bars only.
 
-
-def main():
-    p=argparse.ArgumentParser(description='PAPER read-only scanner (not a background service by itself)')
-    p.add_argument('--once',action='store_true')
-    p.add_argument('--interval',type=int,default=65)
-    p.add_argument('--epic',default=os.getenv('CAPITAL_EPIC','US500'))
-    p.add_argument('--tf',choices=['MINUTE','MINUTE_5','MINUTE_15','HOUR'],default='MINUTE')
-    p.add_argument('--strategy',choices=['DRUGA FALA','EMA TREND'],default='DRUGA FALA')
-    opts=p.parse_args()
-    db=connect()
+    Existing PAPER can progress independently of new-signal permissions;
+    new setups require all four MTFs, broker TRADEABLE and a verified BLS
+    calendar. This is NOT guaranteed full FOMC/macro blackout coverage.
+    """
+    ensure_tables(db)
+    if client.environment!="DEMO" or tf not in TIMEFRAMES:
+        return "WAIT / PAPER v3 is DEMO-only"
+    snapshots,errors=fetch_all_timeframes(client,epic,max_spread=max_spread,count=350)
+    main=snapshots.get(tf)
+    status="UNKNOWN"
     try:
-        client=CapitalReadOnly(os.getenv('CAPITAL_API_KEY',''),os.getenv('CAPITAL_IDENTIFIER',''),
-                               os.getenv('CAPITAL_PASSWORD',''))
-    except FeedError as ex:
-        p.error(str(ex))
-    while True:
-        try: print(datetime.now(timezone.utc).isoformat(),scan_once(client,opts.epic,opts.tf,opts.strategy,2.0,db),flush=True)
-        except FeedError as ex: print('ERROR FEED:', ex,flush=True)
-        except Exception as ex: print('ERROR:', type(ex).__name__,flush=True)
-        if opts.once: break
-        time.sleep(max(opts.interval,30))
+        status=client.market_state(epic)
+    except (FeedError,ValueError):
+        pass
+    if main is None:
+        return f"WAIT / NO_FEED / {tf}: {str(errors.get(tf,'missing'))[:150]}"
+    if not main.good:
+        if telegram_enabled:
+            record_stale_event(db,main.source,epic,tf,main.reason)
+            dispatch_alerts(db,telegram_token,telegram_chat_id,enabled=True)
+        return f"WAIT / DATA_STALE / {main.reason}"
+    # Progress any existing positions on their original TF whenever
+    # a new completed candle can be fetched from the DEMO feed.
+    archived=0
+    transitions=[]
+    for resolution,snapshot in snapshots.items():
+        if snapshot.good:
+            archived+=archive_candles(db,snapshot.frame,epic,snapshot.source,resolution)
+            transitions.extend(progress_paper(db,snapshot.frame,epic,snapshot.source,
+                                              resolution,max_holding=20))
+    verdict=decide_any(main.frame,strategy,spread=main.spread)
+    verdict,views=filter_mtf_decision(verdict,snapshots,asof=main.confirmed_utc)
+    fresh,why,_=current_feed_status(main,main.source)
+    reasons=[]
+    if not enable_setups:
+        reasons.append("SETUPS_DISABLED")
+    if status!="TRADEABLE":
+        reasons.append("MARKET_NOT_TRADEABLE")
+    if not fresh:
+        reasons.append("DATA_STALE")
+    if errors or not all(v.ready for v in views):
+        reasons.append("INCOMPLETE_MTF")
+    if strict_macro:
+        try:
+            calendar=calendar_fetch()
+            if not calendar:
+                reasons.append("MACRO_CALENDAR_UNKNOWN")
+            else:
+                blackout,_=macro_blackout(calendar)
+                if blackout:
+                    reasons.append("MACRO_BLACKOUT")
+        except (OSError,ValueError,TimeoutError,FeedError,TypeError):
+            reasons.append("MACRO_CALENDAR_UNAVAILABLE")
+    queued=None
+    if not reasons and verdict.action in ("LONG","SHORT"):
+        queued=queue_paper(db,epic,main.source,tf,verdict,main.confirmed_utc,
+                           main.spread,slippage=slippage,market_status=status)
+    if telegram_enabled:
+        dispatch_alerts(db,telegram_token,telegram_chat_id,enabled=True)
+    active=active_position(db,epic,main.source,tf)
+    state=active["status"] if active else "NONE"
+    return (f"{main.confirmed_utc.isoformat()} / {verdict.action} / "
+            f"QUEUE={'YES' if queued else 'NO'} / ACTIVE={state} / "
+            f"EVENTS={','.join(transitions) or '-'} / CANDLES={archived} / "
+            f"GATES={','.join(reasons) or 'OK'} / {verdict.reason}")
 
-if __name__=='__main__': main()
+
+def main(argv=None):
+    parser=argparse.ArgumentParser(description="Foreground Capital DEMO PAPER v3 scanner, no live trades")
+    parser.add_argument("--once",action="store_true")
+    parser.add_argument("--interval",type=int,default=65)
+    parser.add_argument("--epic",default=os.getenv("CAPITAL_EPIC","US500"))
+    parser.add_argument("--tf",choices=list(TIMEFRAMES),default="MINUTE")
+    parser.add_argument("--strategy",choices=list(ALL_STRATEGIES),default="DRUGA FALA")
+    parser.add_argument("--disable-new-setups",action="store_true")
+    parser.add_argument("--skip-macro-calendar",action="store_true",
+                        help="Research only! Removes BLS blackout veto, not recommended.")
+    args=parser.parse_args(argv)
+    if args.interval<60:
+        parser.error("Minimum scan interval is 60 seconds")
+    db=connect()
+    client=CapitalReadOnly(os.getenv("CAPITAL_API_KEY",""),
+        os.getenv("CAPITAL_IDENTIFIER",os.getenv("CAPITAL_LOGIN","")),
+        os.getenv("CAPITAL_PASSWORD",""),environment="DEMO")
+    while True:
+        try:
+            message=scan_once(client,args.epic,args.tf,args.strategy,2.0,db,
+                enable_setups=not args.disable_new_setups,
+                strict_macro=not args.skip_macro_calendar,
+                telegram_token=os.getenv("TELEGRAM_BOT_TOKEN",""),
+                telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID",""),
+                telegram_enabled=os.getenv("PAPER_TELEGRAM_ALERTS_ENABLED","").lower()
+                    in ("true","1","yes"))
+            print(datetime.now(timezone.utc).isoformat(),message,flush=True)
+        except (FeedError,ValueError,OSError,RuntimeError) as exc:
+            print(datetime.now(timezone.utc).isoformat(),
+                "WAIT / WORKER ERROR:",type(exc).__name__,flush=True)
+        if args.once:
+            break
+        time.sleep(args.interval)
+
+if __name__=="__main__":
+    main()
