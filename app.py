@@ -393,7 +393,7 @@ with market_tab:
                 st.error('Brak Capital.com API lub CSV. NIE generuję sztucznych cen.')
             obtained=st.session_state.get('market_snap')
             market_status='UNKNOWN'
-            if obtained is not None and not obtained.good and has_cap and csv is None:
+            if obtained is not None and has_cap and csv is None:
                 try:
                     market_status=st.session_state['_capital_client'].market_state(instrument)
                 except (FeedError,ValueError):
@@ -509,7 +509,11 @@ with market_tab:
                 st.success('✅ FEED AKTUALNY: '+current_reason)
             else:
                 st.warning('🟡 WAIT / DANE: '+current_reason)
-            ready=current_ready
+            market_status=st.session_state.get('_market_status','UNKNOWN')
+            status_ready=(src.startswith('Capital.com ') and market_status=='TRADEABLE')
+            if current_ready and not status_ready:
+                st.warning(f'🟡 WAIT / STATUS BROKERA: {market_status}. Bez potwierdzenia TRADEABLE brak nowych sygnałów.')
+            ready=current_ready and status_ready
             if src.startswith('CSV'):
                 st.warning('CSV: wyłącznie symulacja edukacyjna. Nie ma sygnału do egzekucji live.')
             if snap.frame is not None and len(snap.frame)>=70:
@@ -730,6 +734,8 @@ with strategies_tab:
                 asof=snap.confirmed_utc) if st.session_state.get('mtf_enabled') else (d,[])
             if not current_feed_status(snap,src)[0]:
                 filtered_action='WAIT / STALE'
+            elif st.session_state.get('_market_status','UNKNOWN')!='TRADEABLE':
+                filtered_action='WAIT / RYNEK'
             elif src.startswith('CSV'):
                 filtered_action='WAIT / CSV'
             else:
