@@ -114,7 +114,12 @@ def fetch_bls_schedule(get=requests.get, timeout=12):
     r=get(BLS_ICS,timeout=timeout,headers={"User-Agent":"FokusTraderResearch/1.0"})
     r.raise_for_status()
     if len(r.content)>1_500_000:raise ValueError("Zbyt duży kalendarz")
-    return parse_bls_calendar(r.content.decode("utf-8-sig",errors="replace"),limit=300)
+    full=parse_bls_calendar(r.content.decode("utf-8-sig",errors="replace"),limit=0)
+    cutoff=datetime.now(timezone.utc)-timedelta(days=7)
+    active=[e for e in full if e["data_utc"]>=cutoff]
+    if not active:
+        raise ValueError("Kalendarz BLS nie zawiera aktualnych dat — nie wyświetlam fałszywego braku publikacji.")
+    return active[:300]
 
 
 def macro_blackout(events, now=None, minutes_before=20,minutes_after=20):
