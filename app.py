@@ -650,7 +650,7 @@ with lab_tab:
     else:st.info('Brak NOWYCH rozliczeń forward PAPER v2. Audyt ruszy przy kolejnych świecach.')
     if 'legacy_count' in locals() and legacy_count:
         st.warning(f'Stare rozliczenia PAPER (wersja 1): {legacy_count} — zachowane, ale WYŁĄCZONE z nowych statystyk. Nie przeliczam ich bez oryginalnych danych.')
-    st.write('Tryb v0.2 zapisuje decyzje i rozlicza je po pojawieniu się kolejnych zamkniętych świec. **Nie optymalizuje automatycznie parametrów po 2–3 stratach**, bo to grozi przeuczeniem. Następny etap: walk-forward OOS i audyt niezależnych transakcji PAPER.')
+    st.write('v0.3 zapisuje decyzje PAPER i rozlicza późniejsze zamknięte świece. Raporty holdout/rolling są w zakładce RAPORTY. **Nie ma automatycznego dostrajania parametrów** — mała próbka grozi przeuczeniem.')
 
 with archive_tab:
     st.subheader('📚 OSOBNE ARCHIWUM — TYLKO TEN PROGRAM')
@@ -673,13 +673,15 @@ with archive_tab:
 with settings_tab:
     st.subheader('🔐 INTEGRACJE I PRAWDZIWY STAN')
     st.table(pd.DataFrame([
-      ('Capital.com DEMO REST / OHLC','Skonfigurowano' if has_cap else 'Brak kluczy','Odczyt tylko po skanie'),
-      ('OpenAI','Skonfigurowano' if secret('OPENAI_API_KEY') else 'Brak klucza','Tekstowa interpretacja tych samych świec'),
+      (f'Capital.com {capital_env} REST / OHLC','Klucze dostępne' if has_cap else 'Brak kluczy',f'Status instrumentu: {st.session_state.get("_market_status","UNKNOWN")}'),
+      ('OpenAI GPT','Klucz dostępny' if openai_api_key else 'Brak klucza','Ręczne zapytania: świece, dostarczone newsy, koszty API'),
       ('Telegram','Klucze dostępne' if secret('TELEGRAM_BOT_TOKEN') and secret('TELEGRAM_CHAT_ID') else 'Nieskonfigurowany','Wysyłanie: jeszcze niezaimplementowane'),
       ('Niezależny worker','Kod dostępny','Wymaga uruchomienia na własnym hoście 24/7'),
-      ('Bot sam się uczy','NIE','Tylko archiwum i odtwarzalny replay'),
-      ('Wiadomości i kalendarz makro','NIE','Do wdrożenia; brak udawanego sentymentu'),
-      ('Trading DEMO/REAL','BLOKADA','Brak endpointów POST /positions i DELETE /positions'),
+      ('Uczenie strategii','CZĘŚCIOWO','Replay, holdout i rolling — BEZ samodzielnej zmiany progów i bez ML'),
+      ('Wiadomości i kalendarz makro','CZĘŚCIOWO','FED/BLS/BEA RSS + kalendarz BLS, brak pełnego harmonogramu FOMC'),
+      ('Trading DEMO/REAL','BLOKADA','Żadnych zleceń brokerskich, tylko odczyt i PAPER'),
+      ('MTF M1/M5/M15/H1','AKTYWNY' if st.session_state.get('mtf_snapshots') else 'CZEKA','4 osobne serie, brak potwierdzenia = WAIT'),
+      ('Historia świec','LOKALNA','Deduplikowany SQLite, nie gwarantuje trwałości w Cloud'),
     ],columns=['Element','Stan','Wyjaśnienie']))
     st.caption('Klucze podawaj w Secrets aplikacji, nigdy w publicznym GitHubie. API tutaj nie są trwale zapisywane w bazie.')
 
