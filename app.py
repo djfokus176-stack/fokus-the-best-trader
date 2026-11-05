@@ -587,8 +587,18 @@ with market_tab:
                     db_v3=connect()
                     ensure_paper_v3(db_v3)
                     if actual_scan_this_rerun and snap.good and src=='Capital.com DEMO REST':
-                        changes=progress_paper(db_v3,snap.frame,instrument,src,tf,
-                                              max_holding=20)
+                        # Process all available broker TFs so switching M1/M5/H1
+                        # cannot silently strand an older OPEN position.
+                        available={tf:snap}
+                        if st.session_state.get('mtf_enabled',False):
+                            available.update({k:v for k,v in
+                                st.session_state.get('mtf_snapshots',{}).items()
+                                if v is not None and v.epic==instrument and
+                                v.source==src and v.good})
+                        changes=[]
+                        for scan_tf,scan_snap in available.items():
+                            changes.extend(progress_paper(db_v3,scan_snap.frame,
+                                instrument,src,scan_tf,max_holding=20))
                         if ready and decision.action in ('LONG','SHORT'):
                             paper_id=queue_paper(db_v3,instrument,src,tf,decision,
                                 snap.confirmed_utc,snap.spread,slippage=.25,
@@ -617,7 +627,9 @@ with market_tab:
                           else f"Wejście wykonawcze (symulowane BID/ASK): {current_paper['entry_executable']:.2f}."))
                 else:
                     st.caption('🧪 Pozycja PAPER v3: BRAK AKTYWNEJ. Historyczne strzałki są wyłącznie układami, nie zrealizowanymi transakcjami.')
-                annotate_open_paper(fig,current_paper)
+                if current_paper and current_paper['timeframe']!=tf:
+                    st.warning(f"Pozycja PAPER v3 działa na {current_paper['timeframe']}, nie na aktualnym {tf}. Linie poziomów są ukryte, żeby nie mieszać interwałów. Włącz MTF i AUTO-SKAN, aby odświeżać również pierwotny interwał.")
+                annotate_open_paper(fig,current_paper if current_paper and current_paper['timeframe']==tf else None)
                 record_for_chart=dict(st.session_state.get('_scan_last_result') or {})
                 record_for_chart['scan_no']=st.session_state.get('_scan_attempt_count',0)
                 annotate_scan(fig,snap.frame,decision,record_for_chart,
