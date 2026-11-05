@@ -38,5 +38,5 @@ def test_full_master_dashboard_with_four_realistic_synthetic_timeframes(monkeypa
     app.text_input[0].set_value("integration-password-not-in-github")
     app.button[0].click()
     app.run()
-    assert len(app.tabs)==9
+    assert len(app.tabs)==10
     assert not app.exception,[str(x.message) for x in app.exception]
