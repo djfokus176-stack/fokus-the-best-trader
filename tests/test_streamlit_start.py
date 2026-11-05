@@ -25,7 +25,7 @@ def test_main_app_renders_after_owner_login(monkeypatch):
     a.button[0].click()
     a.run()
     assert not a.exception, [str(x.message) for x in a.exception]
-    assert len(a.tabs) == 9
+    assert len(a.tabs) == 10
 
 
 def test_independent_healthcheck_renders():
@@ -44,7 +44,7 @@ def test_auto_scan_toggle_does_not_crash_without_live_api(monkeypatch):
     a.text_input[0].set_value(pw)
     a.button[0].click()
     a.run()
-    assert len(a.tabs)==9
+    assert len(a.tabs)==10
     assert len(a.toggle)>0
     a.toggle[0].set_value(True)
     a.run()
