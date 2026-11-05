@@ -31,7 +31,7 @@ from trader.paper_lifecycle import (
     active_position, recent_positions, recent_events)
 from trader.paper_display import annotate_open_paper,annotate_paper_history
 from trader.paper_sounds import unseen_paper_event,wav_notice,SOUND_EVENTS
-from trader.paper_reporting import daily_weekly
+from trader.paper_reporting import daily_weekly,performance_by_policy
 from trader.remote_checkpoint import RemoteCheckpoint,remote_view_db,RemoteError,dump_state
 from trader.telegram_alerts import dispatch_alerts, record_stale_event
 from trader.auth import capital_credentials, active_credential, test_capital_login, test_openai_model, test_telegram_token
@@ -1228,6 +1228,12 @@ with reports_tab:
                     f"Profit factor: {summary['profit_factor'] if summary['profit_factor'] is not None else 'BRAK MIARODAJNEJ STRATY'}")
             if summary['liczba']<30:
                 st.warning('Mała próba (<30 zamkniętych PAPER v3) — NIE ma dowodu rentowności.')
+            policy_stats=performance_by_policy(paper_db,epic=instrument)
+            if policy_stats:
+                st.markdown('**📊 WYNIKI WEDŁUG POLITYKI WYJŚCIA — FIXED / ADAPTIVE**')
+                st.dataframe(pd.DataFrame(policy_stats),hide_index=True,use_container_width=True)
+                st.caption('To odrębne zbiory transakcji; bez testu na identycznych '
+                           'sygnałach nie porównuj ich jako dowodu przewagi ADAPTIVE.')
             st.download_button('💾 POBIERZ PEŁNY BACKUP PAPER v3 (JSON, bez sekretów)',
                 data=json.dumps(dump_state(paper_db),ensure_ascii=False,
                     indent=2).encode('utf-8'),
