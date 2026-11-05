@@ -867,6 +867,32 @@ with settings_tab:
       ('PAPER remote','TRYB PODGLĄDU' if remote_paper_view_enabled() else 'WYŁĄCZONY','PAPER v4 remote jest TYLKO czytnikiem w tym panelu; zapisuje wyłącznie worker'),
     ],columns=['Element','Stan','Wyjaśnienie']))
     st.caption('Klucze podawaj w Secrets aplikacji, nigdy w publicznym GitHubie. API tutaj nie są trwale zapisywane w bazie.')
+    with st.expander('☁️ PAPER v4 — SPRAWDŹ POŁĄCZENIE Z OSOBNĄ BAZĄ SUPABASE'):
+        st.caption('Tylko odczyt konfiguracji i zdalnej wersji. Ta kontrola NIE zapisuje danych i NIE składa zleceń Capital.com.')
+        has_cloud_url=bool(secret('FOKUS_SUPABASE_URL'))
+        has_cloud_secret=bool(secret('FOKUS_SUPABASE_SECRET_KEY'))
+        st.table(pd.DataFrame([
+            ('URL osobnego Supabase','JEST' if has_cloud_url else 'BRAK'),
+            ('Klucz backendowy Supabase','JEST' if has_cloud_secret else 'BRAK'),
+            ('Podgląd CLOUD','WŁĄCZONY' if remote_paper_view_enabled() else 'WYŁĄCZONY'),
+        ],columns=['Element','Status']))
+        st.info('Aby korzystać z PAPER cloud, trzeba utworzyć osobny projekt Supabase, zastosować plik SQL i ustawić te same sekrety w GitHub Actions oraz Streamlit Secrets. Zobacz dokumentacja/PAPER_V4_SETUP.md.')
+        if st.button('📡 TEST ODCZYTU CHECKPOINTU SUPABASE',key='cloud_v4_test_read'):
+            if not (has_cloud_url and has_cloud_secret):
+                st.warning('Brakuje URL lub serwerowego sekretu Supabase w Streamlit Secrets.')
+            else:
+                try:
+                    conn=RemoteCheckpoint(secret('FOKUS_SUPABASE_URL'),
+                                         secret('FOKUS_SUPABASE_SECRET_KEY'))
+                    version,payload=conn.fetch()
+                    st.success(f'✅ Połączenie READ-ONLY OK. Wersja remote: {version}.')
+                    meta=payload.get('meta') or {}
+                    if meta.get('last_scan_utc'):
+                        st.caption('Ostatni zapis workera UTC: '+meta['last_scan_utc'])
+                    else:
+                        st.warning('Baza odpowiada, ale brak zapisu potwierdzonego skanu workera.')
+                except (RemoteError,ValueError,TypeError) as ex:
+                    st.error('❌ Połączenie z Supabase niepotwierdzone: '+type(ex).__name__)
     with st.expander('🕒 AUDYT SNAPSHOTTIMEUTC — kiedy naprawdę zaczyna się świeca?'):
         st.warning('Konwencja OPEN/CLOSE z API Capital.com nadal NIE jest zweryfikowana. Diagnostyka pokazuje hipotezę opartą na czasach — nie certyfikuje prawdziwego wykonania.')
         if st.button('📡 PORÓWNAJ SUROWE OZNACZENIA CZASU (DEMO, GET ONLY)',key='raw_time_audit'):
