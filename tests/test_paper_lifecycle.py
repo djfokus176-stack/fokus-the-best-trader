@@ -122,3 +122,28 @@ def test_concurrent_partial_index_refuses_extra_active(tmp_path):
     ensure_tables(db)
     idx=db.execute("SELECT name FROM sqlite_master WHERE name='uq_paper_one_active'").fetchone()
     assert idx is not None
+
+
+def test_global_one_open_position_across_timeframes(tmp_path):
+    db=connect(tmp_path/"global.sqlite3")
+    ensure_tables(db)
+    first=queue_paper(db,"US500",SRC,"MINUTE",decision(),T0,.6,slippage=0)
+    assert first
+    second=queue_paper(db,"US500",SRC,"MINUTE_5",
+        Decision("SHORT","EMA TREND","another TF",100,102,98),
+        T0,.6,slippage=0)
+    assert second is None
+    assert active_position(db,"US500",SRC,"MINUTE_5")["trade_id"]==first
+
+
+def test_bad_setup_geometry_or_finite_prevent_pending(tmp_path):
+    db=connect(tmp_path/"geometry.sqlite3")
+    ensure_tables(db)
+    for d in (
+        Decision("LONG","EMA TREND","no entry",None,98,102),
+        Decision("LONG","EMA TREND","wrong stop",100,102,103),
+        Decision("SHORT","EMA TREND","wrong stop",100,98,99),
+        Decision("LONG","EMA TREND","infinite",float("inf"),98,102),
+    ):
+        assert queue_paper(db,"US500",SRC,"MINUTE",d,T0,.6) is None
+    assert recent_positions(db)==[]
