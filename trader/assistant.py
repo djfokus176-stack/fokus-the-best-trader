@@ -25,8 +25,8 @@ def answer_ai(api_key, model, question, payload, effort='high'):
         if effort not in {'low','medium','high','xhigh'}:
             return 'Niepoprawny OPENAI_REASONING_EFFORT — ustaw low/medium/high/xhigh.'
         from openai import OpenAI
-        response = OpenAI(api_key=api_key,timeout=45).responses.create(
-           model=model, reasoning={'effort':effort}, max_output_tokens=3500,
+        response = OpenAI(api_key=api_key,timeout=65).responses.create(
+           model=model, reasoning={'effort':effort}, max_output_tokens=7000,
            instructions=('Jesteś asystentem badawczym FOKU$ do scalpingu US500 w trybie PAPER. '
              'Używaj TYLKO danych dostarczonych w JSON. Kiedy brak świec, wyraźnie napisz BRAK WYKRESU. '
              'Jeśli dostaniesz news_untrusted_external, przedstaw chronologię i potencjalne scenariusze, '
@@ -37,6 +37,24 @@ def answer_ai(api_key, model, question, payload, effort='high'):
              'danych w pewne LONG/SHORT. Oceń trend, ryzyko, spread, potwierdzenia i warunki WAIT. '
              'Nie wydawaj kategorycznych zaleceń kupna/sprzedaży. Pisz po polsku.'),
            input='PYTANIE: '+question+'\nDANE WYKRESU: '+json.dumps(payload,ensure_ascii=False))
-        return response.output_text or 'Brak odpowiedzi tekstowej z API. Sprawdź limity tokenów.'
+        written = str(getattr(response,'output_text','') or '').strip()
+        if written:
+            return written
+        # Some reasoning responses may expend all tokens on internal reasoning.
+        # Show the actual API state instead of pretending the bot said nothing.
+        usage=getattr(response,'usage',None)
+        token_count=getattr(usage,'output_tokens',None) if usage else None
+        status=str(getattr(response,'status','UNKNOWN'))
+        detail=getattr(response,'incomplete_details',None)
+        reason=str(getattr(detail,'reason','BRAK') if detail else 'BRAK')
+        return ('⚠️ API OpenAI odpowiedziało, ale nie zwróciło widocznego tekstu. '
+                f'Status: {status}; powód: {reason}; '
+                f'tokeny wyjścia: {token_count if token_count is not None else "BRAK"}. '
+                'Nie udaję gotowej analizy. Możesz ponowić ręcznie; '
+                'jeśli problem się powtarza, zmniejsz wysiłek modelu do medium w Secrets.')
     except Exception as ex:
-        return f'Nie udało się wywołać AI ({type(ex).__name__}). Analiza regułowa działa niezależnie.'
+        status=getattr(ex,'status_code',None)
+        http=f'HTTP {status}' if status else type(ex).__name__
+        return ('❌ OpenAI nie zwróciło analizy ('+http+', '+type(ex).__name__+'). '
+                'Sprawdź limit środków API, model GPT, łączność lub uprawnienia. '
+                'Nie wysyłaj klucza API w czacie.')
