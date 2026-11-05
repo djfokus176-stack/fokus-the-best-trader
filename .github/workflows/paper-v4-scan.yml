@@ -1,0 +1,54 @@
+name: FOKU$ PAPER v4 - scheduled DEMO scan (optional)
+on:
+  # GitHub schedules are best-effort and may be delayed or skipped.
+  # Offset from minute 0 reduces peak congestion.
+  schedule:
+    - cron: '3-58/5 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: fokus-paper-v4-one-writer
+  cancel-in-progress: false
+jobs:
+  paper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    env:
+      FOKUS_PAPER_WORKER_ENABLED: ${{ vars.FOKUS_PAPER_WORKER_ENABLED }}
+      FOKUS_SUPABASE_URL: ${{ secrets.FOKUS_SUPABASE_URL }}
+      FOKUS_SUPABASE_SECRET_KEY: ${{ secrets.FOKUS_SUPABASE_SECRET_KEY }}
+      CAPITAL_API_KEY: ${{ secrets.CAPITAL_API_KEY }}
+      CAPITAL_IDENTIFIER: ${{ secrets.CAPITAL_IDENTIFIER }}
+      CAPITAL_PASSWORD: ${{ secrets.CAPITAL_PASSWORD }}
+      CAPITAL_EPIC: ${{ vars.CAPITAL_EPIC || 'US500' }}
+    steps:
+      - name: Verify explicit opt-in and required secrets (no output of secret values)
+        id: preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+          if [[ "$FOKUS_PAPER_WORKER_ENABLED" != "true" ]]; then
+            echo "PAPER worker disabled. Repository variable FOKUS_PAPER_WORKER_ENABLED must be true."
+            exit 0
+          fi
+          for key in FOKUS_SUPABASE_URL FOKUS_SUPABASE_SECRET_KEY CAPITAL_API_KEY CAPITAL_IDENTIFIER CAPITAL_PASSWORD; do
+            if [[ -z "${!key:-}" ]]; then
+              echo "Missing required server secret: $key. No market calls performed."
+              exit 0
+            fi
+          done
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v5
+        if: steps.preflight.outputs.ready == 'true'
+      - uses: actions/setup-python@v6
+        if: steps.preflight.outputs.ready == 'true'
+        with:
+          python-version: '3.12'
+      - name: Install pinned dependencies
+        if: steps.preflight.outputs.ready == 'true'
+        run: python -m pip install -r requirements.txt
+      - name: Scan Capital DEMO once; checkpoint is mandatory
+        if: steps.preflight.outputs.ready == 'true'
+        run: python -m trader.worker --once --tf MINUTE --strategy 'DRUGA FALA'
