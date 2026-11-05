@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime,timezone
 import os
+import sqlite3
 import time
 from .market import CapitalReadOnly,FeedError,PERIOD
 from .mtf import fetch_all_timeframes,filter_mtf_decision,TIMEFRAMES
@@ -19,12 +20,14 @@ from .storage import connect,archive_candles
 from .strategies_pro import ALL_STRATEGIES,decide_any
 from .paper_lifecycle import ensure_tables,progress_paper,queue_paper,active_position
 from .telegram_alerts import dispatch_alerts,record_stale_event
+from .remote_checkpoint import (RemoteCheckpoint, configured, dump_state,
+                                restore_state, RemoteError)
 
 
 def scan_once(client,epic,tf,strategy,max_spread,db, *,
               slippage=.25,enable_setups=True,strict_macro=True,
               calendar_fetch=fetch_bls_schedule,telegram_token="",
-              telegram_chat_id="",telegram_enabled=False):
+              telegram_chat_id="",telegram_enabled=False,remote=None):
     """One accountable v3 scan, using Capital DEMO + closed bars only.
 
     Existing PAPER can progress independently of new-signal permissions;
@@ -86,12 +89,37 @@ def scan_once(client,epic,tf,strategy,max_spread,db, *,
                            main.spread,slippage=slippage,market_status=status)
     if telegram_enabled:
         dispatch_alerts(db,telegram_token,telegram_chat_id,enabled=True)
+    if remote is not None:
+        remote.upsert_candles(snapshots,epic)
     active=active_position(db,epic,main.source,tf)
     state=active["status"] if active else "NONE"
     return (f"{main.confirmed_utc.isoformat()} / {verdict.action} / "
             f"QUEUE={'YES' if queued else 'NO'} / ACTIVE={state} / "
             f"EVENTS={','.join(transitions) or '-'} / CANDLES={archived} / "
             f"GATES={','.join(reasons) or 'OK'} / {verdict.reason}")
+
+
+def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
+                     enable_setups=True,strict_macro=True,
+                     calendar_fetch=fetch_bls_schedule):
+    """Single-worker cloud cycle; fail closed on missing/changed checkpoint.
+
+    Cloud checkpoint is loaded before the scan and CAS-saved after.
+    Telegram delivery disabled in this cloud route until atomic cloud
+    outbox claiming is available (local at-most-once cannot protect a
+    job that crashes after sending but before checkpointing).
+    """
+    version,payload=remote.fetch()
+    db=sqlite3.connect(":memory:")
+    try:
+        restore_state(db,payload)
+        status=scan_once(client,epic,tf,strategy,max_spread,db,
+                         enable_setups=enable_setups,strict_macro=strict_macro,
+                         calendar_fetch=calendar_fetch,telegram_enabled=False)
+        new_version=remote.save(version,dump_state(db))
+        return status+f" / CLOUD_CHECKPOINT_VERSION={new_version} / TELEGRAM_REMOTE=DISABLED"
+    finally:
+        db.close()
 
 
 def main(argv=None):
@@ -107,23 +135,33 @@ def main(argv=None):
     args=parser.parse_args(argv)
     if args.interval<60:
         parser.error("Minimum scan interval is 60 seconds")
-    db=connect()
+    use_remote=configured()
+    remote=RemoteCheckpoint.from_env() if use_remote else None
+    db=connect() if not use_remote else None
     client=CapitalReadOnly(os.getenv("CAPITAL_API_KEY",""),
         os.getenv("CAPITAL_IDENTIFIER",os.getenv("CAPITAL_LOGIN","")),
         os.getenv("CAPITAL_PASSWORD",""),environment="DEMO")
     while True:
         try:
-            message=scan_once(client,args.epic,args.tf,args.strategy,2.0,db,
-                enable_setups=not args.disable_new_setups,
-                strict_macro=not args.skip_macro_calendar,
-                telegram_token=os.getenv("TELEGRAM_BOT_TOKEN",""),
-                telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID",""),
-                telegram_enabled=os.getenv("PAPER_TELEGRAM_ALERTS_ENABLED","").lower()
-                    in ("true","1","yes"))
+            if use_remote:
+                message=remote_scan_once(remote,client,args.epic,args.tf,
+                    args.strategy,2.0,enable_setups=not args.disable_new_setups,
+                    strict_macro=not args.skip_macro_calendar)
+            else:
+                message=scan_once(client,args.epic,args.tf,args.strategy,2.0,db,
+                    enable_setups=not args.disable_new_setups,
+                    strict_macro=not args.skip_macro_calendar,
+                    telegram_token=os.getenv("TELEGRAM_BOT_TOKEN",""),
+                    telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID",""),
+                    telegram_enabled=os.getenv("PAPER_TELEGRAM_ALERTS_ENABLED","").lower()
+                        in ("true","1","yes"))
             print(datetime.now(timezone.utc).isoformat(),message,flush=True)
         except (FeedError,ValueError,OSError,RuntimeError) as exc:
             print(datetime.now(timezone.utc).isoformat(),
                 "WAIT / WORKER ERROR:",type(exc).__name__,flush=True)
+            if use_remote:
+                # Fail the scheduled job, never claim successful durable progress.
+                raise SystemExit(1) from None
         if args.once:
             break
         time.sleep(args.interval)
