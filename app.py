@@ -24,6 +24,7 @@ from trader.assistant import numeric_context, answer_ai
 from trader.csv_data import read_ohlc_csv
 from trader.runtime import current_feed_status, scan_delay_seconds
 from trader.live_chart import quote_sample,sampled_preview,show_quote_preview
+from trader.auto_news import refresh_news_state,calendar_is_current
 from trader.scan_monitor import scan_event, append_scan_log
 from trader.chat_ui import append_message, renderable_history, preview_context
 from trader.paper_lifecycle import (
@@ -259,6 +260,11 @@ with st.sidebar:
         help='Odświeża dostępny snapshot BID/OFFER Capital.com, NIE pobiera całego okna '
              'OHLC i NIE otwiera pozycji. Nowe pełne świece i strategie M1 są '
              'sprawdzane najczęściej co 60 sekund.')
+    st.toggle('📰 AUTO RADAR NEWS/MACRO (RSS co 15 min, BLS co 60 min)',
+       value=_early_secret('FOKUS_AUTO_NEWS_ENABLED','true').lower() in ('true','1','yes','on'),
+       key='auto_news_active',
+       help='Oficjalne źródła FED/BLS/BEA. Nie wywołuje płatnego GPT. '
+            'W aktywnej sesji Streamlit, niezależnie od osobnego workera.')
     st.caption('⚡ Bieżąca cena co '+str(st.session_state['auto_scan_period'])+
                ' s • pełny odczyt świec najczęściej co 60 s (M1). '
                'Osobny worker PAPER GitHub pozostaje na swoim harmonogramie.')
@@ -415,6 +421,13 @@ def auto_scan_heartbeat():
         st.rerun(scope='app')
 
 auto_scan_heartbeat()
+
+# Independent, bounded source refresh even if the NEWS tab is not selected.
+# Never contact all five feeds on every 5-second candle redraw.
+if st.session_state.get('auto_news_active',False):
+    refresh_news_state(st.session_state,
+        fetch_news=lambda:fetch_headlines(timeout=2),
+        fetch_calendar=lambda:fetch_bls_schedule(timeout=4))
 
 def read_csv(file):
     return read_ohlc_csv(file)
@@ -761,11 +774,15 @@ with market_tab:
                             decision,st.session_state.get('mtf_snapshots',{}),
                             asof=snap.confirmed_utc)
                 if ready:
-                    blackout,note=macro_blackout(st.session_state.get('_macro_calendar',[]))
-                    if blackout:
-                        from dataclasses import replace as _replace
-                        decision=_replace(decision,action='WAIT',entry=None,
-                            stop=None,target=None,rr=None,reason=note)
+                    if not calendar_is_current(st.session_state):
+                        decision=dataclass_replace(decision,action='WAIT',entry=None,
+                           stop=None,target=None,rr=None,
+                           reason='Brak aktualnego kalendarza BLS. WAIT do weryfikacji źródła.')
+                    else:
+                        blackout,note=macro_blackout(st.session_state.get('_macro_calendar',[]))
+                        if blackout:
+                            decision=dataclass_replace(decision,action='WAIT',entry=None,
+                                stop=None,target=None,rr=None,reason=note)
                 if not ready: decision.action='WAIT';decision.reason='Brak zweryfikowanego, świeżego feedu LIVE/DEMO — tylko analiza historyczna'
                 banner=f"{decision.action} | {strategy} | {decision.reason}"
                 if decision.action=='LONG':
@@ -1227,18 +1244,18 @@ with strategies_tab:
 
 with news_tab:
     st.subheader('📰 RADAR MAKRO — OFICJALNE ŹRÓDŁA FED / BLS / BEA')
-    st.caption('Nagłówki RSS i kalendarz publikacji BLS. Bez scrapingowania kont osobistych i bez automatycznych płatnych zapytań GPT.')
-    if st.button('🌐 POBIERZ WIADOMOŚCI I KALENDARZ BLS',type='primary',key='fetch_official_news'):
-        headlines,feed_errors=fetch_headlines()
-        st.session_state['_headlines']=headlines
-        st.session_state['_news_feed_errors']=feed_errors
-        st.session_state['_news_read_utc']=datetime.now(timezone.utc).isoformat()
-        try:
-            st.session_state['_macro_calendar']=fetch_bls_schedule()
-            st.session_state['_calendar_error']=None
-        except Exception as ex:
-            st.session_state['_macro_calendar']=[]
-            st.session_state['_calendar_error']=type(ex).__name__
+    st.caption('Oficjalne RSS FED/BLS/BEA automatycznie co 15 minut; '
+               'kalendarz BLS co godzinę, gdy aplikacja otwarta. '
+               'GPT nie jest odpalany automatycznie przez ten przełącznik.')
+    if st.button('🌐 ODŚWIEŻ WIADOMOŚCI I KALENDARZ TERAZ',type='primary',
+                 key='fetch_official_news'):
+        refresh_news_state(st.session_state,force=True,
+            fetch_news=lambda:fetch_headlines(timeout=2),
+            fetch_calendar=lambda:fetch_bls_schedule(timeout=4))
+    st.caption('Stan automatycznego radaru: '+str(st.session_state.get('_news_status','NIE URUCHOMIONO'))+
+               ' | RSS UTC: '+str(st.session_state.get('_news_read_utc','BRAK'))+
+               ' | kalendarz UTC: '+str(st.session_state.get('_calendar_success_utc','BRAK'))+
+               ' | BLS: '+('OK' if calendar_is_current(st.session_state) else 'NIEDOSTĘPNY'))
     if st.session_state.get('_news_read_utc'):
         st.caption('Ostatni udany/podjęty skan źródeł (UTC): '+st.session_state['_news_read_utc'])
     events=st.session_state.get('_macro_calendar',[])
@@ -1257,7 +1274,8 @@ with news_tab:
         st.dataframe(pd.DataFrame(news[:45]),use_container_width=True,hide_index=True,
             column_config={'url':st.column_config.LinkColumn('Oficjalny link')})
     else:
-        st.info('Brak pobranych wiadomości — kliknij przycisk. Nie pokazuję fikcyjnych nagłówków.')
+        st.info('Nie pobrano oficjalnych wiadomości. Sprawdź AUTO RADAR '
+                'i błędy źródeł; nie pokazuję fikcyjnych nagłówków.')
     if st.session_state.get('_news_feed_errors'):
         with st.expander('Niedostępne źródła RSS (uczciwy status)'):
             st.json(st.session_state['_news_feed_errors'])
