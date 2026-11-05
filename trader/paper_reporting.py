@@ -1,9 +1,9 @@
 """PAPER v3 performance on CLOSED positions only, separated from replay."""
 from __future__ import annotations
-from datetime import datetime
+import sqlite3
 from zoneinfo import ZoneInfo
 import pandas as pd
-from .paper_lifecycle import recent_positions
+from .paper_lifecycle import ensure_tables
 
 COMPLETE=("CLOSED_SL","CLOSED_TP","CLOSED_TIMEOUT")
 WARSAW=ZoneInfo("Europe/Warsaw")
@@ -35,10 +35,18 @@ def _metrics(frame):
 
 def daily_weekly(db, source="Capital.com DEMO REST", epic=None):
     """Never merge archived signal v2 or CSV research with ongoing PAPER v3."""
-    rows=recent_positions(db,limit=1000)
-    filtered=[r for r in rows if r["status"] in COMPLETE
-        and r["source"]==source and (epic is None or r["epic"]==epic)]
-    all_rows=pd.DataFrame(filtered)
+    ensure_tables(db)
+    db.row_factory=sqlite3.Row
+    query="""SELECT * FROM paper_positions_v3
+             WHERE status IN ('CLOSED_SL','CLOSED_TP','CLOSED_TIMEOUT')
+             AND source=?"""
+    params=[source]
+    if epic is not None:
+        query+=" AND epic=?"
+        params.append(epic)
+    query+=" ORDER BY closed_utc ASC,trade_id ASC"
+    # Full available on-disk archive, no artificial 1000-position truncation.
+    all_rows=pd.DataFrame([dict(r) for r in db.execute(query,tuple(params))])
     if all_rows.empty:
         return pd.DataFrame(),pd.DataFrame(),_metrics(all_rows)
     all_rows["closed_local"]=pd.to_datetime(all_rows.closed_utc,utc=True).dt.tz_convert(WARSAW)
