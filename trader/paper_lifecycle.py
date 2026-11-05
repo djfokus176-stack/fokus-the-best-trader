@@ -49,6 +49,14 @@ def ensure_tables(db):
     for column in ("entry_assumed_utc","entry_detected_utc"):
         if column not in existing:
             db.execute(f"ALTER TABLE paper_positions_v3 ADD COLUMN {column} TEXT")
+    for column,kind in (
+        ("exit_policy","TEXT NOT NULL DEFAULT 'fixed'"),
+        ("initial_risk_mid","REAL"),
+        ("original_target_mid","REAL"),
+        ("target_extended","INTEGER NOT NULL DEFAULT 0"),
+    ):
+        if column not in existing:
+            db.execute(f"ALTER TABLE paper_positions_v3 ADD COLUMN {column} {kind}")
     db.execute("""CREATE UNIQUE INDEX IF NOT EXISTS uq_paper_one_active
        ON paper_positions_v3(source,epic,timeframe)
        WHERE status IN ('PENDING','OPEN')""")
@@ -94,11 +102,14 @@ def recent_events(db, limit=250):
              ORDER BY created_utc DESC, rowid DESC LIMIT ?""",(max(1,min(2000,int(limit))),))]
 
 def queue_paper(db, epic, source, timeframe, decision, signal_utc,
-                spread, slippage=.25, market_status="TRADEABLE"):
+                spread, slippage=.25, market_status="TRADEABLE",
+                exit_policy="fixed"):
     """One active demo-only position per instrument+source+TF; idempotent."""
     if source!="Capital.com DEMO REST" or market_status!="TRADEABLE":
         return None
     if timeframe not in PERIOD or decision.action not in ("LONG","SHORT"):
+        return None
+    if exit_policy not in ("fixed","adaptive"):
         return None
     try:
         values=[float(x) for x in
@@ -128,11 +139,14 @@ def queue_paper(db, epic, source, timeframe, decision, signal_utc,
             return None
         db.execute("""INSERT INTO paper_positions_v3
             (trade_id,epic,source,timeframe,strategy,side,setup_utc,setup_reason,
-            stop_mid,target_mid,setup_spread,slippage,status,created_utc,updated_utc)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            stop_mid,target_mid,setup_spread,slippage,status,created_utc,updated_utc,
+            exit_policy,original_target_mid,model_version)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (tid,epic,source,timeframe,decision.strategy,decision.action,
              stamp,str(decision.reason)[:300],float(decision.stop),
-             float(decision.target),float(spread),float(slippage),'PENDING',now,now))
+             float(decision.target),float(spread),float(slippage),'PENDING',now,now,
+             exit_policy,float(decision.target),
+             'v3_adaptive_close_only' if exit_policy=="adaptive" else VERSION))
         _emit(db,tid,decision.action+"_SETUP",stamp,decision.reason)
         db.commit()
         return tid
@@ -208,15 +222,16 @@ def progress_paper(db, frame, epic, source, timeframe, max_holding=20):
             # Never present the reconstructed OPEN as a real-time executable quote.
             assumed_open_utc=_utc(t_setup)
             recognized_utc=_now()
+            risk=abs(open_mid-stop)
             db.execute("""UPDATE paper_positions_v3 SET status='OPEN',opened_utc=?,
                 entry_mid=?,entry_executable=?,entry_assumed_utc=?,
-                entry_detected_utc=?,updated_utc=? WHERE trade_id=?""",
+                entry_detected_utc=?,initial_risk_mid=?,updated_utc=? WHERE trade_id=?""",
                 (_utc(first_t),open_mid,filled,assumed_open_utc,
-                 recognized_utc,recognized_utc,tid))
+                 recognized_utc,risk,recognized_utc,tid))
             pos.update(status="OPEN",opened_utc=_utc(first_t),
                        entry_mid=open_mid,entry_executable=filled,
                        entry_assumed_utc=assumed_open_utc,
-                       entry_detected_utc=recognized_utc)
+                       entry_detected_utc=recognized_utc,initial_risk_mid=risk)
             _emit(db,tid,"PAPER_OPEN",_utc(first_t),
                   "Retrospektywny OPEN MID następnej świecy; wykryty dopiero po jej zamknięciu.")
             events.append("PAPER_OPEN")
@@ -278,6 +293,54 @@ def progress_paper(db, frame, epic, source, timeframe, max_holding=20):
                        "Limit czasu PAPER bez SL/TP.",exit_mid,exit_ex,round(pnl,2))
                 events.append("PAPER_TIMEOUT")
                 break
+            # Experimental PAPER-only adaptive exits. Evaluate SL/TP first
+            # using levels that were valid BEFORE this closed bar. Any change
+            # below becomes active only on the NEXT bar (no look-ahead).
+            if pos.get("exit_policy")=="adaptive":
+                origin=float(pos["entry_mid"])
+                risk=float(pos.get("initial_risk_mid") or abs(origin-float(pos["stop_mid"])))
+                if risk>0:
+                    long=pos["side"]=="LONG"
+                    gain=(float(row.Close)-origin)*(1 if long else -1)
+                    stop=float(pos["stop_mid"])
+                    target=float(pos["target_mid"])
+                    costs=float(pos["setup_spread"])+2*float(pos["slippage"])
+                    proposed=stop
+                    if gain>=risk:
+                        breakeven=origin+(costs*(1 if long else -1))
+                        proposed=(max(proposed,breakeven) if long else min(proposed,breakeven))
+                    if gain>=1.5*risk:
+                        trail=float(row.Close)+((-0.70*risk) if long else (0.70*risk))
+                        proposed=(max(proposed,trail) if long else min(proposed,trail))
+                    # Do not move a stop beyond the last confirmed close:
+                    # otherwise claim a retroactive fill at a non-traded level.
+                    proposed=(min(proposed,float(row.Close)) if long else
+                              max(proposed,float(row.Close)))
+                    if (proposed>stop+1e-7 if long else proposed<stop-1e-7):
+                        db.execute("""UPDATE paper_positions_v3
+                            SET stop_mid=?,updated_utc=? WHERE trade_id=?""",
+                            (proposed,_now(),tid))
+                        pos["stop_mid"]=proposed
+                        _emit(db,tid,"PAPER_TRAIL_SL",_utc(stamp),
+                              f"Nowy SL MID={proposed:.2f}, obowiązuje dopiero od kolejnej świecy")
+                        events.append("PAPER_TRAIL_SL")
+                    original=float(pos.get("original_target_mid") or target)
+                    favorable_close=(float(row.Close)>float(row.Open) if long else
+                                     float(row.Close)<float(row.Open))
+                    if (not int(pos.get("target_extended") or 0)
+                        and gain>=1.2*risk and favorable_close):
+                        runner=origin+(2.8*risk*(1 if long else -1))
+                        # No retrospective removal of a touched TP: tested above.
+                        if (runner>target if long else runner<target):
+                            db.execute("""UPDATE paper_positions_v3 SET target_mid=?,
+                                target_extended=1,updated_utc=? WHERE trade_id=?""",
+                                (runner,_now(),tid))
+                            pos["target_mid"]=runner
+                            pos["target_extended"]=1
+                            _emit(db,tid,"PAPER_EXTEND_TP",_utc(stamp),
+                                  f"Cel MID={runner:.2f} (bazowy {original:.2f}), "
+                                  "obowiązuje dopiero od następnej świecy")
+                            events.append("PAPER_EXTEND_TP")
             prev=stamp
             db.execute("""UPDATE paper_positions_v3 SET bars_held=?,updated_utc=?
                    WHERE trade_id=?""",(bars_held,_now(),tid))
