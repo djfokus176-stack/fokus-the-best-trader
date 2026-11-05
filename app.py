@@ -642,3 +642,173 @@ with settings_tab:
       ('Trading DEMO/REAL','BLOKADA','Brak endpointów POST /positions i DELETE /positions'),
     ],columns=['Element','Stan','Wyjaśnienie']))
     st.caption('Klucze podawaj w Secrets aplikacji, nigdy w publicznym GitHubie. API tutaj nie są trwale zapisywane w bazie.')
+
+
+
+with mtf_tab:
+    st.subheader('🧭 M1 + M5 + M15 + H1 — JEDEN OBRAZ RYNKU')
+    st.caption('4 osobne serie z Capital.com. Brak danych, inne źródło lub brak świeżości = WAIT. MTF nie tworzy nowego sygnału, tylko może odrzucić już wykryty.')
+    snapshots=st.session_state.get('mtf_snapshots',{})
+    if not st.session_state.get('mtf_enabled',False):
+        st.warning('Włącz MTF w lewym panelu, aby 4 interwały uczestniczyły w ocenie.')
+    if not snapshots:
+        st.info('Brak zestawu MTF. Wykonaj SKANUJ ŚWIECE przy włączonym MTF.')
+    else:
+        rows,consensus=evaluate_timeframes(snapshots)
+        table=[]
+        for row in rows:
+            table.append({'Interwał':LABELS[row.timeframe],
+                'Trend EMA':row.trend,'Cena':row.close,'ATR':row.atr,'RSI':row.rsi,
+                'Status':'AKTUALNY' if row.ready else 'BRAK/WAIT',
+                'Zamknięta świeca UTC':str(row.candle_utc) if row.candle_utc else 'BRAK',
+                'Wyjaśnienie':row.reason})
+        st.dataframe(pd.DataFrame(table),hide_index=True,use_container_width=True)
+        if consensus in ('UP','DOWN'):
+            st.success(f'KONTEKST MTF: {consensus} (hipoteza, bez gwarancji kierunku)')
+        else:
+            st.warning('KONTEKST MTF: WAIT / NEUTRAL — nie ma pełnej zgodności czterech interwałów.')
+        errors=st.session_state.get('mtf_errors',{})
+        if errors:
+            with st.expander('Błędy pobrania poszczególnych interwałów'):
+                st.json({LABELS.get(k,k):v for k,v in errors.items()})
+        cols=st.columns(2)
+        for i,horizon in enumerate(TIMEFRAMES):
+            sn=snapshots.get(horizon)
+            if sn is not None and len(sn.frame)>10:
+                with cols[i%2]:
+                    st.caption(f'{LABELS[horizon]} • {sn.source} • {len(sn.frame)} zamkniętych świec')
+                    st.line_chart(sn.frame.Close.tail(100),height=190)
+
+
+with strategies_tab:
+    st.subheader('🎯 SZÓSTKA STRATEGII PAPER — NIEZALEŻNE OCENY')
+    st.caption('Każdy algorytm analizuje te same zamknięte świece. LONG/SHORT to jedynie setup badawczy. Reguły nie są skalibrowane na historyczny zysk.')
+    if snap is None or len(snap.frame)<85:
+        st.info('Pobierz co najmniej 85 zamkniętych świec, aby ocenić strategie.')
+    else:
+        all_rows=[]
+        for name in ALL_STRATEGIES:
+            d=decide_any(snap.frame,name,spread=snap.spread)
+            filtered,_=filter_mtf_decision(
+                d,st.session_state.get('mtf_snapshots',{}),
+                asof=snap.confirmed_utc) if st.session_state.get('mtf_enabled') else (d,[])
+            if not current_feed_status(snap,src)[0]:
+                filtered_action='WAIT / STALE'
+            elif src.startswith('CSV'):
+                filtered_action='WAIT / CSV'
+            else:
+                filtered_action=filtered.action
+            all_rows.append({'Strategia':name,'Setup (OHLC)':d.action,
+                'Po filtrze MTF / feed':filtered_action,
+                'Wejście MID':d.entry,'SL MID':d.stop,'TP MID':d.target,
+                'RR':d.rr,'Powód':d.reason if filtered_action==d.action else filtered.reason})
+        st.dataframe(pd.DataFrame(all_rows),hide_index=True,use_container_width=True)
+        st.info('Jednoczesne różne sygnały NIE oznaczają, że należy je sumować. Każda strategia wymaga oddzielnego, rozliczonego testu.')
+
+
+with news_tab:
+    st.subheader('📰 RADAR MAKRO — OFICJALNE ŹRÓDŁA FED / BLS / BEA')
+    st.caption('Nagłówki RSS i kalendarz publikacji BLS. Bez scrapingowania kont osobistych i bez automatycznych płatnych zapytań GPT.')
+    if st.button('🌐 POBIERZ WIADOMOŚCI I KALENDARZ BLS',type='primary',key='fetch_official_news'):
+        headlines,feed_errors=fetch_headlines()
+        st.session_state['_headlines']=headlines
+        st.session_state['_news_feed_errors']=feed_errors
+        st.session_state['_news_read_utc']=datetime.now(timezone.utc).isoformat()
+        try:
+            st.session_state['_macro_calendar']=fetch_bls_schedule()
+            st.session_state['_calendar_error']=None
+        except Exception as ex:
+            st.session_state['_macro_calendar']=[]
+            st.session_state['_calendar_error']=type(ex).__name__
+    if st.session_state.get('_news_read_utc'):
+        st.caption('Ostatni udany/podjęty skan źródeł (UTC): '+st.session_state['_news_read_utc'])
+    events=st.session_state.get('_macro_calendar',[])
+    is_blocked,notice=macro_blackout(events)
+    (st.error if is_blocked else st.info)(notice)
+    if st.session_state.get('_calendar_error'):
+        st.warning('Kalendarz BLS niedostępny: '+st.session_state['_calendar_error']+'. Nie potwierdzamy braku ważnych publikacji.')
+    if events:
+        upcoming=[{'Data UTC':e['data_utc'].isoformat(),'Wydarzenie':e['wydarzenie']}
+            for e in events if e['data_utc']>=datetime.now(timezone.utc)-pd.Timedelta(hours=2)]
+        st.markdown('#### Kalendarz BLS — najbliższe wydarzenia')
+        st.dataframe(pd.DataFrame(upcoming[:20]),use_container_width=True,hide_index=True)
+    news=st.session_state.get('_headlines',[])
+    if news:
+        st.markdown('#### Najnowsze nagłówki')
+        st.dataframe(pd.DataFrame(news[:45]),use_container_width=True,hide_index=True,
+            column_config={'url':st.column_config.LinkColumn('Oficjalny link')})
+    else:
+        st.info('Brak pobranych wiadomości — kliknij przycisk. Nie pokazuję fikcyjnych nagłówków.')
+    if st.session_state.get('_news_feed_errors'):
+        with st.expander('Niedostępne źródła RSS (uczciwy status)'):
+            st.json(st.session_state['_news_feed_errors'])
+    with st.expander('🤖 GPT-5.4 HIGH — wyjaśnij dane + oficjalne nagłówki (płatne, ręcznie)'):
+        st.caption('Nagłówki to niezweryfikowane przez GPT dane z zewnętrznych stron; mogą zawierać błędy. AI nie zna niepodanych wyników publikacji.')
+        q=st.text_area('Pytanie badawcze',value='Jakie ryzyka makro i warunki WAIT wynikają z DOSTARCZONYCH wiadomości i świec?',key='macro_ai_question')
+        if st.button('🧠 ANALIZUJ NEWS + WYKRES — OPENAI',key='macro_ai_button'):
+            if not openai_api_key:st.error('Brak klucza OpenAI API w Secrets.')
+            else:
+                context=dict(st.session_state.get('ai_context') or {})
+                context['news_untrusted_external']=[{'title':x['tytuł'],'published_utc':x['data_utc'],
+                    'source':x['źródło'],'url':x['url']} for x in news[:12]]
+                context['calendar_BLS']=[{'event':x['wydarzenie'],'datetime_utc':x['data_utc'].isoformat()} for x in events[:12]]
+                context['not_live_when_missing']=not bool(st.session_state.get('ai_context'))
+                st.write(answer_ai(openai_api_key,secret('OPENAI_MODEL','gpt-5.4'),
+                    q,context,effort=secret('OPENAI_REASONING_EFFORT','high')))
+
+
+with reports_tab:
+    st.subheader('📈 FOKU$ LAB — PORÓWNAJ 6 STRATEGII PO KOSZTACH')
+    st.caption('Rejestr badań PAPER. Chronologiczny holdout 70/30 + kroczące przedziały. Żaden wynik nie jest obietnicą zysku.')
+    if snap is None or len(snap.frame)<125:
+        st.warning('Do raportu potrzeba >=125 zamkniętych świec. Najlepiej kilkadziesiąt tysięcy świec z wiarygodnego archiwum, a nie tylko 350 z REST.')
+    else:
+        x,y=st.columns(2)
+        with x:
+            research_spread=st.number_input('Spread w teście (pkt)',value=float(snap.spread),min_value=0.,max_value=10.,step=.1,key='research_spread')
+        with y:
+            research_slip=st.number_input('Poślizg na stronę (pkt)',value=.25,min_value=0.,max_value=5.,step=.05,key='research_slip')
+        st.caption(f'Badany zbiór: {len(snap.frame)} świec {tf}. CSV nie jest ceną wykonalną. Limit przyczynowego replay: maksimum 1 pozycja na raz.')
+        if st.button('🔬 PRZELICZ WSZYSTKIE 6 STRATEGII / HOLDOUT',type='primary',key='research_run'):
+            with st.spinner('Liczenie formacji i symulacji z uwzględnieniem kosztów...'):
+                try:
+                    result=chronological_report(snap.frame,ALL_STRATEGIES,
+                        spread=research_spread,slippage=research_slip,holding=20)
+                    st.session_state['_latest_research']={'table':result,
+                        'signature':f'{src}|{instrument}|{tf}|{len(snap.frame)}|{snap.frame.index[-1]}'}
+                except (ValueError,KeyError) as ex:
+                    st.error('Błąd walidacji danych: '+str(ex))
+        current_sig=f'{src}|{instrument}|{tf}|{len(snap.frame)}|{snap.frame.index[-1]}'
+        research=st.session_state.get('_latest_research')
+        if research and research['signature']==current_sig:
+            table=research['table']
+            st.dataframe(table,use_container_width=True,hide_index=True)
+            st.download_button('⬇️ EKSPORT RAPORTU CSV',data=table.to_csv(index=False).encode('utf-8-sig'),
+                file_name='FOKUS_RESEARCH_HOLDOUT.csv',mime='text/csv')
+            if int(table.n.sum())<30:
+                st.warning('Łącznie mniej niż 30 rozstrzygniętych transakcji w raportowanych sekcjach. To ZA MAŁO, by mówić o przewadze.')
+            if st.button('🔁 KROCZĄCE OKNA OOS — WYBRANA STRATEGIA',key='rolling_run'):
+                folds=rolling_oos(snap.frame,strategy,spread=research_spread,slippage=research_slip)
+                st.dataframe(folds,hide_index=True,use_container_width=True)
+        else:
+            st.info('Kliknij PRZELICZ. Wyniki nie są generowane automatycznie na każdej świecy.')
+    st.markdown('#### Statystyki forward PAPER zapisane przez bota')
+    try:
+        historical=paper_report(connect())
+        if historical:
+            resolved=pd.DataFrame(historical)
+            resolved=resolved[resolved.status.isin(['WIN','LOSS','TIMEOUT'])]
+            if not resolved.empty:
+                st.metric('Rozliczone v2 (bez legacy)',len(resolved))
+                st.metric('Suma punktów po kosztach',f'{resolved.pnl_pts.sum():+.2f}')
+                grp=resolved.groupby(['strategy','timeframe'],as_index=False).agg(
+                    liczba=('pnl_pts','size'),suma_pkt=('pnl_pts','sum'),
+                    srednia_pkt=('pnl_pts','mean'))
+                st.dataframe(grp,hide_index=True,use_container_width=True)
+            else:
+                st.info('Jeszcze brak pełnych wyników v2 do statystyki.')
+        else:
+            st.info('Nie zapisano nowych rozliczonych transakcji PAPER v2.')
+    except (OSError,sqlite3.Error) as ex:
+        st.warning('Archiwum niedostępne: '+type(ex).__name__)
+    st.warning('Ważne: lokalny SQLite w Streamlit Cloud nie jest trwałą bazą. Po ponownym wdrożeniu może zostać wyczyszczony. Do autentycznego gromadzenia historii latami potrzebna jest baza zewnętrzna.')
