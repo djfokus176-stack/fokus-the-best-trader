@@ -624,7 +624,11 @@ with market_tab:
                         f"| SL MID {current_paper['stop_mid']:.2f} | TP MID {current_paper['target_mid']:.2f}. "
                         +('Wejście dopiero po następnej ZAMKNIĘTEJ świecy — nie było jeszcze wykonania.'
                           if current_paper['status']=='PENDING'
-                          else f"Wejście wykonawcze (symulowane BID/ASK): {current_paper['entry_executable']:.2f}."))
+                          else (f"MID z następnej świecy (historyczny): {current_paper['entry_mid']:.2f} | "
+                                f"modelowany fill BID/ASK + poślizg: {current_paper['entry_executable']:.2f}. "
+                                f"Założony czas OPEN: {current_paper.get('entry_assumed_utc') or 'BRAK / STARY ZAPIS'}; "
+                                f"wykryte przez skaner: {current_paper.get('entry_detected_utc') or 'BRAK / STARY ZAPIS'}. "
+                                "Nie było rzeczywistego wykonania zlecenia."))
                 else:
                     st.caption('🧪 Pozycja PAPER v3: BRAK AKTYWNEJ. Historyczne strzałki są wyłącznie układami, nie zrealizowanymi transakcjami.')
                 if current_paper and current_paper['timeframe']!=tf:
