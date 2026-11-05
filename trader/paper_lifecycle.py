@@ -47,6 +47,9 @@ def ensure_tables(db):
     db.execute("""CREATE UNIQUE INDEX IF NOT EXISTS uq_paper_one_active
        ON paper_positions_v3(source,epic,timeframe)
        WHERE status IN ('PENDING','OPEN')""")
+    db.execute("""CREATE UNIQUE INDEX IF NOT EXISTS uq_paper_one_epic_active
+       ON paper_positions_v3(source,epic)
+       WHERE status IN ('PENDING','OPEN')""")
     db.execute("""CREATE TABLE IF NOT EXISTS paper_events_v3 (
        event_id TEXT PRIMARY KEY,trade_id TEXT NOT NULL,
        kind TEXT NOT NULL, candle_utc TEXT NOT NULL,
@@ -69,8 +72,8 @@ def active_position(db, epic, source, timeframe):
     ensure_tables(db)
     db.row_factory=sqlite3.Row
     r=db.execute("""SELECT * FROM paper_positions_v3 WHERE
-      epic=? AND source=? AND timeframe=? AND status IN ('PENDING','OPEN')
-      ORDER BY created_utc ASC LIMIT 1""",(epic,source,timeframe)).fetchone()
+      epic=? AND source=? AND status IN ('PENDING','OPEN')
+      ORDER BY created_utc ASC LIMIT 1""",(epic,source)).fetchone()
     return dict(r) if r else None
 
 def recent_positions(db, limit=150):
@@ -105,8 +108,8 @@ def queue_paper(db, epic, source, timeframe, decision, signal_utc,
     try:
         old=db.execute("SELECT trade_id FROM paper_positions_v3 WHERE trade_id=?",(tid,)).fetchone()
         active=db.execute("""SELECT trade_id FROM paper_positions_v3
-             WHERE source=? AND epic=? AND timeframe=? AND status IN ('PENDING','OPEN')""",
-             (source,epic,timeframe)).fetchone()
+             WHERE source=? AND epic=? AND status IN ('PENDING','OPEN')""",
+             (source,epic)).fetchone()
         if old or active:
             db.commit()
             return None
