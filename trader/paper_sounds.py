@@ -104,17 +104,23 @@ def voice_clip(kind, side=None, *, directory=None):
     if not filename:
         return None
     directory=VOICE_DIR if directory is None else Path(directory)
-    path=directory/filename
-    try:
-        if not path.is_file() or not (0<path.stat().st_size<=2*1024*1024):
-            return None
-        data=path.read_bytes()
-        # MP3 frame sync or an ID3 tag; avoid playing random text as audio.
-        if data[:3]!=b"ID3" and not (len(data)>2 and data[0]==255 and data[1]&224==224):
-            return None
-        return data
-    except OSError:
-        return None
+    # Uploaded single 'zamknij' clip can cover TP, SL and TIMEOUT,
+    # while optional event-specific clips have priority when present.
+    choices=[filename]
+    if kind in ("PAPER_CLOSE_TP","PAPER_CLOSE_SL","PAPER_TIMEOUT"):
+        choices.append("close.mp3")
+    for choice in choices:
+        path=directory/choice
+        try:
+            if not path.is_file() or not (0<path.stat().st_size<=2*1024*1024):
+                continue
+            data=path.read_bytes()
+            if data[:3]==b"ID3" or (
+                len(data)>2 and data[0]==255 and data[1]&224==224):
+                return data
+        except OSError:
+            continue
+    return None
 
 
 def alert_audio(kind, side=None, *, voice_enabled=False, directory=None):
@@ -124,3 +130,23 @@ def alert_audio(kind, side=None, *, voice_enabled=False, directory=None):
         if mp3 is not None:
             return mp3,"audio/mpeg","VOICE"
     return wav_notice(kind),"audio/wav","TONE"
+
+
+
+def new_paper_events(events,last_seen):
+    """Collect all newly archived alerts in true chronological order.
+
+    This avoids losing OPEN when it and CLOSE are recorded by one scan.
+    First open of the page establishes baseline without replaying history.
+    """
+    rows=list(events or [])
+    newest=rows[0].get("event_id") if rows else last_seen
+    if last_seen is None:
+        return newest,[]
+    unseen=[]
+    for event in rows:
+        if event.get("event_id")==last_seen:
+            break
+        if event.get("kind") in SOUND_EVENTS:
+            unseen.append(event)
+    return newest,list(reversed(unseen))
