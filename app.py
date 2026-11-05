@@ -9,7 +9,11 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from trader.market import CapitalReadOnly, FeedError, evaluate_snapshot, PERIOD
-from trader.strategy import indicators, decide, backtest
+from trader.strategy import indicators, backtest
+from trader.strategies_pro import decide_any, ALL_STRATEGIES
+from trader.mtf import TIMEFRAMES, LABELS, evaluate_timeframes, filter_mtf_decision
+from trader.research import chronological_report, rolling_oos, replay, stats
+from trader.news_radar import fetch_headlines, fetch_bls_schedule, macro_blackout
 from trader.storage import connect, archive, recent, recent_scan_decisions, audit_prior_paper_signals, paper_report, legacy_outcomes_count
 from trader.assistant import numeric_context, answer_ai
 from trader.visuals import historical_marks
@@ -114,7 +118,7 @@ st.markdown('''<style>
 .tag {background:#21304b;color:#c8defd;padding:5px 12px;border-radius:20px;font-weight:bold;}
 </style>''',unsafe_allow_html=True)
 st.markdown('<div class="fokus">⚡ FOKU$ THE BEST TRADER</div>',unsafe_allow_html=True)
-st.markdown('<span class="tag">v0.2 NOWY PROJEKT</span> &nbsp; <span class="tag">PAPER / READ-ONLY</span> &nbsp; <span class="tag">BRAK AUTO TRADE</span>',unsafe_allow_html=True)
+st.markdown('<span class="tag">v0.3 MASTER RESEARCH</span> &nbsp; <span class="tag">PAPER / READ-ONLY</span> &nbsp; <span class="tag">BRAK AUTO TRADE</span>',unsafe_allow_html=True)
 st.caption('Nowy program napisany od zera. Analiza świec, nie wizja AI i nie gwarancja zysku. Bez połączeń ze starym repozytorium.')
 
 
@@ -152,7 +156,10 @@ with st.sidebar:
             st.session_state.pop(k, None)
     st.session_state['_prev_capital_env'] = capital_env
     tf=st.selectbox('Interwał',['MINUTE','MINUTE_5','MINUTE_15','HOUR'],format_func=lambda x:{'MINUTE':'M1','MINUTE_5':'M5','MINUTE_15':'M15','HOUR':'H1'}[x])
-    strategy=st.radio('Strategia',['DRUGA FALA','EMA TREND'])
+    strategy=st.selectbox('Strategia badawcza',ALL_STRATEGIES)
+    st.toggle('🧭 Potwierdzenie M1/M5/M15/H1 (veto)',value=True,key='mtf_enabled',
+        help='Bot nie pokaże nowego LONG/SHORT gdy nie ma 4 zgodnych i świeżych odczytów.')
+    st.caption('Każda strategia jest HIPOTEZĄ PAPER, nie potwierdzonym systemem zarobkowym.')
     max_spread=st.slider('Maksymalny spread (pkt)',.2,5.0,2.0,.1)
     st.toggle('🔄 AUTO-SKAN — tylko gdy aplikacja otwarta',value=_early_secret('AUTO_SCAN_DEFAULT','true').lower() in ('true','1','yes'),key='auto_scan_active',
         help='Ocenia zamknięte świece co najmniej co 60 sekund. Nie jest usługą działającą 24/7.')
@@ -246,7 +253,10 @@ with st.sidebar:
         st.warning('⚠️ Brak API Capital.com. Możesz analizować własny CSV.')
     st.info('Streamlit Cloud nie gwarantuje skanera działającego 24/7. Do tego potrzebny osobny worker na stale działającym hoście.')
 
-market_tab,dna_tab,lab_tab,archive_tab,settings_tab=st.tabs(['📊 WYKRES I SYGNAŁ','🧬 MARKET DNA','🧪 TESTY I NAUKA','📚 ARCHIWUM','🔐 STATUS SYSTEMU'])
+market_tab,dna_tab,mtf_tab,strategies_tab,lab_tab,news_tab,reports_tab,archive_tab,settings_tab=st.tabs([
+    '📊 TERMINAL','🧬 MARKET DNA','🧭 M1–H1','🎯 STRATEGIE',
+    '🧪 LABORATORIUM','📰 NEWS / MAKRO','📈 RAPORTY',
+    '📚 ARCHIWUM','⚙️ STATUS / API'])
 
 @st.fragment(run_every="60s")
 def auto_scan_heartbeat():
@@ -291,7 +301,9 @@ with market_tab:
         else:
             st.info('⚪ TRYB RĘCZNY — nowe świece wymagają ponownego skanowania.')
     with col2:
-        st.info('Dane źródłowe = te same świece, które czyta strategia i wyświetla wykres. AI nie widzi obrazu ekranu; dostaje numeryczne OHLC i wskaźniki.')
+        st.markdown('#### 🎯 FOKU$ MARKET TERMINAL')
+        st.caption('Świece MID • EMA9/21/50 • SL/TP PAPER • potwierdzenie 4 interwałów • analiza bez zleceń')
+        st.info('Dane wykresu i silnika są wspólne. GPT czyta dane liczbowe, a nie obraz wykresu.')
     auto_scan = bool(has_cap and csv is None and not st.session_state.get('initial_scan_attempted') and st.session_state.get('market_snap') is None)
     if auto_scan:
         st.session_state['initial_scan_attempted'] = True
@@ -324,6 +336,38 @@ with market_tab:
                 st.session_state['market_snap']=st.session_state['_capital_client'].candles(
                     instrument,tf,count=350,max_spread=max_spread)
                 st.session_state['source_override']=f'Capital.com {capital_env} REST'
+                if st.session_state.get('mtf_enabled',False):
+                    import time as _clock
+                    client=st.session_state['_capital_client']
+                    cache_key=(instrument,capital_env)
+                    if st.session_state.get('_mtf_cache_key')!=cache_key:
+                        st.session_state['mtf_snapshots']={}
+                        st.session_state['_mtf_due']={}
+                        st.session_state['mtf_errors']={}
+                    st.session_state['_mtf_cache_key']=cache_key
+                    snapshots=dict(st.session_state.get('mtf_snapshots',{}))
+                    due=dict(st.session_state.get('_mtf_due',{}))
+                    errors=dict(st.session_state.get('mtf_errors',{}))
+                    stamp=_clock.monotonic()
+                    for horizon in TIMEFRAMES:
+                        if horizon==tf:
+                            snapshots[horizon]=st.session_state['market_snap']
+                            due[horizon]=stamp
+                            errors.pop(horizon,None)
+                            continue
+                        seconds=PERIOD[horizon]
+                        if horizon not in snapshots or stamp-due.get(horizon,0)>=max(60,seconds)-2:
+                            try:
+                                snapshots[horizon]=client.candles(instrument,horizon,
+                                    count=350,max_spread=max_spread)
+                                due[horizon]=stamp
+                                errors.pop(horizon,None)
+                            except (FeedError,ValueError) as ex:
+                                snapshots.pop(horizon,None)
+                                errors[horizon]=str(ex)[:180]
+                    st.session_state['mtf_snapshots']=snapshots
+                    st.session_state['_mtf_due']=due
+                    st.session_state['mtf_errors']=errors
             else:
                 st.error('Brak Capital.com API lub CSV. NIE generuję sztucznych cen.')
             obtained=st.session_state.get('market_snap')
@@ -433,7 +477,17 @@ with market_tab:
             if src.startswith('CSV'):
                 st.warning('CSV: wyłącznie symulacja edukacyjna. Nie ma sygnału do egzekucji live.')
             if snap.frame is not None and len(snap.frame)>=70:
-                decision=decide(snap.frame,strategy,spread=snap.spread)
+                decision=decide_any(snap.frame,strategy,spread=snap.spread)
+                if ready and st.session_state.get('mtf_enabled',False):
+                    decision,_mtf_rows=filter_mtf_decision(
+                        decision,st.session_state.get('mtf_snapshots',{}),
+                        asof=snap.confirmed_utc)
+                if ready:
+                    blackout,note=macro_blackout(st.session_state.get('_macro_calendar',[]))
+                    if blackout:
+                        from dataclasses import replace as _replace
+                        decision=_replace(decision,action='WAIT',entry=None,
+                            stop=None,target=None,rr=None,reason=note)
                 if not ready: decision.action='WAIT';decision.reason='Brak zweryfikowanego, świeżego feedu LIVE/DEMO — tylko analiza historyczna'
                 banner=f"{decision.action} | {strategy} | {decision.reason}"
                 if decision.action=='LONG':
@@ -459,7 +513,7 @@ with market_tab:
                 if ready:
                     payload=numeric_context(snap.frame,decision,instrument,tf,snap.spread)
                     st.session_state['ai_context']=payload
-                    key=hashlib.sha256(f'{instrument}|{tf}|{strategy}|{snap.confirmed_utc.isoformat()}|{decision.action}'.encode()).hexdigest()
+                    key=hashlib.sha256(f'{src}|{instrument}|{tf}|{strategy}|{snap.confirmed_utc.isoformat()}|{decision.action}'.encode()).hexdigest()
                     try:
                         db=connect()
                         new=archive(db,key,snap.confirmed_utc.isoformat(),instrument,src,tf,decision,spread=snap.spread)
