@@ -118,7 +118,7 @@ class HistoricalMTFGate:
 
 def compare_mtf_on_m1_csv(m1:pd.DataFrame, strategies=ALL_STRATEGIES,
                            spread=.6, slippage=.25, holding=20, split=.7,
-                           max_candles=6000):
+                           max_candles=6500):
     """Same fixed setup rules on chronological 70/30 split, with/without MTF.
 
     Rules are NOT optimized on either sample. This compares two independent
@@ -136,11 +136,18 @@ def compare_mtf_on_m1_csv(m1:pd.DataFrame, strategies=ALL_STRATEGIES,
     if len(higher["HOUR"])<70:
         raise ValueError("Za mało pełnych godzin H1; luki M1 uniemożliwiają rzetelny MTF.")
     gate=HistoricalMTFGate(m1,higher)
-    bound=int(len(m1)*split)
+    # First 70 fully closed H1 bars serve as shared warmup, NOT as scored trades.
+    # Split the eligible history 70/30; otherwise a 6000-bar dataset would
+    # have no MTF signals in the '70% earlier' segment.
+    earliest_full_h1=higher["HOUR"].index[69]
+    warmup=int(m1.index.searchsorted(earliest_full_h1,side="right"))
+    if len(m1)-warmup < 2*holding+80:
+        raise ValueError("Po rozgrzaniu 70 godzin H1 jest za mało danych na dwa odrębne okresy testu.")
+    bound=warmup+int((len(m1)-warmup)*split)
     output=[];trade_rows=[]
     for name in strategies:
-        for period,start,end in (("WCZEŚNIEJSZE / 70%",85,bound),
-                                 ("PÓŹNIEJSZE / 30%",max(85,bound),len(m1))):
+        for period,start,end in (("WCZEŚNIEJSZE / 70%",warmup,bound),
+                                 ("PÓŹNIEJSZE / 30%",bound,len(m1))):
             for variant in ("BEZ MTF","Z MTF"):
                 counted={"candidates":0,"rejected":0,"passed":0}
                 def trade_filter(decision,stamp):
