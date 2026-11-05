@@ -63,6 +63,13 @@ def test_dashboard_v3_queue_then_simulated_open_on_next_closed_candle(monkeypatc
     manual[0].set_value("DRUGA FALA")
     app.run()
     assert not app.exception,[str(x.message) for x in app.exception]
+    # Changing a selector does not fetch new market data; only an actual
+    # scheduled/manual scan is permitted to queue a PAPER candidate.
+    reload_buttons=[x for x in app.button if "SKANUJ ŚWIECE" in x.label]
+    assert reload_buttons
+    reload_buttons[0].click()
+    app.run()
+    assert not app.exception,[str(x.message) for x in app.exception]
     db=connect(tmp_path/"v3.sqlite3")
     recorded=recent_positions(db)
     assert len(recorded)==1 and recorded[0]["status"]=="PENDING"
