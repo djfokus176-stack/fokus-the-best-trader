@@ -74,6 +74,16 @@ Bramka hasłowa chroni aplikację przed przypadkowym dostępem, ale **nie zastę
 
 **CAŁKOWICIE NOWY PROJEKT.** Nowe repo `fokus-the-best-trader`, nowe `app.py`, nowy moduł analityczny, nowe archiwum. ZERO integracji, push/pull czy użycia git remote `sp500-kolega-gemini`. Stary kod nie jest tu skopiowany.
 
+## Audyt UX — cache strzałek i czat (5 listopada 2026)
+
+- **Cache strzałek:** `trader/arrow_cache.py` używa Streamlit `st.cache_data`, z limitem 40 wpisów i TTL 30 min. Klucz obejmuje **całą zawartość** DataFrame zamkniętych świec oraz EPIC, źródło, TF, strategię i okno. Odświeżenie interfejsu bez zmiany danych może ponownie wykorzystać wynik; NOWA lub skorygowana świeca powoduje ponowne obliczenie. Nie gwarantujemy poprawy na wszystkich komputerach i rozmiarach historii.
+- **Okno strzałek:** dokładnie **6 opcji**: 60, 90, 120, 180, 240, 350 zamkniętych świec. To nie jest płynny suwak. Tabela pod wykresem zawiera godziny, ceny MID i powody historycznych układów PAPER.
+- **Znacznik BOT / CSV:** punkt na ostatniej potwierdzonej świecy `snap.frame.iloc[-1]`. `evaluate_snapshot` wycina najnowszą, mogącą się dopiero tworzyć świecę. CSV jest oznaczany jako **REPLAY**, nigdy LIVE. Jest test odczytu CSV i dokładnego timestampu znacznika.
+- **GPT:** wybór `medium` (domyślny, limit 2400 output tokens, 45 s) lub `high` (4200 output tokens, 65 s). Pytanie maksymalnie 800 znaków. Rzeczywiste dane `usage.input_tokens/output_tokens` są dołączone do odpowiedzi, jeśli API je przekazuje. Nie pokazujemy wymyślonej kwoty kosztu — zależy od aktualnego cennika i warunków naliczania.
+- **Historia czatu:** jest tylko w `st.session_state`. Przetrwa standardowy AUTO-SKAN/rerun aktywnej sesji, **NIE** jest trwała po przeładowaniu karty, ponownym logowaniu czy restarcie instancji. Nie zapisujemy automatycznie rozmów ani prywatnych danych do publicznego repo.
+- **Testy CI:** używa akcji GitHuba kompatybilnych z Node 24. Poprawiono ostrzeżenie Pandas wynikające z typu kolumny w teście symulowanego przeskoku stop loss.
+- **Czego nie sprawdzono:** płatnych odpowiedzi prawdziwego OpenAI, zachowania aplikacji w przeglądarce właściciela przez długi czas i realnej poprawy rentowności strategii.
+
 ## Audyt techniczny — poprawki PAPER v2 / 4 listopada 2026
 
 - **Bilans PAPER:** poziomy SL/TP są interpretowane jako **MID**, a wejście/wyjście jako odpowiednio ASK/BID dla LONG i BID/ASK dla SHORT; poślizg jest liczony na obu końcach. Jeśli oba progi są dotknięte w tej samej świecy OHLC, konserwatywnie pierwszeństwo ma SL. Nie jest to egzekucja brokerska ani tick-by-tick.
