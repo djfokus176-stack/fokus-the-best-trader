@@ -12,6 +12,9 @@ concurrency:
   cancel-in-progress: false
 jobs:
   paper:
+    # Skip before allocating a runner unless owner enables the bot.
+    # Avoid consuming Actions minutes for unconfigured 5-min cron.
+    if: vars.FOKUS_PAPER_WORKER_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 4
     env:
