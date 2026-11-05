@@ -20,6 +20,9 @@ def test_dashboard_v3_queue_then_simulated_open_on_next_closed_candle(monkeypatc
     monkeypatch.setenv("CAPITAL_API_KEY","mock-api")
     monkeypatch.setenv("CAPITAL_IDENTIFIER","mock@example.invalid")
     monkeypatch.setenv("CAPITAL_PASSWORD","mock-password")
+    # Synthetic fixtures below already carry CLOSE-time timestamps.
+    # Owner explicitly confirmed raw API labels are OPEN to enable PAPER.
+    monkeypatch.setenv("FOKUS_CANDLE_TIME_CONFIRMED","open")
     monkeypatch.setenv("PAPER_TELEGRAM_ALERTS_ENABLED","false")
     import trader.storage as storage
     monkeypatch.setattr(storage,"DB_PATH",tmp_path/"v3.sqlite3")
