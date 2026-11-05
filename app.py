@@ -813,7 +813,27 @@ with market_tab:
                     db_v3=paper_view_db()
                     ensure_paper_v3(db_v3)
                     if remote_paper_view_enabled():
-                        st.caption('☁️ PAPER REMOTE VIEW: pozycje z trwałego checkpointu workera. Ten terminal nie zapisuje nowych pozycji PAPER — jeden writer w GitHub Actions.')
+                        st.caption('☁️ PAPER REMOTE VIEW: pozycje z trwałego checkpointu workera. '
+                                   'Ten terminal nie zapisuje nowych pozycji PAPER.')
+                        meta=st.session_state.get('_paper_remote_meta') or {}
+                        stamp=meta.get('last_scan_utc')
+                        try:
+                            worker_age=(datetime.now(timezone.utc)-
+                                datetime.fromisoformat(stamp)).total_seconds() if stamp else None
+                        except (ValueError,TypeError):
+                            worker_age=None
+                        if worker_age is None:
+                            st.error('🔴 WORKER GH: brak potwierdzonego skanu w bazie.')
+                        elif worker_age>15*60:
+                            st.error(f'🔴 WORKER GH NIEAKTUALNY — ostatni skan {worker_age/60:.0f} min temu. '
+                                     'Samo odświeżanie wykresu NIE otworzy pozycji PAPER!')
+                        else:
+                            st.success(f'🟢 WORKER GH: zapis {worker_age/60:.1f} min temu.')
+                        st.caption('🤖 Strategia workera: '+
+                            str(meta.get('strategy','BRAK DANYCH / starszy checkpoint')))
+                        if meta.get('last_scan_summary'):
+                            st.caption('Ostatni wynik workera (bez sekretów): '+
+                                str(meta['last_scan_summary'])[:350])
                     if (not remote_paper_view_enabled() and actual_scan_this_rerun
                             and snap.good and src=='Capital.com DEMO REST'):
                         # Process all available broker TFs so switching M1/M5/H1
