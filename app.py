@@ -156,8 +156,12 @@ def paper_view_db():
         # the one authoritative writer. Never fallback to local silently.
         remote=RemoteCheckpoint(secret('FOKUS_SUPABASE_URL'),
                                 secret('FOKUS_SUPABASE_SECRET_KEY'))
-        db,version=remote_view_db(remote)
+        version,payload=remote.fetch()
+        db=sqlite3.connect(':memory:')
+        from trader.remote_checkpoint import restore_state
+        restore_state(db,payload)
         st.session_state['_paper_remote_version']=version
+        st.session_state['_paper_remote_meta']=payload.get('meta') or {}
         return db
     return connect()
 
@@ -1000,6 +1004,18 @@ with reports_tab:
             ensure_paper_v3(paper_db)
             if remote_paper_view_enabled():
                 st.success(f"☁️ REMOTE PAPER: checkpoint worker version {st.session_state.get('_paper_remote_version','BRAK')}. Statystyki pochodzą z bazy workera, nie z lokalnego SQLite.")
+                meta=st.session_state.get('_paper_remote_meta') or {}
+                latest=meta.get('last_scan_utc')
+                if latest:
+                    st.caption(f"Ostatnie zakończone uruchomienie workera UTC: {latest}. Źródło {meta.get('source','BRAK')}; TF {meta.get('timeframe','BRAK')}.")
+                    try:
+                        lag=(pd.Timestamp.now(tz='UTC')-pd.Timestamp(latest)).total_seconds()/60
+                        if lag>15:
+                            st.warning(f"⚠️ Ostatni checkpoint workera ma {lag:.0f} minut. Nie zakładam, że skaner teraz działa.")
+                    except (ValueError,TypeError):
+                        st.warning("Nieznany format czasu ostatniego skanu workera.")
+                else:
+                    st.warning("Brak potwierdzonego skanu workera w chmurze. Cloud jest skonfigurowany, ale skaner mógł jeszcze nigdy nie wystartować.")
             else:
                 st.caption('Lokalna historia PAPER v3; w Streamlit Cloud może zniknąć podczas redeploy.')
             all_positions=[p for p in recent_positions(paper_db,200)
