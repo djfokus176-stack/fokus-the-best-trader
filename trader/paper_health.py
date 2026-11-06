@@ -55,17 +55,22 @@ def readiness_report(*, clock_verified, data_ready, market_status,
                   worker_strategy+". Zmiana w Streamlit NIE przełącza workera.")
     else:
         mismatch=None
+    # Historical worker flags explain the *last* run, not the current UI
+    # readiness status. Counting them as extra current blockers falsely
+    # claimed six separate faults when two were duplicates.
     summary=str(last_worker_summary or "")
+    historical_flags=[]
     if remote_view and summary:
-        for flag in ("CANDLE_TIME_UNVERIFIED","DATA_STALE","INCOMPLETE_MTF",
-                     "MACRO_CALENDAR_UNAVAILABLE","SETUPS_DISABLED",
-                     "MARKET_NOT_TRADEABLE","NO_FEED"):
-            if flag in summary and flag not in " ".join(blockers):
-                blockers.append("Ostatni skan workera: "+flag)
+        historical_flags=[flag for flag in (
+            "CANDLE_TIME_UNVERIFIED","DATA_STALE","INCOMPLETE_MTF",
+            "MACRO_CALENDAR_UNAVAILABLE","SETUPS_DISABLED",
+            "MARKET_NOT_TRADEABLE","NO_FEED")
+            if flag in summary]
     return {
         "checks":[{"kontrola":name,"status":"✅ OK" if ok else "🔴 BLOKADA",
                    "powód":"" if ok else reason} for name,ok,reason in checks],
         "blockers":blockers,
+        "historical_worker_flags":historical_flags,
         "worker_strategy_note":mismatch,
         "ready_to_consider_setup":not blockers and (not remote_view or remote_ok),
         "note":"Brak blokad technicznych NIE oznacza sygnału LONG/SHORT ani zysku. "
