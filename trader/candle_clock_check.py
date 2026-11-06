@@ -58,7 +58,7 @@ def main(argv=None):
         observe(client,epic=args.epic,samples=args.samples)
     except (FeedError,ValueError) as exc:
         # This only prints sanitized diagnostic error, never credentials.
-        parser.exit(1,f"BŁĄD WERYFIKACJI: {type(exc).__name__}: {str(exc)[:180]}\\n")
+        parser.exit(1,f"BŁĄD WERYFIKACJI: {type(exc).__name__}: {str(exc)[:180]}\n")
 
 
 if __name__=="__main__":
