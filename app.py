@@ -26,6 +26,7 @@ from trader.runtime import current_feed_status, scan_delay_seconds
 from trader.live_chart import quote_sample
 from trader.live_chart_fragment import render_independent_live_chart
 from trader.auto_news import refresh_news_state,calendar_is_current
+from trader.news_context import official_news_context
 from trader.scan_monitor import scan_event, append_scan_log
 from trader.chat_ui import append_message, renderable_history, preview_context
 from trader.paper_lifecycle import (
@@ -898,6 +899,21 @@ with market_tab:
                     st.session_state.get('auto_scan_period',5),
                     visible_bars=st.session_state.get('chart_window_size',30),
                     auto_zoom=st.session_state.get('chart_price_autoscale',True))
+                news_ctx=official_news_context(st.session_state)
+                with st.expander('📰 NEWS / MAKRO OBOK WYKRESU — ŹRÓDŁA I CZAS',expanded=False):
+                    st.caption('Ostatni udany RSS UTC: '+
+                        news_ctx['last_success_utc']+' | Status: '+
+                        news_ctx['status']+' | Kalendarz BLS: '+
+                        ('OK' if calendar_is_current(st.session_state) else 'BRAK POTWIERDZENIA'))
+                    if news_ctx['headlines']:
+                        st.dataframe(pd.DataFrame(news_ctx['headlines'][:6]),
+                            hide_index=True,use_container_width=True)
+                    else:
+                        st.warning('Brak świeżych nagłówków w ostatnich 30 min. '
+                                   'Nie twierdzę, że nie ma informacji makro.')
+                    if st.session_state.get('_news_feed_errors'):
+                        st.caption('Nieudane źródła: '+
+                            ', '.join(st.session_state['_news_feed_errors'].keys()))
                 st.caption('🤖 Strategie i PAPER używają tylko ZAMKNIĘTYCH świec. '
                            'Bieżący podgląd MID aktualizuje się z REST według wybranych '
                            '5–300 s, ale nie daje sygnału ani nie wysyła zlecenia.')
@@ -977,13 +993,17 @@ with chat_tab:
             with st.spinner('🧠 GPT analizuje liczby — odpowiedź zostanie zapisana w historii...'):
                 st.session_state['_ai_busy']=True
                 try:
-                    result=manual_ai_request(question,dict(chat_payload or {
+                    context=dict(chat_payload or {
                         'instrument':instrument,
                         'resolution':tf,
                         'last_closed_utc':'BRAK — brak danych',
                         'last_12_closed_candles':[],
                         'note':'Brak danych live. Nie wolno wnioskować o bieżącym kierunku.'
-                    }))
+                    })
+                    # Manual AI gets only bounded, timestamped official RSS.
+                    # This is never a paid call during the 5-second refresh.
+                    context['news_untrusted_external']=official_news_context(st.session_state)
+                    result=manual_ai_request(question,context)
                 finally:
                     st.session_state['_ai_busy']=False
             candle_id=(chat_payload or {}).get('last_closed_utc','BRAK')
