@@ -27,7 +27,7 @@ from trader.live_chart import quote_sample
 from trader.live_chart_fragment import render_independent_live_chart
 from trader.auto_news import refresh_news_state,calendar_is_current
 from trader.news_context import official_news_context
-from trader.paper_health import readiness_report, worker_age_seconds
+from trader.paper_health import readiness_report, worker_age_seconds, worker_calendar_health
 from trader.scan_monitor import scan_event, append_scan_log
 from trader.chat_ui import append_message, renderable_history, preview_context
 from trader.paper_lifecycle import (
@@ -752,6 +752,9 @@ with market_tab:
             ready=current_ready and status_ready
             remote_health=st.session_state.get('_paper_remote_meta') or {}
             remote_is_on=remote_paper_view_enabled()
+            worker_calendar=(worker_calendar_health(remote_health)
+                if remote_is_on else None)
+            local_calendar_ok=calendar_is_current(st.session_state)
             tf_views,_=evaluate_timeframes(st.session_state.get('mtf_snapshots',{}),
                                           asof=snap.confirmed_utc)
             health=readiness_report(
@@ -761,7 +764,11 @@ with market_tab:
                 data_ready=current_ready,
                 market_status=market_status,
                 mtf_ready=all(v.ready for v in tf_views),
-                calendar_current=calendar_is_current(st.session_state),
+                calendar_current=(worker_calendar['ok'] if remote_is_on
+                                  else local_calendar_ok),
+                calendar_scope='worker' if remote_is_on else 'local',
+                calendar_reason=(worker_calendar['reason']
+                                 if worker_calendar else None),
                 remote_view=remote_is_on,
                 worker_age=worker_age_seconds(remote_health),
                 last_worker_summary=remote_health.get('last_scan_summary',''),
@@ -780,8 +787,24 @@ with market_tab:
                 st.dataframe(pd.DataFrame(health['checks']),
                     hide_index=True,use_container_width=True)
                 st.caption('ℹ️ Zegar/worker: ostatni zapis Supabase; '
-                           'MTF/BLS/rynek: bieżąca sesja Streamlit. '
+                           'MTF/rynek: bieżąca sesja Streamlit. '
+                           'Kalendarz: w trybie REMOTE z ostatniego zapisu workera, '
+                           'w trybie LOCAL z tej przeglądarki. '
                            'To DWA niezależne systemy, nie jeden test.')
+                if remote_is_on and worker_calendar:
+                    if worker_calendar['source']=='BLS_VERIFIED_SNAPSHOT_NOT_LIVE':
+                        st.warning('🗓️ Ostatni worker PAPER: kalendarz ze zweryfikowanej '
+                            'kopii, NIE LIVE. Wygasa UTC: '+
+                            str(worker_calendar.get('expires') or 'BRAK')+
+                            '. Po wygaśnięciu nowe PAPER nie przejdzie tej bramki.')
+                    elif worker_calendar['source']=='BLS_OFFICIAL_LIVE':
+                        st.info('🗓️ Ostatni worker PAPER: oficjalny kalendarz BLS, '
+                                'pobrany podczas ostatniego skanu.')
+                    if not local_calendar_ok:
+                        st.info('ℹ️ Ta przeglądarka nie ma aktualnego kalendarza BLS. '
+                            'Nie blokuje to osobnego workera PAPER, który sam '
+                            'sprawdza źródło przed każdym skanem. '
+                            'Lokalna analiza nadal ma WAIT bez kalendarza.')
                 if not all(v.ready for v in tf_views):
                     st.markdown('#### 🧭 Dlaczego MTF jest niekompletne?')
                     mtf_errors=st.session_state.get('mtf_errors',{})
