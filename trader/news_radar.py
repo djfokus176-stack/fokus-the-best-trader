@@ -211,7 +211,7 @@ def fetch_bls_schedule_html(get=requests.get, timeout=12, *, now=None):
     return sorted(future,key=lambda x:x["data_utc"])
 
 
-def fetch_bls_schedule(get=requests.get, timeout=12):
+def fetch_bls_schedule(get=requests.get, timeout=12, *, now=None):
     # Identify client and use official sources only. If the .ics is
     # forbidden, try BLS's own current monthly HTML calendar; fail closed
     # when neither can be validated.
@@ -228,10 +228,10 @@ def fetch_bls_schedule(get=requests.get, timeout=12):
         # bundled dates; if official HTML is also unavailable, fail closed.
         if getattr(getattr(exc,"response",None),"status_code",None)!=403:
             raise
-        return fetch_bls_schedule_html(get=get,timeout=timeout)
+        return fetch_bls_schedule_html(get=get,timeout=timeout,now=now)
     if len(r.content)>1_500_000:raise ValueError("Zbyt duży kalendarz")
     full=parse_bls_calendar(r.content.decode("utf-8-sig",errors="replace"),limit=0)
-    cutoff=datetime.now(timezone.utc)-timedelta(days=7)
+    cutoff=(now or datetime.now(timezone.utc))-timedelta(days=7)
     active=[e for e in full if e["data_utc"]>=cutoff]
     if not active:
         raise ValueError("Kalendarz BLS nie zawiera aktualnych dat — nie wyświetlam fałszywego braku publikacji.")
