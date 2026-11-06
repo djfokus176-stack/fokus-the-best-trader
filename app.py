@@ -23,7 +23,8 @@ from trader.storage import connect, archive, recent, recent_scan_decisions, audi
 from trader.assistant import numeric_context, answer_ai
 from trader.csv_data import read_ohlc_csv
 from trader.runtime import current_feed_status, scan_delay_seconds
-from trader.live_chart import quote_sample,sampled_preview,show_quote_preview
+from trader.live_chart import quote_sample
+from trader.live_chart_fragment import render_independent_live_chart
 from trader.auto_news import refresh_news_state,calendar_is_current
 from trader.scan_monitor import scan_event, append_scan_log
 from trader.chat_ui import append_message, renderable_history, preview_context
@@ -258,9 +259,9 @@ with st.sidebar:
         options=(5,15,30,60,120,300),index=0,
         format_func=lambda secs: f'co {secs} sekund' if secs < 60 else f'co {secs // 60} min',
         key='auto_scan_period',
-        help='Odświeża dostępny snapshot BID/OFFER Capital.com, NIE pobiera całego okna '
-             'OHLC i NIE otwiera pozycji. Nowe pełne świece i strategie M1 są '
-             'sprawdzane najczęściej co 60 sekund.')
+        help='Niezależny fragment wykresu czyta niepełną świecę z Capital.com '
+             '/prices co 5-300 sekund. Strategie M1 i PAPER używają tylko '
+             'zamkniętych świec, co najmniej co 60 sekund.')
     st.toggle('📰 AUTO RADAR NEWS/MACRO (RSS co 15 min, BLS co 60 min)',
        value=_early_secret('FOKUS_AUTO_NEWS_ENABLED','true').lower() in ('true','1','yes','on'),
        key='auto_news_active',
@@ -270,9 +271,10 @@ with st.sidebar:
                ' s • pełny odczyt świec najczęściej co 60 s (M1). '
                'Osobny worker PAPER GitHub pozostaje na swoim harmonogramie.')
     if st.session_state['auto_scan_period'] < 60:
-        st.caption('⚠️ REST nie gwarantuje nowego ticka co 5 s. '
-                   'Bieżąca świeca będzie podglądem z próbek, bez użycia do sygnałów. '
-                   'Przy HTTP 429 wybierz 60 s.')
+        st.caption('⚠️ REST nie gwarantuje zmiany ceny co 5 s. Wykres pokazuje '
+                   'bieżącą świecę /prices, ale nie wykorzystuje jej do sygnałów. '
+                   'Licznik udanych odczytów pod wykresem pozwala odróżnić '
+                   'brak aktualizacji od nieruchomej ceny brokera.')
     st.toggle('🔔 DŹWIĘKI PAPER: otwarcie / TP / SL / timeout',
         value=False,key='paper_audio_enabled',
         help='Wymaga interakcji z przeglądarką. Dźwięk dotyczy tylko nowych '
@@ -412,14 +414,13 @@ def auto_scan_heartbeat():
         if st.session_state.get('_ai_busy',False):
             return
         st.session_state['_last_auto_pulse']=tick
-        st.session_state['_scheduled_live_quote']=True
-        # Even if the quote updates every 5s, M1 strategies only consume
-        # real CLOSED candles. No redundant 350-bar downloads every 5s.
+        # Only a new CLOSED minute justifies a full app rerun. The live chart
+        # has its OWN 5-second fragment, avoiding large all-tab rerenders.
         last_full=st.session_state.get('_last_full_ohlc_pulse',tick)
         if tick-last_full >= max(60,interval)-1:
             st.session_state['_last_full_ohlc_pulse']=tick
             st.session_state['_scheduled_scan']=True
-        st.rerun(scope='app')
+            st.rerun(scope='app')
 
 auto_scan_heartbeat()
 
@@ -462,8 +463,8 @@ with market_tab:
     scheduled_scan = bool(st.session_state.pop('_scheduled_scan',False)
         and st.session_state.get('auto_scan_active',False) and has_cap and csv is None)
     actual_scan_this_rerun=bool(load or auto_scan or scheduled_scan)
-    scheduled_live_quote=bool(st.session_state.pop('_scheduled_live_quote',False)
-        and st.session_state.get('auto_scan_active',False) and has_cap and csv is None)
+    # Quote snapshots and provisional OHLC now refresh in a dedicated
+    # lightweight fragment. No full-app rerun is requested every 5 seconds.
     if actual_scan_this_rerun:
         scan_trigger='MANUAL' if load else ('STARTUP' if auto_scan else 'AUTO')
         scan_requested=datetime.now(timezone.utc)
@@ -592,23 +593,6 @@ with market_tab:
             st.error('❌ Błąd pobierania danych: '+type(ex).__name__)
     elif st.session_state.get('last_feed_error'):
         st.error('❌ Ostatnia próba skanowania: '+st.session_state['last_feed_error'])
-    if scheduled_live_quote and not actual_scan_this_rerun:
-        # Legacy v7 animated the current OHLC through Capital /prices.
-        # Fetch JUST TWO raw bars at 5s intervals for visual display,
-        # never adding provisional data to EMA, decisions or PAPER ledger.
-        try:
-            if '_capital_client' not in st.session_state:
-                st.session_state['_capital_client']=CapitalReadOnly(
-                    cap_api_key,cap_identifier,cap_password,environment=capital_env)
-            if time.monotonic()>=st.session_state.get('_quote_backoff_until',0):
-                form=st.session_state['_capital_client'].forming_candle(instrument,tf)
-                st.session_state['_forming_preview']=form
-                st.session_state['_forming_read_at']=time.monotonic()
-                st.session_state['_forming_error']=None
-        except (FeedError,ValueError) as ex:
-            st.session_state['_forming_error']=str(ex)[:180]
-            if '429' in str(ex):
-                st.session_state['_quote_backoff_until']=time.monotonic()+60
     snap=st.session_state.get('market_snap')
     src=st.session_state.get('source_override','BRAK')
     if st.session_state.get('last_scan_utc'):
@@ -675,40 +659,9 @@ with market_tab:
             c3.metric('WIEK DANYCH (teraz)',f'{current_age:.0f} s' if current_age is not None else 'BRAK')
             signal_banner=st.empty()
             c4.metric('SPREAD zamkniętej świecy',f'{snap.spread:.2f} pkt')
-            live_quote=st.session_state.get('_live_quote')
-            quote_current=bool(
-                live_quote is not None and live_quote.fresh
-                and live_quote.epic==instrument
-                and live_quote.environment==capital_env
-                and st.session_state.get('auto_scan_active',False)
-                and src==f'Capital.com {capital_env} REST'
-                and (datetime.now(timezone.utc)-live_quote.received_utc).total_seconds()<=30)
-            form=st.session_state.get('_forming_preview') or {}
-            form_current=bool(
-                form.get('epic')==instrument and form.get('environment')==capital_env
-                and form.get('timeframe')==tf
-                and st.session_state.get('auto_scan_active',False)
-                and src==f'Capital.com {capital_env} REST'
-                and time.monotonic()-st.session_state.get('_forming_read_at',-1e10)<=20
-                and form.get('time') is not None
-                and pd.Timestamp(form['time'])>pd.Timestamp(snap.confirmed_utc))
-            if form_current or quote_current:
-                q1,q2,q3,q4=st.columns(4)
-                mid=float(form['Close']) if form_current else live_quote.mid
-                bid=float(form['bid']) if form_current else live_quote.bid
-                ask=float(form['ask']) if form_current else live_quote.ask
-                spread=float(form['spread']) if form_current else live_quote.spread
-                q1.metric('⚡ BIEŻĄCY MID • REST',f'{mid:.2f}')
-                q2.metric('BID',f'{bid:.2f}')
-                q3.metric('OFFER',f'{ask:.2f}')
-                q4.metric('BIEŻĄCY SPREAD',f'{spread:.2f} pkt')
-                st.caption('⚡ PODGLĄD NIEPEŁNEJ ŚWIECY Capital.com /prices' if form_current
-                    else '⚡ Podgląd notowania /markets. Nie jest to broker fill.')
-            elif st.session_state.get('auto_scan_active',False):
-                detail=(st.session_state.get('_forming_error')
-                        or st.session_state.get('_live_quote_error')
-                        or 'Brak nowej świecy: rynek może być zamknięty lub API opóźnione.')
-                st.warning('⚠️ LIVE: '+str(detail)[:210])
+            st.caption('⚡ Bieżąca cena, BID/ASK i diagnostyka odczytów '
+                       'aktualizują się POD WYKRESEM co wybrane 5–300 s, '
+                       'bez przerywania czatu i analizy.')
             if snap.quote_spread is not None:
                 st.caption(f'Spread najnowszej świecy (może być niezamknięta): {snap.quote_spread:.2f} pkt. Do logiki strategii używany jest spread świecy zamkniętej.')
             df=indicators(snap.frame) if len(snap.frame)>=14 else snap.frame
@@ -724,27 +677,11 @@ with market_tab:
                 if dna.swing_low is not None:
                     fig.add_hline(y=dna.swing_low,line_color='#7fbf98',line_dash='dot',
                         opacity=.55,annotation_text='Potwierdzony swing LOW')
-            # No historical setup arrows. Add an explicitly non-tradable
-            # forming candle built from sampled current BID/OFFER MID quotes.
-            preview=(form if form_current else
-                sampled_preview(st.session_state.get('_live_samples',[]),
-                    closed_time=snap.confirmed_utc) if quote_current else None)
-            show_quote_preview(fig,preview,bars=snap.frame,
-                 visible_bars=st.session_state.get('chart_window_size',30),
-                 auto_zoom=st.session_state.get('chart_price_autoscale',True))
-            if preview is not None:
-                if preview.get('source')=='Capital.com /prices • bieżąca OHLC':
-                    st.caption('🕯️ LIVE: tworząca się świeca z bieżących danych OHLC '
-                        'Capital.com /prices, odświeżanych co wybrane 5–300 s. '
-                        'Nie jest jeszcze zamknięta, nie liczy się do EMA, '
-                        'LONG/SHORT ani PAPER.')
-                else:
-                    st.caption('🕯️ LIVE: niepełna świeca z próbek BID/OFFER; '
-                        'nie jest wejściem, zleceniem ani zamkniętą świecą.')
+            # LIVE /prices OHLC is rendered separately by the independent
+            # five-second fragment. Base chart contains only CLOSED bars.
             fig.update_layout(height=570,xaxis_rangeslider_visible=False,template='plotly_dark',
                               paper_bgcolor='#111a2d',plot_bgcolor='#111a2d',legend_orientation='h',
                               margin={'l':15,'r':15,'t':30,'b':10})
-            chart_slot=st.empty()
             st.caption('⬆️ Zielona strzałka = bot otworzył PAPER LONG; '
                        '⬇️ czerwona = PAPER SHORT; 🟩 kwadrat = bot zamknął PAPER. '
                        'NIE pokazuję strzałek historycznych formacji. '
@@ -956,7 +893,11 @@ with market_tab:
                     instrument,src,tf)
                 # No BUY/SELL-looking historical scan markers. Trade chart is
                 # restricted to verified PAPER OPEN/CLOSED ledger events.
-                chart_slot.plotly_chart(fig,use_container_width=True)
+                render_independent_live_chart(fig,snap.frame,instrument,tf,capital_env,
+                    src,st.session_state.get('auto_scan_active',False) and has_cap and csv is None,
+                    st.session_state.get('auto_scan_period',5),
+                    visible_bars=st.session_state.get('chart_window_size',30),
+                    auto_zoom=st.session_state.get('chart_price_autoscale',True))
                 st.caption('🤖 Strategie i PAPER używają tylko ZAMKNIĘTYCH świec. '
                            'Bieżący podgląd MID aktualizuje się z REST według wybranych '
                            '5–300 s, ale nie daje sygnału ani nie wysyła zlecenia.')
@@ -982,7 +923,11 @@ with market_tab:
                     st.session_state.pop('ai_context',None)
                 st.info('🤖 Rozmowa z AI jest teraz w osobnej zakładce **CZAT AI**. Odpowiedzi pozostają widoczne po kolejnym automatycznym skanie.')
             else:
-                chart_slot.plotly_chart(fig,use_container_width=True)
+                render_independent_live_chart(fig,snap.frame,instrument,tf,capital_env,
+                    src,st.session_state.get('auto_scan_active',False) and has_cap and csv is None,
+                    st.session_state.get('auto_scan_period',5),
+                    visible_bars=st.session_state.get('chart_window_size',30),
+                    auto_zoom=st.session_state.get('chart_price_autoscale',True))
                 st.warning('Wykres dostępny, ale jest mniej niż 70 zamkniętych świec — brak sygnału.')
     else:
         st.warning('Nie ma danych. Włącz odczyt Capital.com lub dodaj własny CSV edukacyjny. Nie pokazuję fikcyjnych sygnałów.')
