@@ -33,4 +33,11 @@ jobs:
       - name: "Zainstaluj zależności"
         run: pip install -r requirements.txt
       - name: "Porównaj surowe czasy DEMO (2 odczyty co około 65 s)"
-        run: python -m trader.candle_clock_check --epic "$DIAGNOSTIC_EPIC" --samples 2
+        run: python -m trader.candle_clock_check --epic "$DIAGNOSTIC_EPIC" --samples 2 --report-dir clock-report
+      - name: "Zapisz raport zegara jako artefakt (bez sekretów)"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clock-report
+          path: clock-report/
+          if-no-files-found: warn
