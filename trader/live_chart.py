@@ -70,7 +70,8 @@ def show_quote_preview(fig, preview, *, bars, visible_bars=30, auto_zoom=True):
             hovertemplate=None,showlegend=True))
         fig.add_trace(go.Scatter(
             x=[preview["time"]],y=[preview["Close"]],
-            mode="markers+text",text=["◀ LIVE (próbki)"],
+            mode="markers+text",text=["◀ LIVE /prices" if provider_ohlc
+                                      else "◀ LIVE (próbki)"],
             textposition="middle right",textfont={"color":color,"size":12},
             marker={"symbol":"circle","size":9,"color":color},
             name=("Bieżący MID /prices" if provider_ohlc else
