@@ -651,6 +651,33 @@ with market_tab:
                      'zestawu zamkniętych świec.')
             st.warning('⚠️ WYKRES ARCHIWALNY / WAIT: '+str(snap.reason)[:550]+
                        ' Nie używaj tych danych do nowej decyzji.')
+            if snap.frame is not None and len(snap.frame)>=2:
+                # Untrusted historic bars are visual context ONLY.
+                # A live quote preview may still be valid even when 240
+                # historic bid/ask candles failed quarantine. Never run
+                # strategy, PAPER, cached arrow or trend from this branch.
+                st.caption('📉 DIAGNOSTYKA WYKRESU: historia OHLC CZĘŚCIOWO '
+                           'WADLIWA. Poniższa świeca LIVE może się aktualizować, '
+                           'ale NIE JEST zatwierdzonym wejściem PAPER.')
+                history_fig=go.Figure()
+                history_fig.add_trace(go.Candlestick(x=snap.frame.index,
+                    open=snap.frame.Open,high=snap.frame.High,
+                    low=snap.frame.Low,close=snap.frame.Close,
+                    name='ODRZUCONE DANE • tylko podgląd poprawnych rekordów'))
+                history_fig.update_layout(
+                    height=500,xaxis_rangeslider_visible=False,
+                    template='plotly_dark',paper_bgcolor='#111a2d',
+                    plot_bgcolor='#111a2d')
+                if '_capital_client' not in st.session_state and has_cap and csv is None:
+                    st.session_state['_capital_client']=CapitalReadOnly(
+                        cap_api_key,cap_identifier,cap_password,
+                        environment=capital_env)
+                render_independent_live_chart(history_fig,snap.frame,
+                    instrument,tf,capital_env,src,
+                    st.session_state.get('auto_scan_active',False)
+                    and has_cap and csv is None,
+                    st.session_state.get('auto_scan_period',5),
+                    visible_bars=min(30,len(snap.frame)),auto_zoom=True)
             with st.expander('🧪 SZCZEGÓŁY BŁĘDU DANYCH I WORKERA',expanded=True):
                 st.write('Instrument:',snap.epic,'| Interwał:',snap.resolution,
                          '| Źródło:',snap.source)
