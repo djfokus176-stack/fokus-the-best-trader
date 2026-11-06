@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 import pandas as pd
 import streamlit as st
 
-from .live_chart import show_quote_preview
+from .live_chart import show_quote_preview, quote_sample, sampled_preview
 from .market import FeedError
 
 
@@ -48,7 +48,8 @@ def live_chart_refresh_state(state, *, client, instrument, timeframe,
         for key in ("_live_chart_last_fetch","_live_chart_preview",
                     "_live_chart_success","_live_chart_error",
                     "_live_chart_unchanged","_live_chart_prev_close",
-                    "_live_chart_prev_bar","_live_chart_attempts"):
+                    "_live_chart_prev_bar","_live_chart_attempts",
+                    "_live_chart_quote_samples"):
             state.pop(key,None)
         state["_live_chart_scope"]=ident
     last=state.get("_live_chart_last_fetch")
@@ -78,11 +79,45 @@ def live_chart_refresh_state(state, *, client, instrument, timeframe,
         state["_live_chart_success"]=tick
         state["_live_chart_success_utc"]=utc.isoformat()
         state["_live_chart_error"]=None
+        state["_live_chart_quote_samples"]=[]
     except (FeedError,ValueError,TypeError,KeyError) as exc:
         state["_live_chart_preview"]=None
-        state["_live_chart_error"]=str(exc)[:200]
-        if "429" in str(exc):
+        original=str(exc)[:130]
+        state["_live_chart_error"]=original
+        if "429" in original:
             state["_live_chart_backoff"]=tick+60
+        else:
+            # Capital may return a corrupt historical OHLC bar even while
+            # the current /markets quote has valid BID/ASK. This fallback
+            # makes the moving candle a clearly labeled *SAMPLED* preview,
+            # never an authentic broker OHLC or a strategy input.
+            try:
+                quote=client.market_quote(instrument)
+                if not quote.fresh or quote.environment!=environment:
+                    raise FeedError("Brak świeżego notowania /markets")
+                samples=quote_sample(state.get("_live_chart_quote_samples"),
+                                     quote,timeframe)
+                state["_live_chart_quote_samples"]=samples
+                sample=sampled_preview(samples)
+                if sample is None:
+                    raise FeedError("Brak nowych próbek MID")
+                sample.update({
+                    "epic":instrument,"environment":environment,
+                    "timeframe":timeframe,"bid":quote.bid,"ask":quote.ask,
+                    "spread":quote.spread,
+                    "source":"Capital.com /markets • próbki MID",
+                })
+                state["_live_chart_preview"]=sample
+                state["_live_chart_success"]=tick
+                state["_live_chart_success_utc"]=utc.isoformat()
+                state["_live_chart_error"]=(
+                    "UWAGA: /prices odrzucony ("+original+
+                    "); wyświetlam wyłącznie próbki świeżego MID z /markets.")
+            except (FeedError,ValueError,TypeError,AttributeError,KeyError) as second:
+                state["_live_chart_error"]=(
+                    "/prices: "+original+" | /markets: "+str(second)[:90])
+                if "429" in str(second):
+                    state["_live_chart_backoff"]=tick+60
     return True
 
 
@@ -127,6 +162,10 @@ def render_independent_live_chart(base_fig, closed_bars, instrument, timeframe,
                        + (f"API zwróciło tę samą cenę {same+1} razy."
                           if same else "Nowa cena lub nowa świeca.")
                        + " Podgląd bez wpływu na PAPER.")
+            if forming.get("source")=="Capital.com /markets • próbki MID":
+                st.warning("🟠 /prices jest niepoprawny. Pokazuję wyłącznie "
+                           "próbki aktualnego BID/ASK (/markets), a nie "
+                           "rzeczywiste HIGH/LOW całej świecy.")
         else:
             st.warning("⚠️ Brak aktualnej świecy z Capital.com. "
                 +str(st.session_state.get("_live_chart_error")
