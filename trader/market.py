@@ -283,6 +283,30 @@ class CapitalReadOnly:
         except ValueError as ex:
             raise FeedError(f'Niepoprawny JSON API: {ex}') from ex
 
+    def raw_candle_payload(self, epic='US500', resolution='MINUTE', count=8):
+        """Read-only raw Capital JSON for clock diagnostics. NO validation.
+
+        Returns the unmodified payload dict. Used by candle_clock_check to
+        report BID/ASK/MID OHLC and crossed records instead of hiding them.
+        Never sets FOKUS_CANDLE_TIME_CONFIRMED, never creates positions.
+        """
+        if resolution not in PERIOD or not epic.replace('_','').isalnum():
+            raise FeedError('Niepoprawny EPIC lub interwał diagnostyki')
+        try:
+            r=self.session.get(f'{self.base_url}/api/v1/prices/{epic}',
+                params={'resolution':resolution,'max':min(20,max(4,int(count)))},
+                headers=self.headers(), timeout=12)
+            r.raise_for_status()
+            payload=r.json()
+        except requests.RequestException as exc:
+            raise FeedError(http_error_message(
+                exc,'Odczyt surowych danych zegara',epic)) from exc
+        except ValueError as exc:
+            raise FeedError('Niepoprawna odpowiedź JSON zegara Capital') from exc
+        if not isinstance(payload,dict) or not isinstance(payload.get('prices'),list):
+            raise FeedError('API nie zwróciło listy świec do diagnostyki czasu')
+        return payload
+
     def raw_candle_clock_labels(self, epic='US500', resolution='MINUTE', count=8):
         """Read-only raw Capital labels, WITHOUT validating BID/ASK.
 
