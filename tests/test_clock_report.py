@@ -58,8 +58,9 @@ def test_warsaw_time_is_dst_aware():
 def test_invalid_stamp_is_kept_as_error_record():
     payload = {"prices": [{"snapshotTimeUTC": "nie-data"}, _bar("2026-11-06T15:24:00")]}
     recs = cc.build_records(payload, now_utc=pd.Timestamp("2026-11-06T15:30:00Z"))
-    assert len(recs) == 1  # valid bar kept
+    assert len(recs) == 2  # malformed date must remain as an error record
     assert cc.summarize(recs)["liczba_etykiet"] == 1
+    assert cc.summarize(recs)["bledne_rekordy"] == 1
 
 
 def test_report_writes_json_and_txt_without_secrets(tmp_path, monkeypatch):
@@ -95,3 +96,49 @@ def test_two_samples_are_about_65_seconds_apart(tmp_path):
 def test_cli_accepts_report_dir():
     parser_src = Path(cc.__file__).read_text(encoding="utf-8")
     assert "--report-dir" in parser_src
+
+
+def test_missing_prices_not_crossed_and_nan_json_is_standard(tmp_path):
+    bar = _bar("2026-11-06T15:24:00")
+    del bar["lowPrice"]["ask"]
+    bar["highPrice"]["bid"] = float("inf")
+    rec = cc.build_records({"prices":[bar]},now_utc=pd.Timestamp("2026-11-06T15:30:00Z"))[0]
+    assert rec["crossed_bid_gt_ask"] is False
+    assert set(rec["invalid_price_fields"]) == {"high","low"}
+    assert rec["MID"]["high"] is None
+    jp,tp=cc.write_report(tmp_path,epic="US500",resolution="MINUTE",
+        observations=["2026-11-06T15:30:00+00:00"],payload_records_by_sample=[[rec]])
+    body=jp.read_text(encoding="utf8")
+    assert "NaN" not in body and "Infinity" not in body
+    assert "NIEPOPRAWNA CENA" in tp.read_text(encoding="utf8")
+
+
+def test_report_bid_ask_mid_full_ohlc_and_unconfirmed_open(tmp_path):
+    recs=cc.build_records({"prices":[_bar("2026-11-06T15:24:00")]},
+        now_utc=pd.Timestamp("2026-11-06T15:30:00Z"))
+    jp,tp=cc.write_report(tmp_path,epic="US500",resolution="MINUTE",
+        observations=["2026-11-06T15:30:00+00:00"],payload_records_by_sample=[recs])
+    report=tp.read_text(encoding="utf8")
+    assert all(f"{side}: O=" in report for side in ("BID","ASK","MID"))
+    assert "ZAKOŃCZONA JEŚLI OPEN" in report
+    assert "nie potwierdza" in report
+    assert "MOMENT ODCZYTU UTC" in report
+    assert json.loads(jp.read_text(encoding="utf8"))["clock_confirmed"] is False
+
+
+def test_invalid_timestamp_retained_in_report(tmp_path):
+    recs=cc.build_records({"prices":[{"snapshotTimeUTC":"invalid"},
+        _bar("2026-11-06T15:24:00")]},
+        now_utc=pd.Timestamp("2026-11-06T15:30:00Z"))
+    assert len(recs)==2
+    assert cc.summarize(recs)["bledne_rekordy"]==1
+    jp,tp=cc.write_report(tmp_path,epic="US500",resolution="MINUTE",
+        observations=None,payload_records_by_sample=[recs])
+    assert "NIEPRAWIDLOWY_CZAS" in tp.read_text(encoding="utf8")
+    assert len(json.loads(jp.read_text(encoding="utf8"))["proby"][0])==2
+
+
+def test_naive_timestamp_fails_explicitly():
+    with pytest.raises(ValueError,match="strefy"):
+        cc.build_records({"prices":[_bar("2026-11-06T15:24:00")]},
+            now_utc=pd.Timestamp("2026-11-06T15:30:00"))
