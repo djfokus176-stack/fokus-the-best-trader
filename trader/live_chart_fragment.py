@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 
 import pandas as pd
 import streamlit as st
+import plotly.graph_objects as go
 
 from .live_chart import show_quote_preview, quote_sample, sampled_preview
 from .market import FeedError
@@ -49,7 +50,9 @@ def live_chart_refresh_state(state, *, client, instrument, timeframe,
                     "_live_chart_success","_live_chart_error",
                     "_live_chart_unchanged","_live_chart_prev_close",
                     "_live_chart_prev_bar","_live_chart_attempts",
-                    "_live_chart_quote_samples"):
+                    "_live_chart_quote_samples","_live_chart_backoff",
+                    "_live_chart_price_tape","_live_chart_last_move_utc",
+                    "_live_chart_last_vendor_quote_utc","_live_chart_success_count"):
             state.pop(key,None)
         state["_live_chart_scope"]=ident
     last=state.get("_live_chart_last_fetch")
@@ -78,6 +81,9 @@ def live_chart_refresh_state(state, *, client, instrument, timeframe,
         state["_live_chart_preview"]=snap
         state["_live_chart_success"]=tick
         state["_live_chart_success_utc"]=utc.isoformat()
+        state["_live_chart_success_count"]=int(state.get("_live_chart_success_count",0))+1
+        _record_motion(state,mid=float(price),at=utc,source="prices",
+                       quote_timestamp=None)
         state["_live_chart_error"]=None
         state["_live_chart_quote_samples"]=[]
     except (FeedError,ValueError,TypeError,KeyError) as exc:
@@ -110,6 +116,9 @@ def live_chart_refresh_state(state, *, client, instrument, timeframe,
                 state["_live_chart_preview"]=sample
                 state["_live_chart_success"]=tick
                 state["_live_chart_success_utc"]=utc.isoformat()
+                state["_live_chart_success_count"]=int(state.get("_live_chart_success_count",0))+1
+                _record_motion(state,mid=float(quote.mid),at=utc,source="markets",
+                               quote_timestamp=quote.update_utc)
                 state["_live_chart_error"]=(
                     "UWAGA: /prices odrzucony ("+original+
                     "); wyświetlam wyłącznie próbki świeżego MID z /markets.")
@@ -119,6 +128,32 @@ def live_chart_refresh_state(state, *, client, instrument, timeframe,
                 if "429" in str(second):
                     state["_live_chart_backoff"]=tick+60
     return True
+
+
+def _record_motion(state, *, mid, at, source, quote_timestamp):
+    """Track real broker-fetched samples for UI diagnostics, not order data."""
+    import math
+    if not math.isfinite(mid) or mid<=0:
+        return
+    tape=list(state.get("_live_chart_price_tape",[]))
+    if not tape or mid!=tape[-1]["mid"]:
+        state["_live_chart_last_move_utc"]=at.isoformat()
+    tape.append({"at":at.isoformat(),"mid":float(mid),"source":str(source)})
+    state["_live_chart_price_tape"]=tape[-90:]
+    if quote_timestamp is not None:
+        state["_live_chart_last_vendor_quote_utc"]=quote_timestamp.isoformat()
+
+
+def motion_state(state):
+    """Distinctly indicate updates vs unchanged price vs missing reads."""
+    tape=state.get("_live_chart_price_tape") or []
+    if state.get("_live_chart_error") and state.get("_live_chart_preview") is None:
+        return "ERROR"
+    if not tape:
+        return "NO_DATA"
+    if len(tape)<2:
+        return "FIRST_SAMPLE"
+    return "CHANGED" if tape[-1]["mid"]!=tape[-2]["mid"] else "UNCHANGED"
 
 
 @st.fragment(run_every="5s")
@@ -152,16 +187,45 @@ def render_independent_live_chart(base_fig, closed_bars, instrument, timeframe,
         last=st.session_state.get("_live_chart_last_attempt_utc","BRAK")
         success=st.session_state.get("_live_chart_success_utc","BRAK")
         attempts=st.session_state.get("_live_chart_attempts",0)
-        st.caption(f"📡 LIVE /prices | próby pobrania: {attempts} "
-                   f"| ostatnia próba: {last} | ostatnie udane: {success}")
+        successful=st.session_state.get("_live_chart_success_count",0)
+        st.caption(f"📡 REALNE ODCZYTY CAPITAL • próby: {attempts} "
+                   f"| udane: {successful} | ostatnia próba UTC: {last} "
+                   f"| ostatnie udane UTC: {success}")
+        tape=st.session_state.get("_live_chart_price_tape") or []
+        status=motion_state(st.session_state)
+        label={"CHANGED":"🟢 CENA SIĘ ZMIENIŁA",
+               "UNCHANGED":"⚪ API ODPOWIADA, ALE CENA BEZ ZMIANY",
+               "FIRST_SAMPLE":"🟡 PIERWSZA PRÓBKA",
+               "ERROR":"🔴 BŁĄD API / WADLIWE DANE",
+               "NO_DATA":"🔴 BRAK ODCZYTÓW"}[status]
+        st.markdown("**"+label+"**")
+        if len(tape)>=2:
+            # Small audit sparkline reveals real 5-second moves, even if
+            # the candle's 30-bar chart scale hides small fluctuations.
+            xs=[r["at"] for r in tape[-50:]]
+            ys=[r["mid"] for r in tape[-50:]]
+            line=go.Figure(go.Scatter(x=xs,y=ys,mode="lines+markers",
+                line={"color":"#51bcff","width":2},
+                marker={"size":4},name="MID • rzeczywiste odczyty REST"))
+            line.update_layout(height=150,showlegend=False,
+                margin={"l":0,"r":0,"t":4,"b":0},
+                paper_bgcolor="#111a2d",plot_bgcolor="#111a2d",
+                xaxis={"showticklabels":False},
+                yaxis={"tickformat":".2f","side":"right"})
+            st.plotly_chart(line,use_container_width=True,
+                            key="fokus-live-price-microchart")
+        if st.session_state.get("_live_chart_last_vendor_quote_utc"):
+            st.caption("Bieżący timestamp notowania /markets: "+
+                st.session_state["_live_chart_last_vendor_quote_utc"])
         if forming is not None:
             same=st.session_state.get("_live_chart_unchanged",0)
             st.caption(f"🕯️ Świeca w trakcie: MID {forming['Close']:.2f}, "
                        f"BID {forming['bid']:.2f}, ASK {forming['ask']:.2f}, "
-                       f"w czasie UTC {forming['last_tick']}. "
+                       f"czas OTWARCIA przedziału UTC: {forming['last_tick']}. "
                        + (f"API zwróciło tę samą cenę {same+1} razy."
                           if same else "Nowa cena lub nowa świeca.")
-                       + " Podgląd bez wpływu na PAPER.")
+                       + " Licznik prób oznacza odpytywanie API, nie nowe transakcje. "
+                       "Podgląd bez wpływu na PAPER.")
             if forming.get("source")=="Capital.com /markets • próbki MID":
                 st.warning("🟠 /prices jest niepoprawny. Pokazuję wyłącznie "
                            "próbki aktualnego BID/ASK (/markets), a nie "

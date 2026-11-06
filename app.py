@@ -27,6 +27,7 @@ from trader.live_chart import quote_sample
 from trader.live_chart_fragment import render_independent_live_chart
 from trader.auto_news import refresh_news_state,calendar_is_current
 from trader.news_context import official_news_context
+from trader.paper_health import readiness_report, worker_age_seconds
 from trader.scan_monitor import scan_event, append_scan_log
 from trader.chat_ui import append_message, renderable_history, preview_context
 from trader.paper_lifecycle import (
@@ -697,6 +698,42 @@ with market_tab:
             if current_ready and not status_ready:
                 st.warning(f'🟡 WAIT / STATUS BROKERA: {market_status}. Bez potwierdzenia TRADEABLE brak nowych sygnałów.')
             ready=current_ready and status_ready
+            remote_health=st.session_state.get('_paper_remote_meta') or {}
+            remote_is_on=remote_paper_view_enabled()
+            tf_views,_=evaluate_timeframes(st.session_state.get('mtf_snapshots',{}),
+                                          asof=snap.confirmed_utc)
+            health=readiness_report(
+                clock_verified=(remote_health.get('clock_confirmed_open',False)
+                    if remote_is_on else
+                    secret('FOKUS_CANDLE_TIME_CONFIRMED','').strip().lower()=='open'),
+                data_ready=current_ready,
+                market_status=market_status,
+                mtf_ready=all(v.ready for v in tf_views),
+                calendar_current=calendar_is_current(st.session_state),
+                remote_view=remote_is_on,
+                worker_age=worker_age_seconds(remote_health),
+                last_worker_summary=remote_health.get('last_scan_summary',''),
+                ui_strategy=strategy,
+                worker_strategy=remote_health.get('strategy',''))
+            with st.expander('🩺 DLACZEGO BOT NIE OTWIERA PAPER? — PEŁNA LISTA BLOKAD',
+                             expanded=True):
+                if health['ready_to_consider_setup']:
+                    st.success('✅ Brak wykrytych blokad technicznych. '
+                        'To nie oznacza, że na ostatniej świecy był setup.')
+                else:
+                    st.error('🔴 Wykryto '+str(len(health['blockers']))+
+                        ' blokad lub błędów technicznych. Żadnych wymuszonych wejść.')
+                    for obstacle in health['blockers'][:10]:
+                        st.write('• '+obstacle)
+                st.dataframe(pd.DataFrame(health['checks']),
+                    hide_index=True,use_container_width=True)
+                if health['worker_strategy_note']:
+                    st.warning(health['worker_strategy_note'])
+                st.caption(health['note'])
+                if remote_is_on and not remote_health:
+                    st.caption('Brak odczytanego checkpointu PAPER w tej sesji. '
+                               'Upewnij się, że FOKUS_REMOTE_VIEW_ENABLED=true i '
+                               'Supabase jest skonfigurowane.')
             if src.startswith('CSV'):
                 st.warning('CSV: wyłącznie symulacja edukacyjna. Nie ma sygnału do egzekucji live.')
             if snap.frame is not None and len(snap.frame)>=70:
