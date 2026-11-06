@@ -7,6 +7,9 @@ from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
 from zoneinfo import ZoneInfo
+from html.parser import HTMLParser
+import re
+import calendar
 from xml.etree import ElementTree as ET
 from urllib.parse import urlparse
 import requests
@@ -118,6 +121,97 @@ def parse_bls_calendar(ics: str, limit=40) -> list[dict]:
     return result[:limit] if limit else result
 
 
+class _BlsTableParser(HTMLParser):
+    """Collect literal table cells; no scripts, links or untrusted instructions."""
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.in_row=False
+        self.cell_depth=0
+        self.cell=[]
+        self.cells=[]
+        self.rows=[]
+    def handle_starttag(self,tag,attrs):
+        if tag=="tr":
+            self.in_row=True;self.cells=[]
+        elif self.in_row and tag in ("td","th"):
+            self.cell_depth+=1
+            if self.cell_depth==1:self.cell=[]
+    def handle_data(self,data):
+        if self.cell_depth:self.cell.append(data)
+    def handle_endtag(self,tag):
+        if self.in_row and tag in ("td","th") and self.cell_depth:
+            self.cell_depth-=1
+            if not self.cell_depth:
+                self.cells.append(re.sub(r"\\s+"," "," ".join(self.cell)).strip())
+        elif tag=="tr" and self.in_row:
+            if len(self.cells)>=3:self.rows.append(self.cells)
+            self.in_row=False
+
+
+def parse_bls_month_html(raw, *, year, month):
+    """Parse BLS's own published Date/Time/Release schedule, fail closed.
+
+    Only official www.bls.gov list pages are accepted by the caller.
+    Dates stay America/New_York and are validated against page month/year.
+    Unknown or irregular rows are ignored, NEVER assumed to be no releases.
+    """
+    if isinstance(raw,bytes):raw=raw.decode("utf-8-sig",errors="replace")
+    if not isinstance(raw,str) or len(raw)>2_000_000:
+        raise ValueError("Nieprawidłowy lub zbyt duży HTML BLS")
+    parser=_BlsTableParser();parser.feed(raw)
+    events=[]
+    for row in parser.rows:
+        date_cell,time_cell,name=row[:3]
+        date_cell=re.sub(r"\\s+"," ",date_cell.strip())
+        time_cell=re.sub(r"\\s+"," ",time_cell.strip())
+        try:
+            date_part=date_cell.split(",",1)[-1].strip()
+            date=datetime.strptime(date_part,"%B %d, %Y")
+            clock=datetime.strptime(time_cell,"%I:%M %p").time()
+        except ValueError:
+            continue
+        if date.year!=year or date.month!=month or not name.strip():
+            continue
+        eastern=datetime(date.year,date.month,date.day,clock.hour,clock.minute,
+                         tzinfo=ZoneInfo("America/New_York"))
+        events.append({"wydarzenie":name.strip()[:200],
+                       "data_utc":eastern.astimezone(timezone.utc)})
+    if not events:
+        raise ValueError("Oficjalna strona kalendarza BLS nie zawiera rozpoznanych dat")
+    return events
+
+
+def fetch_bls_schedule_html(get=requests.get, timeout=12, *, now=None):
+    """Alternate official BLS **public** schedule (not a proxy).
+
+    Fetch current AND next month to avoid missing releases across midnight
+    at the end of a month. A missing page, unavailable BLS server, or
+    unparsable HTML remains an error and keeps PAPER stopped.
+    """
+    now=now or datetime.now(timezone.utc)
+    eastern=now.astimezone(ZoneInfo("America/New_York"))
+    y,m=eastern.year,eastern.month
+    next_y,next_m=(y+1,1) if m==12 else (y,m+1)
+    events=[]
+    for yy,mm in [(y,m),(next_y,next_m)]:
+        url=f"https://www.bls.gov/schedule/{yy}/{mm:02d}_sched_list.htm"
+        r=get(url,timeout=timeout,headers={
+            "User-Agent":"FokusTraderResearch/1.1 (+https://github.com/djfokus176-stack/fokus-the-best-trader)",
+            "Accept":"text/html,application/xhtml+xml;q=0.9"})
+        r.raise_for_status()
+        if len(r.content)>2_000_000:raise ValueError("Zbyt duży HTML BLS")
+        events.extend(parse_bls_month_html(r.content,year=yy,month=mm))
+    # Require not just any holiday/old information, but actual upcoming
+    # high-impact employment/inflation dates from a freshly retrieved page.
+    future=[event for event in events
+            if now-timedelta(days=2)<=event["data_utc"]<=now+timedelta(days=60)]
+    major=[event for event in future
+           if any(term in event["wydarzenie"].lower() for term in EVENT_TERMS)]
+    if len(major)<2:
+        raise ValueError("Niepełny aktualny kalendarz BLS — za mało publikacji makro")
+    return sorted(future,key=lambda x:x["data_utc"])
+
+
 def fetch_bls_schedule(get=requests.get, timeout=12):
     # Identify the read-only client honestly. An HTTP 403 from BLS must
     # remain a hard data-unavailable error; NEVER proxy, spoof a browser or
@@ -126,8 +220,16 @@ def fetch_bls_schedule(get=requests.get, timeout=12):
         "User-Agent":"FokusTraderResearch/1.1 (+https://github.com/djfokus176-stack/fokus-the-best-trader)",
         "Accept":"text/calendar, text/plain;q=0.9, */*;q=0.5",
     }
-    r=get(BLS_ICS,timeout=timeout,headers=headers)
-    r.raise_for_status()
+    try:
+        r=get(BLS_ICS,timeout=timeout,headers=headers)
+        r.raise_for_status()
+    except requests.HTTPError as exc:
+        # Some network environments reject .ics while allowing BLS's own
+        # published HTML schedule. Never use third-party mirrors or stale
+        # bundled dates; if official HTML is also unavailable, fail closed.
+        if getattr(getattr(exc,"response",None),"status_code",None)!=403:
+            raise
+        return fetch_bls_schedule_html(get=get,timeout=timeout)
     if len(r.content)>1_500_000:raise ValueError("Zbyt duży kalendarz")
     full=parse_bls_calendar(r.content.decode("utf-8-sig",errors="replace"),limit=0)
     cutoff=datetime.now(timezone.utc)-timedelta(days=7)
