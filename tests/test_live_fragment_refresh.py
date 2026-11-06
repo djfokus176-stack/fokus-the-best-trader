@@ -119,3 +119,22 @@ def test_live_fragment_is_distinct_from_full_app_refresh():
     hb=src.split("def auto_scan_heartbeat():",1)[1].split("auto_scan_heartbeat()",1)[0]
     assert "_scheduled_live_quote" not in hb
     assert "if tick-last_full >= max(60,interval)-1:" in hb
+
+
+
+def test_valid_current_market_quote_can_salvage_chart_when_prices_is_bad():
+    from trader.market import FeedError,MarketQuote
+    class FallbackClient(CandleClient):
+        def market_quote(self,instrument):
+            return MarketQuote(instrument,"DEMO",7333.0,7333.6,7333.3,.6,
+                "TRADEABLE",NOW,NOW,0,True)
+    c=FallbackClient()
+    c.raise_error=FeedError("Nieprawidłowy rekord danych: closePrice bid > ask")
+    s={}
+    assert live_chart_refresh_state(s,client=c,instrument="US500",
+        timeframe="MINUTE",environment="DEMO",period=5,tick=500,utc=NOW)
+    assert s["_live_chart_preview"]["Close"]==pytest.approx(7333.3)
+    assert s["_live_chart_preview"]["source"]=="Capital.com /markets • próbki MID"
+    assert "UWAGA" in s["_live_chart_error"]
+    # Even a fallback is a UI preview and not a submitted PAPER trade.
+    assert "PAPER_OPEN" not in s
