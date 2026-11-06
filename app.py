@@ -646,8 +646,33 @@ with market_tab:
         if snap.epic!=instrument or snap.resolution!=tf:
             st.warning('Zmieniono instrument lub interwał: wykonaj NOWY SKAN przed decyzją.')
         if not snap.good:
-            st.warning('⚠️ WYKRES ARCHIWALNY / WAIT: '+str(snap.reason)[:280]+
+            st.error('🔴 BLOKADA DANYCH — NIE MA NOWEGO WEJŚCIA PAPER. '
+                     'Capital.com nie dostarczył pełnego, zweryfikowanego '
+                     'zestawu zamkniętych świec.')
+            st.warning('⚠️ WYKRES ARCHIWALNY / WAIT: '+str(snap.reason)[:550]+
                        ' Nie używaj tych danych do nowej decyzji.')
+            with st.expander('🧪 SZCZEGÓŁY BŁĘDU DANYCH I WORKERA',expanded=True):
+                st.write('Instrument:',snap.epic,'| Interwał:',snap.resolution,
+                         '| Źródło:',snap.source)
+                st.write('Powód odmowy danych:',snap.reason)
+                st.caption('Podgląd pięciosekundowy MID może się ruszać, '
+                           'nawet gdy zamknięte OHLC są wadliwe. To nie jest '
+                           'dowód, że można bezpiecznie otwierać PAPER.')
+                st.caption('Potwierdzenie zegara świec workera jest osobne '
+                           'od udanej sesji Capital.com.')
+                meta=st.session_state.get('_paper_remote_meta') or {}
+                if remote_paper_view_enabled():
+                    if meta:
+                        st.write('Ostatni skan zdalnego workera:',
+                                 meta.get('last_scan_utc','BRAK'))
+                        st.write('Raport:',meta.get('last_scan_summary','BRAK'))
+                        st.write('Strategia workera:',meta.get('strategy','BRAK'))
+                    else:
+                        st.error('Brak odczytanego checkpointu workera w tej '
+                                 'sesji. Nie twierdzę, że worker działa.')
+                else:
+                    st.info('Remote PAPER View wyłączone. GitHub Worker działa '
+                            'osobno od wykresu i sesji Streamlit.')
         else:
             st.select_slider('🔎 Powiększenie wykresu — liczba ostatnich świec',
                 options=[20,30,45,60,90,120,180,240,350],value=30,
