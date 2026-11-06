@@ -127,8 +127,9 @@ def parse_prices(payload: dict, *, quarantine_bad: bool = False) -> pd.DataFrame
             for field, val in [('Open', 'openPrice'), ('High', 'highPrice'),
                                ('Low', 'lowPrice'), ('Close', 'closePrice')]:
                 b, a = float(item[val]['bid']), float(item[val]['ask'])
-                if not (pd.notna(b) and pd.notna(a)):
-                    raise ValueError('NaN ceny BID/ASK')
+                import math
+                if not (math.isfinite(b) and math.isfinite(a) and b>0 and a>0):
+                    raise ValueError(f'{field}: NaN/Infinity/ujemna cena BID/ASK')
                 if b > a:
                     raise ValueError(f'{field}: bid > ask')
                 row[field] = (b + a) / 2

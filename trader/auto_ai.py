@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import os
+from .news_context import verified_recent_headlines
 
 
 def _on(value):
@@ -90,6 +91,11 @@ def review_closed_candle(previous, snapshot, decision, votes, mtf_views,
         candles.append({"time_utc": timestamp.isoformat(),
             **{name: round(float(row[name]), 3)
                for name in ("Open", "High", "Low", "Close")}})
+    recent_news=verified_recent_headlines(
+        (news_context or {}).get("headlines",[]),now=at,limit=8)
+    news_status=_brief((news_context or {}).get("status","UNAVAILABLE"),40)
+    if not recent_news and news_status in ("OK","PARTIAL"):
+        news_status="NO_RECENT_PUBLICATIONS"
     payload = {
         "source": "Capital.com DEMO REST",
         "epic": _brief(snapshot.epic, 60),
@@ -112,13 +118,13 @@ def review_closed_candle(previous, snapshot, decision, votes, mtf_views,
                  "ready": bool(v.ready)} for v in (mtf_views or [])[:4]],
         "last_8_closed_bars": candles,
         "official_headline_context": {
-            "status": _brief((news_context or {}).get("status","UNAVAILABLE"),40),
+            "status": news_status,
             "last_fetch_utc": _brief((news_context or {}).get("last_fetch_utc",""),45),
             "headlines": [{
-                "source": _brief(n.get("źródło",""),75),
-                "date": _brief(n.get("data_utc",""),45),
-                "title": _brief(n.get("tytuł",""),180),
-            } for n in (news_context or {}).get("headlines",[])[:8]],
+                "source": n["source"],
+                "date": n["published_utc"],
+                "title": n["title"][:180],
+            } for n in recent_news],
         },
     }
     # Count attempts, not only successes, to avoid free retries on errors.
