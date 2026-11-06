@@ -1,6 +1,7 @@
 """Observable PAPER readiness report. Does not alter strategy/ledger/gates."""
 from __future__ import annotations
 from datetime import datetime,timezone
+import re
 
 
 def worker_age_seconds(meta, now=None):
@@ -17,10 +18,53 @@ def worker_age_seconds(meta, now=None):
         return None
 
 
+def worker_calendar_health(meta, now=None):
+    """Report the last worker checkpoint's macro gate, not browser RSS.
+
+    Read-only advisory display. Never overrides worker gate evaluation.
+    Refuse stale, absent, ambiguous, or expired checkpoint data.
+    """
+    check=now or datetime.now(timezone.utc)
+    if check.tzinfo is None:
+        raise ValueError("worker_calendar_health requires timezone-aware now")
+    age=worker_age_seconds(meta,now=check)
+    if age is None or not 0<=age<=15*60:
+        return {"ok":False,"source":"BRAK","expires":None,
+                "reason":"Brak świeżego checkpointu workera (maksymalnie 15 minut)."}
+    summary=str((meta or {}).get("last_scan_summary") or "")
+    if not re.search(r"(?:^|[ /])GATES=OK(?:[ /]|$)",summary):
+        return {"ok":False,"source":"BRAK","expires":None,
+                "reason":"Ostatni skan workera nie potwierdza GATES=OK."}
+    match=re.search(r"MACRO_SOURCE=(BLS_OFFICIAL_LIVE|BLS_VERIFIED_SNAPSHOT_NOT_LIVE)(?:[ /;]|$)",
+                    summary)
+    if not match:
+        return {"ok":False,"source":"BRAK","expires":None,
+                "reason":"Ostatni skan nie podaje zweryfikowanego źródła kalendarza."}
+    source=match.group(1)
+    if source=="BLS_OFFICIAL_LIVE":
+        return {"ok":True,"source":source,"expires":None,
+                "reason":"Oficjalny kalendarz był dostępny podczas ostatniego skanu workera."}
+    expiry_match=re.search(r"EXPIRES_UTC=([^\s/;]+)",summary)
+    if not expiry_match:
+        return {"ok":False,"source":source,"expires":None,
+                "reason":"Kopia BLS bez daty ważności nie może potwierdzić gotowości."}
+    expiry_text=expiry_match.group(1)
+    try:
+        expires=datetime.fromisoformat(expiry_text)
+    except (ValueError,TypeError):
+        expires=None
+    if expires is None or expires.tzinfo is None or check>=expires:
+        return {"ok":False,"source":source,"expires":expiry_text,
+                "reason":"Weryfikowana kopia kalendarza BLS wygasła albo ma błędną datę."}
+    return {"ok":True,"source":source,"expires":expiry_text,
+            "reason":"Zweryfikowana kopia BLS z ograniczoną ważnością (NIE LIVE)."}
+
+
 def readiness_report(*, clock_verified, data_ready, market_status,
                      mtf_ready, calendar_current, remote_view,
                      worker_age=None, last_worker_summary="", ui_strategy="",
-                     worker_strategy=""):
+                     worker_strategy="", calendar_scope="local",
+                     calendar_reason=None):
     """Display all blockers separately; WAIT can still be a valid strategy result.
 
     This status list is advisory UI only. It must NEVER be used to override
@@ -40,8 +84,9 @@ def readiness_report(*, clock_verified, data_ready, market_status,
          "ustawieniem FOKUS_CANDLE_TIME_CONFIRMED=open."),
         ("MTF M1/M5/M15/H1",bool(mtf_ready),
          "Brakuje kompletnych, zweryfikowanych interwałów MTF."),
-        ("Kalendarz BLS",bool(calendar_current),
-         "Brak świeżego oficjalnego kalendarza — nie oznacza braku publikacji."),
+        ("Kalendarz BLS (worker — ostatni skan)" if calendar_scope=="worker"
+         else "Kalendarz BLS (sesja Streamlit)",bool(calendar_current),
+         calendar_reason or "Brak świeżego oficjalnego kalendarza — nie oznacza braku publikacji."),
     ]
     if remote_view:
         checks.append(("Worker PAPER (zapis w bazie)",remote_ok,
