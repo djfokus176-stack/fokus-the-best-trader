@@ -119,7 +119,14 @@ def parse_bls_calendar(ics: str, limit=40) -> list[dict]:
 
 
 def fetch_bls_schedule(get=requests.get, timeout=12):
-    r=get(BLS_ICS,timeout=timeout,headers={"User-Agent":"FokusTraderResearch/1.0"})
+    # Identify the read-only client honestly. An HTTP 403 from BLS must
+    # remain a hard data-unavailable error; NEVER proxy, spoof a browser or
+    # infer that no economic releases are planned.
+    headers={
+        "User-Agent":"FokusTraderResearch/1.1 (+https://github.com/djfokus176-stack/fokus-the-best-trader)",
+        "Accept":"text/calendar, text/plain;q=0.9, */*;q=0.5",
+    }
+    r=get(BLS_ICS,timeout=timeout,headers=headers)
     r.raise_for_status()
     if len(r.content)>1_500_000:raise ValueError("Zbyt duży kalendarz")
     full=parse_bls_calendar(r.content.decode("utf-8-sig",errors="replace"),limit=0)

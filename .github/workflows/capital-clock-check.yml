@@ -1,0 +1,36 @@
+name: "FOKU$ CLOCK CHECK — Capital DEMO (read-only)"
+on:
+  workflow_dispatch:
+    inputs:
+      epic:
+        description: "Instrument do weryfikacji etykiet czasu"
+        required: true
+        type: choice
+        default: US500
+        options:
+          - US500
+          - NAS100
+permissions:
+  contents: read
+concurrency:
+  group: fokus-clock-check
+  cancel-in-progress: false
+jobs:
+  raw-candle-timestamps:
+    name: "2 próbki etykiet czasu UTC (bez zleceń)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    env:
+      CAPITAL_API_KEY: ${{ secrets.CAPITAL_API_KEY }}
+      CAPITAL_IDENTIFIER: ${{ secrets.CAPITAL_IDENTIFIER }}
+      CAPITAL_PASSWORD: ${{ secrets.CAPITAL_PASSWORD }}
+      DIAGNOSTIC_EPIC: ${{ inputs.epic }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: "Zainstaluj zależności"
+        run: pip install -r requirements.txt
+      - name: "Porównaj surowe czasy DEMO (2 odczyty co około 65 s)"
+        run: python -m trader.candle_clock_check --epic "$DIAGNOSTIC_EPIC" --samples 2

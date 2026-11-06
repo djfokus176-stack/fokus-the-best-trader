@@ -283,6 +283,45 @@ class CapitalReadOnly:
         except ValueError as ex:
             raise FeedError(f'Niepoprawny JSON API: {ex}') from ex
 
+    def raw_candle_clock_labels(self, epic='US500', resolution='MINUTE', count=8):
+        """Read-only raw Capital labels, WITHOUT validating BID/ASK.
+
+        Diagnostic only: corrupt OHLC must not prevent verifying whether the
+        vendor stamps the OPEN or CLOSE of a minute. Nothing here sets
+        FOKUS_CANDLE_TIME_CONFIRMED, creates positions or saves credentials.
+        Compare TWO consecutive *finished* bars with the DEMO terminal.
+        """
+        if resolution not in PERIOD or not epic.replace('_','').isalnum():
+            raise FeedError('Niepoprawny EPIC lub interwał diagnostyki')
+        try:
+            r=self.session.get(f'{self.base_url}/api/v1/prices/{epic}',
+                params={'resolution':resolution,'max':min(20,max(4,int(count)))},
+                headers=self.headers(), timeout=12)
+            r.raise_for_status()
+            payload=r.json()
+        except requests.RequestException as exc:
+            raise FeedError(http_error_message(
+                exc,'Odczyt surowych etykiet czasu',epic)) from exc
+        except ValueError as exc:
+            raise FeedError('Niepoprawna odpowiedź JSON zegara Capital') from exc
+        items=payload.get('prices') if isinstance(payload,dict) else None
+        if not isinstance(items,list) or not items:
+            raise FeedError('API nie zwróciło świec do diagnostyki czasu')
+        labels=[]
+        for item in items:
+            if not isinstance(item,dict) or not item.get('snapshotTimeUTC'):
+                raise FeedError('Brak snapshotTimeUTC w danych zegara')
+            stamp=pd.to_datetime(item['snapshotTimeUTC'],utc=True,errors='coerce')
+            if pd.isna(stamp):
+                raise FeedError('Niepoprawna etykieta snapshotTimeUTC')
+            labels.append(stamp)
+        labels.sort()
+        if len(labels)!=len(set(labels)):
+            raise FeedError('Powielone etykiety UTC w próbie zegara')
+        if any(int(t.value//1_000_000_000)%PERIOD[resolution] for t in labels):
+            raise FeedError('Etykiety UTC niezgodne z interwałem')
+        return tuple(t.to_pydatetime() for t in labels)
+
     def raw_candle_time_diagnostic(self, epic='US500', resolution='MINUTE', count=8):
         """Owner-triggered read-only diagnostic: INCLUDE latest possibly forming bar.
 
