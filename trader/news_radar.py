@@ -72,7 +72,15 @@ def fetch_headlines(get=requests.get, timeout=10) -> tuple[list[dict],dict]:
             errors[source]=type(ex).__name__
     unique={x["url"]:x for x in output}
     records=list(unique.values())
-    records.sort(key=lambda r:r["data_utc"],reverse=True)
+    # Unknown publication dates must NEVER outrank dated releases.
+    # Sorting by the original text put "NIEZNANA" above ISO dates.
+    def publication_time(row):
+        try:
+            value=datetime.fromisoformat(row["data_utc"])
+            return value.astimezone(timezone.utc) if value.tzinfo else datetime.min.replace(tzinfo=timezone.utc)
+        except (ValueError,TypeError,KeyError):
+            return datetime.min.replace(tzinfo=timezone.utc)
+    records.sort(key=publication_time,reverse=True)
     return records,errors
 
 
