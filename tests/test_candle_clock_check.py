@@ -63,7 +63,7 @@ def test_two_samples_print_without_leaking_credentials_or_setting_gate(monkeypat
          sleep=lambda t:waits.append(t),
          now=lambda:datetime(2026,11,6,14,8,tzinfo=timezone.utc),
          emit=messages.append)
-    result="\\n".join(messages)
+    result="\n".join(messages)
     assert len(vals)==2
     assert waits==[65]
     assert "ZAKOŃCZONA" in result
