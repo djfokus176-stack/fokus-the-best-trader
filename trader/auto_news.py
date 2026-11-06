@@ -47,9 +47,13 @@ def refresh_news_state(state, *, now_mono=None, now_utc=None,
             state["_macro_calendar"]=events
             state["_calendar_error"]=None
             state["_calendar_success_utc"]=utc.isoformat()
+            state["_calendar_source"]=getattr(events,"source","BLS_OFFICIAL_LIVE")
+            state["_calendar_expires_utc"]=getattr(events,"expires_utc",None)
         except Exception as exc:
             # An older/stale calendar cannot certify that a new entry is safe.
             state["_macro_calendar"]=[]
+            state["_calendar_source"]="UNAVAILABLE"
+            state["_calendar_expires_utc"]=None
             state["_calendar_error"]=type(exc).__name__
     return {"news_refreshed":news_due,"calendar_refreshed":cal_due,
             "news_status":state.get("_news_status","NOT_RUN"),
@@ -65,6 +69,11 @@ def calendar_is_current(state,now=None,max_age_seconds=60*60+120):
     try:
         check=now or datetime.now(timezone.utc)
         age=(check-datetime.fromisoformat(last)).total_seconds()
+        expiry=state.get("_calendar_expires_utc")
+        if expiry:
+            until=datetime.fromisoformat(expiry)
+            if until.tzinfo is None or check>=until:
+                return False
         return 0<=age<=max_age_seconds
     except (TypeError,ValueError):
         return False

@@ -1,6 +1,7 @@
 """BLS HTTP 403 stays a blocking macro-data failure."""
 import requests
 import pytest
+from datetime import datetime,timezone
 from trader.news_radar import BLS_ICS,fetch_bls_schedule
 
 
@@ -30,6 +31,6 @@ def test_bls_403_is_not_reinterpreted_as_empty_safe_calendar():
         content=b"ACCESS DENIED"
         def raise_for_status(self):
             raise requests.HTTPError("403 Forbidden",response=response)
-    with pytest.raises(requests.HTTPError) as ex:
-        fetch_bls_schedule(get=lambda *a,**kw:Rejected())
-    assert ex.value.response.status_code==403
+    with pytest.raises(ValueError,match="SNAPSHOT_EXPIRED"):
+        fetch_bls_schedule(get=lambda *a,**kw:Rejected(),
+            now=datetime(2026,11,8,1,0,tzinfo=timezone.utc))

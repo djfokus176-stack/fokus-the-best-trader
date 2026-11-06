@@ -1378,6 +1378,11 @@ with news_tab:
                ' | BLS: '+('OK' if calendar_is_current(st.session_state) else 'NIEDOSTĘPNY'))
     if st.session_state.get('_news_read_utc'):
         st.caption('Ostatni udany/podjęty skan źródeł (UTC): '+st.session_state['_news_read_utc'])
+    if st.session_state.get('_calendar_source')=='BLS_VERIFIED_SNAPSHOT_NOT_LIVE':
+        st.warning('⚠️ KALENDARZ BLS — ZWERYFIKOWANA KOPIA, NIE LIVE. '+
+                   'Wygasa UTC: '+str(st.session_state.get('_calendar_expires_utc'))+
+                   '. Po wygaśnięciu nowe PAPER będzie zablokowane, '
+                   'jeśli BLS nadal nie odpowie.')
     events=st.session_state.get('_macro_calendar',[])
     is_blocked,notice=macro_blackout(events)
     (st.error if is_blocked else st.info)(notice)
