@@ -779,6 +779,31 @@ with market_tab:
                         st.write('• '+obstacle)
                 st.dataframe(pd.DataFrame(health['checks']),
                     hide_index=True,use_container_width=True)
+                st.caption('ℹ️ Zegar/worker: ostatni zapis Supabase; '
+                           'MTF/BLS/rynek: bieżąca sesja Streamlit. '
+                           'To DWA niezależne systemy, nie jeden test.')
+                if not all(v.ready for v in tf_views):
+                    st.markdown('#### 🧭 Dlaczego MTF jest niekompletne?')
+                    mtf_errors=st.session_state.get('mtf_errors',{})
+                    mtf_rows=[]
+                    for v in tf_views:
+                        label=LABELS.get(v.timeframe,v.timeframe)
+                        error=mtf_errors.get(v.timeframe)
+                        mtf_rows.append({
+                            'Interwał':label,
+                            'Status':'✅ OK' if v.ready else '🔴 BRAK',
+                            'Trend':v.trend,
+                            'Ostatnia zamknięta UTC':str(v.candle_utc or 'BRAK'),
+                            'Przyczyna':str(error or v.reason),
+                        })
+                    st.dataframe(pd.DataFrame(mtf_rows),
+                        hide_index=True,use_container_width=True)
+                    st.caption('Brak danych na stronie nie oznacza automatycznie, '
+                        'że ostatni zdalny skan workera miał błąd MTF.')
+                if health.get('historical_worker_flags'):
+                    st.info('📜 Ostatni zarejestrowany skan workera (HISTORYCZNY): '+
+                        ', '.join(health['historical_worker_flags'])+
+                        '. Nie doliczam go drugi raz do bieżących blokad.')
                 if health['worker_strategy_note']:
                     st.warning(health['worker_strategy_note'])
                 st.caption(health['note'])
