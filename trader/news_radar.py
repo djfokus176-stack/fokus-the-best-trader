@@ -9,7 +9,6 @@ from email.utils import parsedate_to_datetime
 from zoneinfo import ZoneInfo
 from html.parser import HTMLParser
 import re
-import calendar
 from xml.etree import ElementTree as ET
 from urllib.parse import urlparse
 import requests
@@ -142,7 +141,7 @@ class _BlsTableParser(HTMLParser):
         if self.in_row and tag in ("td","th") and self.cell_depth:
             self.cell_depth-=1
             if not self.cell_depth:
-                self.cells.append(re.sub(r"\\s+"," "," ".join(self.cell)).strip())
+                self.cells.append(re.sub(r"\s+"," "," ".join(self.cell)).strip())
         elif tag=="tr" and self.in_row:
             if len(self.cells)>=3:self.rows.append(self.cells)
             self.in_row=False
@@ -162,8 +161,8 @@ def parse_bls_month_html(raw, *, year, month):
     events=[]
     for row in parser.rows:
         date_cell,time_cell,name=row[:3]
-        date_cell=re.sub(r"\\s+"," ",date_cell.strip())
-        time_cell=re.sub(r"\\s+"," ",time_cell.strip())
+        date_cell=re.sub(r"\s+"," ",date_cell.strip())
+        time_cell=re.sub(r"\s+"," ",time_cell.strip())
         try:
             date_part=date_cell.split(",",1)[-1].strip()
             date=datetime.strptime(date_part,"%B %d, %Y")
@@ -213,9 +212,9 @@ def fetch_bls_schedule_html(get=requests.get, timeout=12, *, now=None):
 
 
 def fetch_bls_schedule(get=requests.get, timeout=12):
-    # Identify the read-only client honestly. An HTTP 403 from BLS must
-    # remain a hard data-unavailable error; NEVER proxy, spoof a browser or
-    # infer that no economic releases are planned.
+    # Identify client and use official sources only. If the .ics is
+    # forbidden, try BLS's own current monthly HTML calendar; fail closed
+    # when neither can be validated.
     headers={
         "User-Agent":"FokusTraderResearch/1.1 (+https://github.com/djfokus176-stack/fokus-the-best-trader)",
         "Accept":"text/calendar, text/plain;q=0.9, */*;q=0.5",
