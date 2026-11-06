@@ -228,7 +228,17 @@ def fetch_bls_schedule(get=requests.get, timeout=12, *, now=None):
         # bundled dates; if official HTML is also unavailable, fail closed.
         if getattr(getattr(exc,"response",None),"status_code",None)!=403:
             raise
-        return fetch_bls_schedule_html(get=get,timeout=timeout,now=now)
+        try:
+            return fetch_bls_schedule_html(get=get,timeout=timeout,now=now)
+        except requests.HTTPError as html_exc:
+            # GH-hosted IPs may be denied by both official BLS endpoints.
+            # A human-verified snapshot can cover a SHORT PAPER research
+            # window, but it is NEVER a live calendar and expires firmly.
+            # No fallback on arbitrary HTTP errors or unparseable sources.
+            if getattr(getattr(html_exc,"response",None),"status_code",None)!=403:
+                raise
+            from .bls_verified_snapshot import verified_schedule
+            return verified_schedule(now=now)
     if len(r.content)>1_500_000:raise ValueError("Zbyt duży kalendarz")
     full=parse_bls_calendar(r.content.decode("utf-8-sig",errors="replace"),limit=0)
     cutoff=(now or datetime.now(timezone.utc))-timedelta(days=7)
