@@ -646,8 +646,60 @@ with market_tab:
         if snap.epic!=instrument or snap.resolution!=tf:
             st.warning('Zmieniono instrument lub interwał: wykonaj NOWY SKAN przed decyzją.')
         if not snap.good:
-            st.warning('⚠️ WYKRES ARCHIWALNY / WAIT: '+str(snap.reason)[:280]+
+            st.error('🔴 BLOKADA DANYCH — NIE MA NOWEGO WEJŚCIA PAPER. '
+                     'Capital.com nie dostarczył pełnego, zweryfikowanego '
+                     'zestawu zamkniętych świec.')
+            st.warning('⚠️ WYKRES ARCHIWALNY / WAIT: '+str(snap.reason)[:550]+
                        ' Nie używaj tych danych do nowej decyzji.')
+            if snap.frame is not None and len(snap.frame)>=2:
+                # Untrusted historic bars are visual context ONLY.
+                # A live quote preview may still be valid even when 240
+                # historic bid/ask candles failed quarantine. Never run
+                # strategy, PAPER, cached arrow or trend from this branch.
+                st.caption('📉 DIAGNOSTYKA WYKRESU: historia OHLC CZĘŚCIOWO '
+                           'WADLIWA. Poniższa świeca LIVE może się aktualizować, '
+                           'ale NIE JEST zatwierdzonym wejściem PAPER.')
+                history_fig=go.Figure()
+                history_fig.add_trace(go.Candlestick(x=snap.frame.index,
+                    open=snap.frame.Open,high=snap.frame.High,
+                    low=snap.frame.Low,close=snap.frame.Close,
+                    name='ODRZUCONE DANE • tylko podgląd poprawnych rekordów'))
+                history_fig.update_layout(
+                    height=500,xaxis_rangeslider_visible=False,
+                    template='plotly_dark',paper_bgcolor='#111a2d',
+                    plot_bgcolor='#111a2d')
+                if '_capital_client' not in st.session_state and has_cap and csv is None:
+                    st.session_state['_capital_client']=CapitalReadOnly(
+                        cap_api_key,cap_identifier,cap_password,
+                        environment=capital_env)
+                render_independent_live_chart(history_fig,snap.frame,
+                    instrument,tf,capital_env,src,
+                    st.session_state.get('auto_scan_active',False)
+                    and has_cap and csv is None,
+                    st.session_state.get('auto_scan_period',5),
+                    visible_bars=min(30,len(snap.frame)),auto_zoom=True)
+            with st.expander('🧪 SZCZEGÓŁY BŁĘDU DANYCH I WORKERA',expanded=True):
+                st.write('Instrument:',snap.epic,'| Interwał:',snap.resolution,
+                         '| Źródło:',snap.source)
+                st.write('Powód odmowy danych:',snap.reason)
+                st.caption('Podgląd pięciosekundowy MID może się ruszać, '
+                           'nawet gdy zamknięte OHLC są wadliwe. To nie jest '
+                           'dowód, że można bezpiecznie otwierać PAPER.')
+                st.caption('Potwierdzenie zegara świec workera jest osobne '
+                           'od udanej sesji Capital.com.')
+                meta=st.session_state.get('_paper_remote_meta') or {}
+                if remote_paper_view_enabled():
+                    if meta:
+                        st.write('Ostatni skan zdalnego workera:',
+                                 meta.get('last_scan_utc','BRAK'))
+                        st.write('Raport:',meta.get('last_scan_summary','BRAK'))
+                        st.write('Strategia workera:',meta.get('strategy','BRAK'))
+                    else:
+                        st.error('Brak odczytanego checkpointu workera w tej '
+                                 'sesji. Nie twierdzę, że worker działa.')
+                else:
+                    st.info('Remote PAPER View wyłączone. GitHub Worker działa '
+                            'osobno od wykresu i sesji Streamlit.')
         else:
             st.select_slider('🔎 Powiększenie wykresu — liczba ostatnich świec',
                 options=[20,30,45,60,90,120,180,240,350],value=30,
