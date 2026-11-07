@@ -47,13 +47,20 @@ def scan_once(client,epic,tf,strategy,max_spread,db, *,
         status=client.market_state(epic)
     except (FeedError,ValueError):
         pass
+    if status in ("CLOSED","OFFLINE","EDIT","EDITS_ONLY","EDIT_ONLY"):
+        # Market closure is NOT the same as a broken feed. Never create PAPER
+        # setups against a dormant CFD and do not invent weekend candles.
+        return (f"WAIT / MARKET_CLOSED / BROKER_STATUS={status} / "
+                f"Latest={getattr(main,'confirmed_utc',None)} / "
+                "NO_NEW_PAPER_SETUP")
     if main is None:
-        return f"WAIT / NO_FEED / {tf}: {str(errors.get(tf,'missing'))[:150]}"
+        return f"WAIT / NO_FEED / BROKER_STATUS={status} / {tf}: {str(errors.get(tf,'missing'))[:150]}"
     if not main.good:
         if telegram_enabled:
             record_stale_event(db,main.source,epic,tf,main.reason)
             dispatch_alerts(db,telegram_token,telegram_chat_id,enabled=True)
-        return f"WAIT / DATA_STALE / {main.reason}"
+        return (f"WAIT / DATA_STALE / BROKER_STATUS={status} / "
+                f"{main.reason}")
     # Progress any existing positions on their original TF whenever
     # a new completed candle can be fetched from the DEMO feed.
     archived=0
@@ -87,6 +94,8 @@ def scan_once(client,epic,tf,strategy,max_spread,db, *,
     reasons=[]
     # Report WHY a gate blocked the scan. Never log credentials or tokens.
     diagnostics=[]
+    if "POMINIĘTO_STARE_BŁĘDY=" in main.reason:
+        diagnostics.append("DATA_WARN:"+main.reason.split("POMINIĘTO_STARE_BŁĘDY=",1)[1][:100])
     for resolution in TIMEFRAMES:
         if resolution in errors:
             diagnostics.append(f"{resolution}:FETCH_ERROR:{str(errors[resolution])[:100]}")
