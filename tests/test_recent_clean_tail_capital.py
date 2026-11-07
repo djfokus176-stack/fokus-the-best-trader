@@ -85,7 +85,10 @@ def test_old_corruption_does_not_bypass_stale_data_gate():
 def test_old_corruption_does_not_bypass_excessive_spread():
     payload=make_payload(corrupted=(0,))
     for row in payload["prices"][-5:]:
-        row["closePrice"]["ask"]=104.0
+        for part in ("openPrice","closePrice"):
+            row[part]["ask"]=104.0
+        row["highPrice"]["ask"]=104.6
+        row["lowPrice"]["ask"]=103.6
     s=snap(payload)
     assert not s.good
     assert "Spread" in s.reason or "spread" in s.reason
