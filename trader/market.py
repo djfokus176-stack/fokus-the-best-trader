@@ -202,16 +202,55 @@ def evaluate_snapshot(raw: pd.DataFrame, epic: str, resolution: str,
     step = PERIOD[resolution]
     spread = float(confirmed.iloc[-1]['Spread'])  # strategy's CLOSED signal candle
     quote_spread = float(raw.iloc[-1]['Spread'])  # newest/forming bar, never model history
+    # Historical corruption may safely be quarantined ONLY if it is
+    # strictly older than a sufficiently long, recent and uninterrupted
+    # tail of independently valid bars. We never alter prices or bridge a
+    # missing bar by interpolation. A corrupt latest/forming bar is fatal.
+    warning=""
     if quarantined:
-        first=quarantined[0]
         from collections import Counter
         counts=Counter(x["issue"] for x in quarantined)
         categories=", ".join(f"{k}={v}" for k,v in counts.most_common(4))
-        reason=(f'DANE_WADLIWE: odrzucono {len(quarantined)} rekordów, '
-                f'przyczyny {categories}; '
-                f'np. {first["candle_utc"]}: {first["issue"]}. '
-                'Wykres tylko historyczny; LONG/SHORT zablokowane do czystego odczytu.')
-    elif raw.index[-1] <= confirmed.index[-1]:
+        failure=(f'DANE_WADLIWE: odrzucono {len(quarantined)} rekordów; '
+                 f'{categories}. Bieżące PAPER pozostaje zablokowane.')
+        timestamps=pd.to_datetime([q["candle_utc"] for q in quarantined],
+                                  utc=True,errors="coerce")
+        if timestamps.isna().any():
+            return Snapshot(confirmed,source,epic,resolution,spread,
+                            confirmed_time,age,False,failure+
+                            ' Brak czasu wadliwej świecy.',quote_spread)
+        if timestamps.max()>=raw.index[-1]:
+            return Snapshot(confirmed,source,epic,resolution,spread,
+                            confirmed_time,age,False,failure+
+                            ' Wadliwa najnowsza świeca.',quote_spread)
+        # A clean segment must include the forming candle plus >=70 CLOSED.
+        # Gaps > one nominal interval must not be hidden inside M1/M5/M15;
+        # H1 tolerates a short scheduled trading break, not weekend gaps.
+        maximum_gap=step*(3 if resolution=="HOUR" else 1)
+        last=raw.index[-1]
+        first_pos=len(raw)-1
+        for idx in range(len(raw)-2,-1,-1):
+            delta=(last-raw.index[idx]).total_seconds()
+            if delta<=0 or delta>maximum_gap:
+                break
+            first_pos=idx
+            last=raw.index[idx]
+        clean=raw.iloc[first_pos:]
+        # Any skipped bad record at or after start of tail means an
+        # untrusted gap, even if adjacent valid timestamps look continuous.
+        if len(clean)<71 or (timestamps>=clean.index[0]).any():
+            return Snapshot(confirmed,source,epic,resolution,spread,
+                            confirmed_time,age,False,failure+
+                            f' Ostatnia poprawna seria: {max(0,len(clean)-1)}'
+                            ' zamkniętych świec (minimum 70).',quote_spread)
+        confirmed=clean.iloc[:-1].copy()
+        confirmed_time=confirmed.index[-1].to_pydatetime()
+        age=(now-confirmed_time).total_seconds()
+        spread=float(confirmed.iloc[-1]["Spread"])
+        quote_spread=float(clean.iloc[-1]["Spread"])
+        warning=(f' POMINIĘTO_STARE_BŁĘDY={len(quarantined)}; '
+                 f'ostatnia poprawna seria: {len(confirmed)} zamkniętych świec.')
+    if raw.index[-1] <= confirmed.index[-1]:
         reason = 'Brak świecy następującej po świecy sygnałowej'
     elif age < -step:
         reason = 'Świece z przyszłości / błędna strefa czasu'
@@ -227,6 +266,8 @@ def evaluate_snapshot(raw: pd.DataFrame, epic: str, resolution: str,
         reason = 'Wykryto duże luki w świecach'
     else:
         reason = 'OK: poprzednia świeca ma nowszego następcę (nie potwierdza ticków ani jakości feedu)'
+    if reason.startswith('OK:') and warning:
+        reason+=warning
     return Snapshot(confirmed, source, epic, resolution,
                     spread, confirmed_time, age, reason.startswith('OK:'), reason, quote_spread)
 
