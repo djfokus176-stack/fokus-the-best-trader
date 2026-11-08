@@ -38,7 +38,7 @@ def paper_proof(payload, *, epic="US500", source="Capital.com DEMO REST"):
         counts["CLOSED"]+=1
         stages=by_id.get(pos.get("trade_id"),[])
         types={x.get("kind") for x in stages}
-        if not (pos.get("side")+"_SETUP" in types and "PAPER_OPEN" in types
+        if not ((pos.get("side") or "")+"_SETUP" in types and "PAPER_OPEN" in types
                 and CLOSED[state] in types):
             invalid_closed+=1
             continue
@@ -52,7 +52,7 @@ def paper_proof(payload, *, epic="US500", source="Capital.com DEMO REST"):
                 if stamp.tzinfo is None:
                     raise ValueError("Unaware timestamp")
                 return stamp.astimezone(timezone.utc)
-            start=when(pos["side"]+"_SETUP")
+            start=when((pos.get("side") or "")+"_SETUP")
             opened=when("PAPER_OPEN")
             closed=when(CLOSED[state])
             if not start<opened<=closed:
