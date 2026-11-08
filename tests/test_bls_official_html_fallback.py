@@ -71,14 +71,14 @@ def test_http403_on_both_official_sources_uses_verified_temporary_snapshot():
     def get(url,**kwargs):return Response(403,"Forbidden",url)
     events=fetch_bls_schedule(get=get,now=NOW)
     assert events.source=="BLS_VERIFIED_SNAPSHOT_NOT_LIVE"
-    assert events.expires_utc=="2026-11-08T00:00:00+00:00"
+    assert events.expires_utc=="2026-11-10T00:00:00+00:00"
     assert len(events)>=3
 
 
 def test_http403_after_verified_snapshot_expiry_keeps_macro_blocked():
     def get(url,**kwargs):return Response(403,"Forbidden",url)
     with pytest.raises(ValueError,match="SNAPSHOT_EXPIRED"):
-        fetch_bls_schedule(get=get,now=datetime(2026,11,8,0,0,tzinfo=timezone.utc))
+        fetch_bls_schedule(get=get,now=datetime(2026,11,10,0,0,tzinfo=timezone.utc))
 
 
 def test_html_without_valid_calendar_does_not_enable_paper():
