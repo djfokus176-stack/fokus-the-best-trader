@@ -174,6 +174,7 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
     version,payload=remote.fetch()
     auto_state=payload.get("auto_ai",{})
     candidates=payload.get("candidate_feed",[])
+    forecast_state=payload.get("forecast_research",{})
     news_feed=dict(payload.get("news_radar") or {})
     utc=datetime.now(timezone.utc)
     last=news_feed.get("last_fetch_utc")
@@ -194,7 +195,11 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             news_feed["errors"]={"worker":type(exc).__name__}
             news_feed["headlines"]=[]
     def review_snapshot(snapshot,decision,votes,views,blockers):
-        nonlocal auto_state,candidates
+        nonlocal auto_state,candidates,forecast_state
+        from .forecast_audit import update_forecast
+        # Only fresh, verified closed bars can enter future-price SHADOW audit.
+        # The resulting predictions are not inputs to PAPER or risk gates.
+        forecast_state=update_forecast(forecast_state,snapshot)
         from .auto_ai import review_closed_candle
         from .candidate_radar import append_candidate
         # Keep the original 6-vote AUTO consensus unchanged; evaluate an
@@ -221,6 +226,10 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
         if isinstance(candidates,list):
             payload["candidate_feed"]=candidates[-120:]
         payload["news_radar"]=news_feed
+        if isinstance(forecast_state,dict):
+            payload["forecast_research"]=forecast_state
+        from .paper_learning import strategy_scorecard
+        payload["learning_report"]=strategy_scorecard(db,epic=epic)
         payload["meta"]={
             "last_scan_utc":datetime.now(timezone.utc).isoformat(),
             "last_scan_summary":status[:350],
