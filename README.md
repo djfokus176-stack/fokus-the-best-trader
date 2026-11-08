@@ -1,3 +1,45 @@
+## ✅ AKTYWACJA 8.11.2026 — AUTO GPT + FED/BEA + PAPER (tylko DEMO)
+
+Właściciel zlecił aktywację automatycznych analiz GPT oraz radaru FED/BEA. 
+Po wdrożeniu workflow **domyślnie próbuje włączyć AUTO GPT**, ale wyłącznie gdy
+GitHub Actions ma prywatny sekret `OPENAI_API_KEY`. Domyślne bezpieczne limity:
+**6 wywołań dziennie i 60 miesięcznie**, model `gpt-5.4-mini`, komentarze
+nie tylko do LONG/SHORT, ale także godzinowe WAIT. Nie jest to limit wydatków
+w USD/PLN! ChatGPT Plus NIE opłaca OpenAI API.
+
+**Jednorazowy wymóg właściciela, bez przesyłania mi klucza:**
+
+1. GitHub → repo → Settings → Secrets and variables → Actions → Secrets:
+   upewnij się, że istnieje `OPENAI_API_KEY` z oddzielnego konta OpenAI API.
+   Bez sekretu bezpiecznie pozostaje **NOT_READY**, bez wywołań.
+2. GitHub → Actions → Variables: jeżeli `FOKUS_AUTO_AI_ENABLED=false`, zmień
+   na `true` (jawne `false` zawsze nadpisuje nowy domyślny tryb). Analogicznie
+   inne zapisane wcześniej wartości limitów mają pierwszeństwo.
+3. W Actions → `FOKU$ PAPER v4 - scheduled DEMO scan (optional)` →
+   `Run workflow` zobacz komunikat `AUTO_GPT=READY` albo `NOT_READY`.
+   Sam zielony workflow nie potwierdza odpowiedzi GPT: raport w
+   Streamlit → RAPORTY → AUTO GPT zawiera rzeczywisty status `SUCCESS`.
+4. Streamlit Cloud → app → Settings → Secrets: `CAPITAL_API_KEY`,
+   `CAPITAL_IDENTIFIER`, `CAPITAL_PASSWORD`, `CAPITAL_ENV="DEMO"`.
+   Jeśli wykres pokazuje HTTP 401, popraw sekrety; kod nie ma dostępu
+   do prywatnych wartości. Do zdalnego podglądu PAPER w Streamlit
+   potrzebne są **oba** `FOKUS_SUPABASE_URL` i
+   `FOKUS_SUPABASE_SECRET_KEY`; wtedy panel automatycznie wybiera
+   tryb wyłącznie do odczytu, o ile `FOKUS_REMOTE_VIEW_ENABLED` nie jest
+   jawnie `false`.
+
+**FED/BEA:** radar pobiera urzędowe daty FOMC, GDP, PCE, trade; zapisuje czas
+pobrania i błędy do checkpointu. Zdarzenia są wysyłane jako KONTEKST do GPT,
+nie generują zleceń ani nie usuwają obowiązkowej blokady BLS. Coverage jest
+częściowe: brak źródła nie oznacza braku publikacji.
+
+**Pozostałe ograniczenia:** GitHub cron nie zapewnia regularnej pracy co
+5 minut, Streamlit nie aktualizuje wykresu przy zamkniętej przeglądarce,
+pozycje PAPER nie są zleceniami Capital.com. Podczas zamkniętej giełdy
+mogą nie pojawić się nowe komentarze GPT ani nowe prognozy.
+
+---
+
 ## 🧠 Płatny GPT w osobnym workerze — opcjonalny, z limitami
 
 Dodano bezpieczną integrację komentarzy GPT do skanów PAPER w GitHub Actions. Domyślnie **WYŁĄCZONA**, nie generuje opłat bez osobnego sekretu i opt-in. Model nie zmienia deterministycznych sygnałów ani żadnych blokad i nigdy nie wysyła zleceń REAL. Domyślne limity to 24 próby dziennie i 200 miesięcznie; nie są to limity kwotowe OpenAI. Historia i licznik pokazują się w panelu RAPORTY przy połączeniu Supabase.
