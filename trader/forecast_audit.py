@@ -97,22 +97,30 @@ def update_forecast(state, snapshot):
         at = datetime.fromisoformat(str(pending["at_utc"]))
         now = datetime.fromisoformat(stamp)
         target = at + timedelta(seconds=PERIOD[tf])
-        if now == target:
+        # Scheduled GitHub scans can arrive minutes late. Score ONLY the
+        # exact next closed bar if it still exists in the fetched history.
+        # Never substitute a later candle or current forming bar.
+        if now >= target and target in frame.index:
+            close_target = float(frame.loc[target, "Close"])
+            if not math.isfinite(close_target) or close_target <= 0:
+                work["missed_candles"]=int(work.get("missed_candles",0))+1
+                close_target = None
             predicted = float(pending["predicted"])
             previous = float(pending["previous_close"])
             predicted_change = predicted-previous
-            actual_change = close-previous
+            actual_change = (close_target-previous) if close_target is not None else 0.0
             direction_hit = (predicted_change*actual_change > 0
                              if abs(predicted_change)>1e-12
                              else abs(actual_change)<=1e-12)
-            by_model = {k:abs(close-float(v))
-                        for k,v in pending["candidates"].items()}
-            event = {"at_utc":pending["at_utc"],"target_utc":stamp,
-                     "model":pending["model"],"previous_close":previous,
-                     "predicted":predicted,"actual":close,
-                     "abs_error":abs(close-predicted),
-                     "direction_hit":bool(direction_hit),"errors":by_model}
-            work["resolved"] = (list(work.get("resolved") or [])+[event])[-MAX_HISTORY:]
+            if close_target is not None:
+                by_model = {k:abs(close_target-float(v))
+                            for k,v in pending["candidates"].items()}
+                event = {"at_utc":pending["at_utc"],"target_utc":target.isoformat(),
+                         "model":pending["model"],"previous_close":previous,
+                         "predicted":predicted,"actual":close_target,
+                         "abs_error":abs(close_target-predicted),
+                         "direction_hit":bool(direction_hit),"errors":by_model}
+                work["resolved"] = (list(work.get("resolved") or [])+[event])[-MAX_HISTORY:]
         elif now>target:
             work["missed_candles"]=int(work.get("missed_candles",0))+1
         elif now<at:
