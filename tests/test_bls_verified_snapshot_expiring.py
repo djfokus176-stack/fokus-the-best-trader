@@ -1,4 +1,4 @@
-"""Audited, time-limited macro backup: official BLS checked on 2026-11-06."""
+"""Audited, time-limited macro backup: official BLS rechecked on 2026-11-08."""
 from datetime import datetime,timedelta,timezone
 import pytest
 import requests
@@ -26,7 +26,7 @@ def test_snapshot_is_official_date_checked_and_uses_eastern_timezone():
     schedule=verified_schedule(now=at)
     assert schedule.source=="BLS_VERIFIED_SNAPSHOT_NOT_LIVE"
     assert schedule.source_url==SOURCE_URL=="https://www.bls.gov/schedule/2026/"
-    assert RESEARCH_VERIFIED_DATE=="2026-11-06"
+    assert RESEARCH_VERIFIED_DATE=="2026-11-08"
     assert len(schedule)==6
     dates={x["wydarzenie"]:x["data_utc"] for x in schedule}
     assert dates["Consumer Price Index for October 2026"]==datetime(
