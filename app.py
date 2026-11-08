@@ -169,7 +169,14 @@ def secret(name,default=''):
 
 
 def remote_paper_view_enabled():
-    return secret('FOKUS_REMOTE_VIEW_ENABLED','false').lower() in ('true','1','yes')
+    # Owner requested connected cloud PAPER monitoring. Remain read-only,
+    # enable automatically only if BOTH private Streamlit server Secrets exist.
+    # Explicit false in Secrets always wins.
+    setting=secret('FOKUS_REMOTE_VIEW_ENABLED','auto').lower()
+    if setting in ('false','0','no','off'):
+        return False
+    keys_ready=bool(secret('FOKUS_SUPABASE_URL') and secret('FOKUS_SUPABASE_SECRET_KEY'))
+    return keys_ready and setting in ('auto','true','1','yes','on')
 
 
 def paper_view_db():
@@ -1577,6 +1584,22 @@ with reports_tab:
                     else:
                         st.info('Brak zapisanej historii kandydatów — worker uzupełni ją przy następnym poprawnym skanie.')
                 auto_ai=st.session_state.get('_paper_remote_auto_ai') or {}
+                cloud_meta=st.session_state.get('_paper_remote_meta') or {}
+                with st.expander('⚙️ AKTYWACJA AUTO GPT / FED / BEA (STATUS WORKERA)',expanded=True):
+                    if cloud_meta.get('auto_gpt_enabled'):
+                        if cloud_meta.get('auto_gpt_configured'):
+                            st.success('AUTO GPT: AKTYWOWANY i klucz GitHub dostępny. '
+                                       'Odpowiedzi powstaną dopiero przy odpowiednich zamkniętych świecach.')
+                        else:
+                            st.error('AUTO GPT: WŁĄCZONY, ale brak OPENAI_API_KEY w GitHub Actions Secrets.')
+                    else:
+                        st.warning('AUTO GPT: WYŁĄCZONY w ostatnim checkpointcie workera. '
+                                   'Sprawdź GitHub Variables / uruchomienie najnowszej wersji.')
+                    st.caption('Ostatni status GPT: '+str(cloud_meta.get('auto_gpt_last_status','BRAK'))+
+                               ' | FED: '+str(cloud_meta.get('macro_fed_status','UNKNOWN'))+
+                               ' | BEA: '+str(cloud_meta.get('macro_bea_status','UNKNOWN')))
+                    st.caption('Limity automatycznego GPT to LICZBA wywołań, nie limit kwotowy. '
+                               'Brak nowych cen lub zamknięty rynek oznacza brak nowych analiz.')
                 if auto_ai:
                     with st.expander('🤖 AUTOMATYCZNY GPT — OSTATNIA ANALIZA WORKERA (PAPER)'):
                         st.caption(f"Status: {auto_ai.get('status','BRAK')} | Model: {auto_ai.get('model','BRAK')} | Dzisiaj: {auto_ai.get('daily_calls',0)} wywołań | Miesiąc: {auto_ai.get('monthly_calls',0)} wywołań")

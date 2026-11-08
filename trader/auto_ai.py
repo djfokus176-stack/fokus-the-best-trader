@@ -30,7 +30,7 @@ def _brief(value, size=250):
 
 def review_closed_candle(previous, snapshot, decision, votes, mtf_views,
                          blockers, *, env=None, now=None, call=None,
-                         news_context=None):
+                         news_context=None, macro_context=None):
     """Review one distinct closed candle; persist call caps in returned state.
 
     Never retry paid requests. Opt-in is only via GitHub worker env + secret.
@@ -96,6 +96,32 @@ def review_closed_candle(previous, snapshot, decision, votes, mtf_views,
     news_status=_brief((news_context or {}).get("status","UNAVAILABLE"),40)
     if not recent_news and news_status in ("OK","PARTIAL"):
         news_status="NO_RECENT_PUBLICATIONS"
+    # Only official, timestamped macro events may be included, with explicit
+    # coverage/error status; never infer that missing events imply safety.
+    watch=macro_context if isinstance(macro_context,dict) else {}
+    verified=[]
+    for event in (watch.get("events") or [])[:50]:
+        if not isinstance(event,dict):
+            continue
+        if event.get("source") not in ("FED_OFFICIAL_LIVE","BEA_OFFICIAL_LIVE"):
+            continue
+        try:
+            stamp=datetime.fromisoformat(str(event["data_utc"]))
+            if stamp.tzinfo is None:
+                continue
+            until=(stamp-at).total_seconds()
+            if -3600<=until<=14*86400:
+                verified.append({
+                    "time_utc":stamp.isoformat(),
+                    "title":_brief(event.get("wydarzenie",""),160),
+                    "source":event["source"],
+                })
+        except (KeyError,ValueError,TypeError):
+            continue
+    verified.sort(key=lambda item:item["time_utc"])
+    source_health={name:_brief((value or {}).get("status","UNKNOWN"),30)
+                   for name,value in (watch.get("sources") or {}).items()
+                   if isinstance(value,dict)}
     payload = {
         "source": "Capital.com DEMO REST",
         "epic": _brief(snapshot.epic, 60),
@@ -117,6 +143,13 @@ def review_closed_candle(previous, snapshot, decision, votes, mtf_views,
                  "trend": _brief(v.trend, 20),
                  "ready": bool(v.ready)} for v in (mtf_views or [])[:4]],
         "last_8_closed_bars": candles,
+        "official_macro_calendar": {
+            "coverage": _brief(watch.get("coverage","UNAVAILABLE"),45),
+            "read_utc": _brief(watch.get("asof_utc",""),45),
+            "source_status": source_health,
+            "events_next_14_days": verified[:10],
+            "warning": "Only FED and BEA selected events. BLS veto is separate; unknown means UNKNOWN, not safe.",
+        },
         "official_headline_context": {
             "status": news_status,
             "last_fetch_utc": _brief((news_context or {}).get("last_fetch_utc",""),45),
@@ -152,6 +185,10 @@ def review_closed_candle(previous, snapshot, decision, votes, mtf_views,
                 "polsku: co sugerują wskaźniki, argumenty za/przeciw, "
                 "kluczowy warunek unieważnienia, co wymaga potwierdzenia. "
                 "Nie widzisz screenshotu ani strumienia wiadomości na żywo. "
+                "W sekcji official_macro_calendar są wyłącznie wybrane terminy FED/BEA, "
+                "wraz ze statusem źródła. Nigdy nie zakładaj, że lista jest kompletna; "
+                "jeśli brak źródła lub dat, wskaż niepewność. Terminy są kontekstem, "
+                "nie sygnałem do zawierania transakcji. "
                 "Jeśli w payloadzie są oficjalne nagłówki RSS, traktuj je "
                 "wyłącznie jako niezweryfikowany kontekst i podaj datę; "
                 "jeśli radar ma status ERROR/NO_DATA, napisz, że nie ma "
