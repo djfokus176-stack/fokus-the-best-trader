@@ -55,7 +55,9 @@ def test_forecast_does_not_score_missing_candle_or_bad_source():
     bad=snap("2026-11-09 12:00",n=7)
     bad.good=False
     assert update_forecast(a,bad)==a
-    gap=update_forecast(a,snap("2026-11-09 12:04",n=7))
+    missing=snap("2026-11-09 12:04",n=7)
+    missing.frame=missing.frame.drop(pd.Timestamp("2026-11-09 12:06",tz="UTC"))
+    gap=update_forecast(a,missing)
     assert gap["missed_candles"]==1
     assert len(gap["resolved"])==0
 
