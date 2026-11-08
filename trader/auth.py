@@ -55,3 +55,37 @@ def test_telegram_token(token: str):
         return (True, 'Telegram: autoryzacja prawidłowa (getMe).') if obj.get('ok') else (False, 'Telegram nie potwierdził tokenu.')
     except Exception as ex:
         return False, 'Telegram: brak połączenia (' + type(ex).__name__ + ').'
+
+
+CAPITAL_SECRET_FIELDS = ("CAPITAL_API_KEY", "CAPITAL_IDENTIFIER", "CAPITAL_PASSWORD")
+
+
+def drop_capital_session_overrides(overrides: dict | None) -> dict:
+    """Discard only temporary broker credentials; preserve unrelated settings."""
+    return {key: value for key, value in dict(overrides or {}).items()
+            if key not in (*CAPITAL_SECRET_FIELDS, "CAPITAL_LOGIN")}
+
+
+def capital_credential_sources(read_secret, overrides: dict | None = None) -> dict:
+    """Report origins, never values, so a populated field is not called verified."""
+    sources = {}
+    session = overrides or {}
+    for name in CAPITAL_SECRET_FIELDS:
+        temporary = session.get(name)
+        if name == "CAPITAL_IDENTIFIER" and not temporary:
+            temporary = session.get("CAPITAL_LOGIN")
+        stored = read_secret(name)
+        if name == "CAPITAL_IDENTIFIER" and not stored:
+            stored = read_secret("CAPITAL_LOGIN")
+        sources[name] = ("SESJA" if temporary is not None and str(temporary).strip()
+                         else "SECRETS" if stored else "BRAK")
+    return sources
+
+
+def capital_client_matches(client, api_key, identifier, password, environment):
+    """Never reuse a broker session if its environment or credentials differ."""
+    return (client is not None
+            and getattr(client, "environment", None) == environment
+            and getattr(client, "api_key", None) == api_key
+            and getattr(client, "identifier", None) == identifier
+            and getattr(client, "password", None) == password)
