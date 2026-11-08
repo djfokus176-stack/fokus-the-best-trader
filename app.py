@@ -38,7 +38,9 @@ from trader.paper_sounds import new_paper_events,wav_notice,SOUND_EVENTS,alert_a
 from trader.paper_reporting import daily_weekly,performance_by_policy
 from trader.remote_checkpoint import RemoteCheckpoint,remote_view_db,RemoteError,dump_state
 from trader.telegram_alerts import dispatch_alerts, record_stale_event
-from trader.auth import capital_credentials, active_credential, test_capital_login, test_openai_model, test_telegram_token
+from trader.auth import (capital_credentials, active_credential, test_capital_login,
+    test_openai_model, test_telegram_token, drop_capital_session_overrides,
+    capital_credential_sources, capital_client_matches)
 from trader.access import access_configured, password_matches
 from trader.owner_auth import auth_mode, owner_email_configured, google_identity_matches, google_oidc_ready
 from trader.market_dna import analyze_market
@@ -306,8 +308,8 @@ with st.sidebar:
         st.audio(audio,format=mime,autoplay=True)
     st.caption('AUTO-SKAN nie wykonuje zleceń. Płatne AI jest ręczne w CZAT AI; osobny worker może opcjonalnie uruchamiać limitowane komentarze GPT po włączeniu w GitHub.')
     st.markdown('---')
-    with st.expander('🔑 KLUCZE API — TESTY / ZMIANY (już zapisane w Secrets)', expanded=False):
-        st.caption('Wpisz tylko pola, które chcesz zmienić. Puste pola korzystają z zapisanych Streamlit Secrets. Wpisane tutaj dane żyją wyłącznie w tej sesji przeglądarki.')
+    with st.expander('🔑 KLUCZE API — TESTY / ZMIANY', expanded=False):
+        st.caption('Puste pola korzystają z Secrets. Dane wpisane tymczasowo w sesji MAJĄ PIERWSZEŃSTWO przed Secrets. Samo istnienie kluczy NIE potwierdza poprawnego logowania.')
         with st.form('fokus_credentials_login', clear_on_submit=True):
             entered_key=st.text_input('Capital.com: API Key',type='password')
             entered_login=st.text_input('Capital.com: Login / e-mail')
@@ -329,13 +331,14 @@ with st.sidebar:
                       'initial_scan_attempted','last_feed_error','epic_matches'):
                 st.session_state.pop(k,None)
             if save_session:
+                st.session_state.pop('_capital_test', None)
                 st.success('Zapisano tymczasowo w tej sesji — NIE na dysku ani w GitHubie.')
         overrides=st.session_state.get('_api_session_overrides',{})
         cap_api_key,cap_identifier,cap_password=capital_credentials(secret,overrides)
         openai_api_key=active_credential('OPENAI_API_KEY',secret,overrides)
         telegram_token=active_credential('TELEGRAM_BOT_TOKEN',secret,overrides)
         has_cap=bool(cap_api_key and cap_identifier and cap_password)
-        st.caption('Capital.com: '+('pola dostępne' if has_cap else 'brak wymaganych pól')
+        st.caption('Capital.com: '+('pola wypełnione (NIE POTWIERDZA logowania)' if has_cap else 'brak wymaganych pól')
             +' | OpenAI: '+('jest klucz' if openai_api_key else 'brak klucza')
             +' | Telegram: '+('jest token' if telegram_token else 'brak tokenu'))
         if check_capital:
@@ -370,15 +373,53 @@ with st.sidebar:
             st.rerun()
         st.info('Na stałe: Streamlit Cloud → My apps → Settings → Secrets. Ta aplikacja nie ma uprawnień do zmiany Secrets.')
         st.caption('Formularz dostępny dopiero po autoryzacji właściciela. Zalecane ograniczenie dostępu również w ustawieniach Sharing Streamlit Cloud.')
+    # This bypasses stale temporary overrides and authenticates from Secrets
+    # without asking the owner to type or reveal any credentials.
+    if st.button('🧪 TESTUJ ZAPISANE SECRETS (BEZ WPISYWANIA)', use_container_width=True):
+        existing=st.session_state.get('_api_session_overrides',{})
+        st.session_state['_api_session_overrides']=drop_capital_session_overrides(existing)
+        for key in ('_capital_client','_capital_test','market_snap','ai_context',
+                    'source_override','initial_scan_attempted','last_feed_error','epic_matches'):
+            st.session_state.pop(key,None)
+        saved_api,saved_login,saved_password=capital_credentials(secret,{})
+        try:
+            client=test_capital_login(saved_api,saved_login,saved_password,capital_env)
+            st.session_state['_capital_client']=client
+            st.session_state['_capital_test']={'env':capital_env,'ok':True,
+                'message':'✅ HTTP 200: Capital.com zaakceptował zapisane Secrets. Nie wpisuj danych ponownie.'}
+        except (FeedError,RuntimeError) as ex:
+            st.session_state['_capital_test']={'env':capital_env,'ok':False,
+                'message':'❌ Sekrety obecne, ale uwierzytelnienie nieudane: '+str(ex)[:220]}
+        except Exception as ex:
+            st.session_state['_capital_test']={'env':capital_env,'ok':False,
+                'message':'❌ Test Secrets: '+type(ex).__name__}
     overrides=st.session_state.get('_api_session_overrides',{})
     cap_api_key,cap_identifier,cap_password=capital_credentials(secret,overrides)
     openai_api_key=active_credential('OPENAI_API_KEY',secret,overrides)
     has_cap=bool(cap_api_key and cap_identifier and cap_password)
+    sources=capital_credential_sources(secret,overrides)
+    st.caption('Źródło danych Capital.com (bez wartości): '+
+        ' | '.join(name.replace('CAPITAL_','')+'='+where for name,where in sources.items()))
+    if (st.session_state.get('_capital_client') is not None and
+            not capital_client_matches(st.session_state.get('_capital_client'),
+                                       cap_api_key,cap_identifier,cap_password,capital_env)):
+        # Reboot or changed Secrets/temporary overrides must not reuse a stale API session.
+        for key in ('_capital_client','market_snap','ai_context','source_override',
+                    'initial_scan_attempted','last_feed_error','epic_matches'):
+            st.session_state.pop(key,None)
     if has_cap:
-        st.success('✅ Capital.com: klucze dostępne — status logowania pokazuje test API')
+        tested=st.session_state.get('_capital_test',{})
+        if tested.get('env')==capital_env and tested.get('ok'):
+            st.success('✅ Capital.com: logowanie POTWIERDZONE (HTTP 200).')
+        elif tested.get('env')==capital_env and tested.get('ok') is False:
+            st.error(tested.get('message','❌ Capital.com: błąd logowania.'))
+        else:
+            st.info('🔐 Dane Capital.com są dostępne, ale jeszcze NIEPOTWIERDZONE. '
+                    'Kliknij „TESTUJ ZAPISANE SECRETS”, bez wpisywania hasła.')
         if st.button(f'🔎 SPRAWDŹ EPIC NA KONCIE {capital_env}',use_container_width=True):
             try:
-                if '_capital_client' not in st.session_state:
+                if not capital_client_matches(st.session_state.get('_capital_client'),
+                        cap_api_key,cap_identifier,cap_password,capital_env):
                     st.session_state['_capital_client']=CapitalReadOnly(
                         cap_api_key,cap_identifier,cap_password,environment=capital_env)
                 st.session_state['epic_matches']=st.session_state['_capital_client'].search_markets(instrument)
@@ -488,11 +529,14 @@ with market_tab:
                 st.session_state['market_snap']=evaluate_snapshot(raw,instrument,tf,max_spread=max_spread,source='CSV NAUKA (NIE LIVE)')
                 st.session_state['source_override']='CSV NAUKA (NIE LIVE)'
             elif has_cap:
-                if '_capital_client' not in st.session_state:
+                if not capital_client_matches(st.session_state.get('_capital_client'),
+                        cap_api_key,cap_identifier,cap_password,capital_env):
                     st.session_state['_capital_client']=CapitalReadOnly(
                         cap_api_key,cap_identifier,cap_password,environment=capital_env)
                 st.session_state['market_snap']=st.session_state['_capital_client'].candles(
                     instrument,tf,count=350,max_spread=max_spread)
+                st.session_state['_capital_test']={'env':capital_env,'ok':True,
+                    'message':'✅ Capital.com: uwierzytelnienie potwierdzone przez /prices.'}
                 st.session_state['source_override']=f'Capital.com {capital_env} REST'
                 if st.session_state.get('mtf_enabled',False):
                     import time as _clock
@@ -577,6 +621,9 @@ with market_tab:
                 st.session_state.pop('market_snap', None)
             st.session_state.pop('ai_context', None)
             st.session_state['last_feed_error'] = str(ex)
+            if 'HTTP 401' in str(ex):
+                st.session_state['_capital_test']={'env':capital_env,'ok':False,
+                    'message':'❌ HTTP 401: Capital.com odrzucił autoryzację. To NIE jest zamknięty rynek (CLOSED). Użyj testu Secrets.'}
             st.error('❌ Nie udało się pobrać poprawnych świec: '+str(ex))
         except Exception as ex:
             record=scan_event(scan_trigger,previous_snap,None,
