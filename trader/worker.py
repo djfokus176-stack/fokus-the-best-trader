@@ -176,6 +176,7 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
     candidates=payload.get("candidate_feed",[])
     forecast_state=payload.get("forecast_research",{})
     news_feed=dict(payload.get("news_radar") or {})
+    macro_watch=dict(payload.get("macro_watch") or {})
     utc=datetime.now(timezone.utc)
     last=news_feed.get("last_fetch_utc")
     try:
@@ -194,6 +195,21 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             news_feed["status"]="ERROR_"+type(exc).__name__
             news_feed["errors"]={"worker":type(exc).__name__}
             news_feed["headlines"]=[]
+    # Independent, read-only official FED/BEA calendar watcher once per hour
+    # when job runs. It never substitutes unknown BLS dates for "no events".
+    watch_last=macro_watch.get("asof_utc")
+    try:
+        watch_age=(utc-datetime.fromisoformat(watch_last)).total_seconds() if watch_last else 1e20
+    except (ValueError,TypeError):
+        watch_age=1e20
+    if watch_age>=3600 or watch_age<0:
+        try:
+            from .macro_calendar_plus import fetch_macro_watch
+            macro_watch=fetch_macro_watch(timeout=4,now=utc)
+        except (OSError,ValueError,TypeError,RuntimeError) as exc:
+            macro_watch={"asof_utc":utc.isoformat(),"coverage":"UNAVAILABLE",
+                         "events":[],"errors":{"worker":type(exc).__name__},
+                         "sources":{}}
     def review_snapshot(snapshot,decision,votes,views,blockers):
         nonlocal auto_state,candidates,forecast_state
         from .forecast_audit import update_forecast
@@ -226,6 +242,7 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
         if isinstance(candidates,list):
             payload["candidate_feed"]=candidates[-120:]
         payload["news_radar"]=news_feed
+        payload["macro_watch"]=macro_watch
         if isinstance(forecast_state,dict):
             payload["forecast_research"]=forecast_state
         from .paper_learning import strategy_scorecard

@@ -33,12 +33,31 @@ def test_forecast_is_created_before_next_candle_and_scored_once():
     assert update_forecast(verified,snap("2026-11-09 12:00",n=7))==verified
 
 
+def test_delayed_scan_scores_only_exact_next_closed_bar():
+    initial=update_forecast({},snap("2026-11-09 12:00",n=6))
+    # GitHub may scan 6 minutes later, but the next CLOSED bar remains
+    # available in the broker's historical response.
+    delayed=update_forecast(initial,snap("2026-11-09 12:00",n=12))
+    assert len(delayed["resolved"])==1
+    assert delayed["resolved"][0]["target_utc"]=="2026-11-09T12:06:00+00:00"
+    assert delayed["resolved"][0]["actual"]==101.8
+    assert delayed["pending"]["at_utc"]=="2026-11-09T12:11:00+00:00"
+    # If the exact target bar is absent from history, do NOT interpolate.
+    missing=snap("2026-11-09 12:00",n=12)
+    missing.frame=missing.frame.drop(pd.Timestamp("2026-11-09 12:06",tz="UTC"))
+    expired=update_forecast(initial,missing)
+    assert len(expired["resolved"])==0
+    assert expired["missed_candles"]==1
+
+
 def test_forecast_does_not_score_missing_candle_or_bad_source():
     a=update_forecast({},snap("2026-11-09 12:00",n=6))
     bad=snap("2026-11-09 12:00",n=7)
     bad.good=False
     assert update_forecast(a,bad)==a
-    gap=update_forecast(a,snap("2026-11-09 12:04",n=7))
+    missing=snap("2026-11-09 12:04",n=7)
+    missing.frame=missing.frame.drop(pd.Timestamp("2026-11-09 12:06",tz="UTC"))
+    gap=update_forecast(a,missing)
     assert gap["missed_candles"]==1
     assert len(gap["resolved"])==0
 

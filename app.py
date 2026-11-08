@@ -195,6 +195,7 @@ def paper_view_db():
         st.session_state['_paper_remote_auto_ai']=payload.get('auto_ai') or {}
         st.session_state['_paper_remote_candidates']=payload.get('candidate_feed') or []
         st.session_state['_paper_remote_news']=payload.get('news_radar') or {}
+        st.session_state['_paper_remote_macro_watch']=payload.get('macro_watch') or {}
         st.session_state['_paper_remote_forecasts']=payload.get('forecast_research') or {}
         st.session_state['_paper_remote_learning']=payload.get('learning_report') or {}
         return db
@@ -1541,6 +1542,23 @@ with reports_tab:
                             hide_index=True,use_container_width=True)
                     if worker_news.get('errors'):
                         st.json(worker_news['errors'])
+                with st.expander('📅 OFICJALNY KALENDARZ FED + BEA (WATCH, NIE PEŁNA OCHRONA)',expanded=True):
+                    macro=st.session_state.get('_paper_remote_macro_watch') or {}
+                    st.caption('Odczyt UTC: '+str(macro.get('asof_utc','BRAK'))+
+                               ' | Zakres: '+str(macro.get('coverage','BRAK')))
+                    st.warning('Brak pozycji na liście NIE oznacza braku wydarzeń. '
+                               'BLS, Census, Treasury, ISM i niespodziewane komunikaty '
+                               'nie są tutaj kompletnie monitorowane. '
+                               'Obecna bramka PAPER pozostaje zależna od osobnego BLS.')
+                    if macro.get('sources'):
+                        st.json(macro['sources'])
+                    if macro.get('events'):
+                        st.dataframe(pd.DataFrame(macro['events'][:30]),
+                                     hide_index=True,use_container_width=True)
+                    else:
+                        st.info('Brak zweryfikowanych dat FED/BEA — źródło może być niedostępne.')
+                    if macro.get('errors'):
+                        st.error('Niepełny odczyt urzędowy: '+str(macro['errors']))
                 with st.expander('🔎 ARCHIWUM RADARU — SUROWE SYGNAŁY I POWODY BLOKAD',expanded=True):
                     st.caption('Nie są to pozycje PAPER ani zweryfikowane typy. Zapis z workera '
                                'na kolejnych zamkniętych świecach, również gdy decyzją jest WAIT.')
