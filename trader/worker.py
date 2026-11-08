@@ -228,7 +228,8 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
                 "RR":wave.rr,"Powód":wave.reason})
         candidates=append_candidate(candidates,snapshot,decision,research_votes,blockers)
         auto_state=review_closed_candle(auto_state,snapshot,decision,votes,views,
-                                      blockers,news_context=news_feed)
+                                      blockers,news_context=news_feed,
+                                      macro_context=macro_watch)
     db=sqlite3.connect(":memory:")
     try:
         restore_state(db,payload)
@@ -257,6 +258,11 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             "setups_enabled":bool(enable_setups),
             "news_status":news_feed.get("status","NO_DATA"),
             "news_last_fetch_utc":news_feed.get("last_fetch_utc"),
+            "macro_fed_status":(macro_watch.get("sources") or {}).get("FED_FOMC",{}).get("status","UNKNOWN"),
+            "macro_bea_status":(macro_watch.get("sources") or {}).get("BEA",{}).get("status","UNKNOWN"),
+            "auto_gpt_enabled":os.getenv("FOKUS_AUTO_AI_ENABLED","false").strip().lower() in ("true","1","yes","on"),
+            "auto_gpt_configured":bool(os.getenv("OPENAI_API_KEY","")),
+            "auto_gpt_last_status":auto_state.get("status","NOT_YET_EXECUTED") if isinstance(auto_state,dict) else "NOT_YET_EXECUTED",
             "worker":"GitHub Actions or foreground process",
             "telegram_remote":"DISABLED"}
         new_version=remote.save(version,payload)
