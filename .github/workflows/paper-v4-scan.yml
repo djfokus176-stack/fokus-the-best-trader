@@ -28,13 +28,15 @@ jobs:
       CAPITAL_EPIC: ${{ vars.CAPITAL_EPIC || 'US500' }}
       # Optional strategy comparison; AUTO remains default until opted in.
       FOKUS_PAPER_STRATEGY: ${{ vars.FOKUS_PAPER_STRATEGY || 'AUTO — 6 STRATEGII' }}
-      # Separate worker secret, never committed. No billable call unless opt-in.
+      # Owner opted in 8 Nov 2026. Paid API calls ONLY if worker OpenAI secret exists.
+      # Existing GitHub variables set explicitly to 'false' still disable GPT.
+      # Limited calls are NOT hard monetary spending caps.
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      FOKUS_AUTO_AI_ENABLED: ${{ vars.FOKUS_AUTO_AI_ENABLED || 'false' }}
+      FOKUS_AUTO_AI_ENABLED: ${{ vars.FOKUS_AUTO_AI_ENABLED || 'true' }}
       FOKUS_AUTO_AI_MODEL: ${{ vars.FOKUS_AUTO_AI_MODEL || 'gpt-5.4-mini' }}
-      FOKUS_AUTO_AI_DAILY_LIMIT: ${{ vars.FOKUS_AUTO_AI_DAILY_LIMIT || '24' }}
-      FOKUS_AUTO_AI_MONTHLY_LIMIT: ${{ vars.FOKUS_AUTO_AI_MONTHLY_LIMIT || '200' }}
-      FOKUS_AUTO_AI_INCLUDE_WAIT: ${{ vars.FOKUS_AUTO_AI_INCLUDE_WAIT || 'false' }}
+      FOKUS_AUTO_AI_DAILY_LIMIT: ${{ vars.FOKUS_AUTO_AI_DAILY_LIMIT || '6' }}
+      FOKUS_AUTO_AI_MONTHLY_LIMIT: ${{ vars.FOKUS_AUTO_AI_MONTHLY_LIMIT || '60' }}
+      FOKUS_AUTO_AI_INCLUDE_WAIT: ${{ vars.FOKUS_AUTO_AI_INCLUDE_WAIT || 'true' }}
       # Opt-in only: default fixed targets until PAPER policy comparisons validate.
       FOKUS_PAPER_EXIT_POLICY: ${{ vars.FOKUS_PAPER_EXIT_POLICY || 'fixed' }}
     steps:
@@ -54,6 +56,16 @@ jobs:
               exit 0
             fi
           done
+          if [[ "${FOKUS_AUTO_AI_ENABLED:-false}" == "true" ]]; then
+            if [[ -n "${OPENAI_API_KEY:-}" ]]; then
+              echo "AUTO_GPT=READY; capped attempts per day=$FOKUS_AUTO_AI_DAILY_LIMIT per month=$FOKUS_AUTO_AI_MONTHLY_LIMIT; billable API."
+            else
+              echo "AUTO_GPT=NOT_READY; GitHub Actions OPENAI_API_KEY secret missing (no paid API request)."
+            fi
+          else
+            echo "AUTO_GPT=DISABLED; GitHub variable FOKUS_AUTO_AI_ENABLED=false."
+          fi
+          echo "OFFICIAL_MACRO=FED/BEA automatic hourly watch (BLS veto independent)."
           echo "ready=true" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v5
         if: steps.preflight.outputs.ready == 'true'
