@@ -4,8 +4,8 @@ PAPER/DEMO research only. This is NOT a live data feed. Use only when BOTH
 official BLS endpoints reject GitHub Actions and this curated source is
 inside its explicit expiry window. Never roll expiry forward automatically.
 
-Verified against the official BLS annual calendar on 2026-11-06:
-https://www.bls.gov/schedule/2026/
+Initially verified on 2026-11-06 and rechecked on 2026-11-08 against:
+https://www.bls.gov/schedule/2026/11_sched_list.htm
 November section last modified by BLS on 2026-11-03.
 """
 from __future__ import annotations
@@ -14,12 +14,14 @@ from zoneinfo import ZoneInfo
 
 SOURCE_URL="https://www.bls.gov/schedule/2026/"
 SOURCE_LAST_MODIFIED="2026-11-03"
-RESEARCH_VERIFIED_DATE="2026-11-06"
-VALID_UNTIL_UTC=datetime(2026,11,8,0,0,tzinfo=timezone.utc)
+RESEARCH_VERIFIED_DATE="2026-11-08"
+VALID_UNTIL_UTC=datetime(2026,11,10,0,0,tzinfo=timezone.utc)
 
 # All times are from official BLS schedule, in US/Eastern local time.
 # No fabricated dates; all entries for November 2026 verified on the
-# published annual schedule. Include enough events to assess blackout.
+# published November schedule (rechecked 2026-11-08). This is a temporary
+# emergency snapshot through Monday only, NOT a live calendar.
+# Include enough events to assess blackout.
 _RELEASES=(
     (6,8,30,"Employment Situation for October 2026"),
     (10,8,30,"Consumer Price Index for October 2026"),
