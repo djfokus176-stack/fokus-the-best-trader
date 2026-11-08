@@ -71,3 +71,8 @@ jobs:
         run: python -m trader.worker --once --tf MINUTE
         # Strategy is resolved from FOKUS_PAPER_STRATEGY by worker argparse.
         # The old hard-coded --strategy silently ignored that setting.
+      - name: Audit durable PAPER event cycle (read-only, aggregate only)
+        if: steps.preflight.outputs.ready == 'true'
+        run: python -m trader.paper_proof
+        # A green job does not mean any positions opened. Inspect
+        # OBSERVED_COMPLETE_PAPER_CYCLE vs NOT_PROVEN in the job log.
