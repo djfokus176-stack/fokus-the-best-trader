@@ -52,7 +52,7 @@ def test_paid_gpt_wait_receives_only_official_fed_bea_dates_and_coverage_status(
     assert calendar["source_status"]["BEA"]=="UNAVAILABLE"
     assert len(calendar["events_next_14_days"])==2
     assert "MALICIOUS" not in str(calendar)
-    assert "kalendarz" in calls[0]["instructions"].lower()
+    assert "official_macro_calendar" in calls[0]["instructions"]
     assert calls[0]["model"]=="gpt-5.4-mini"
 
 
