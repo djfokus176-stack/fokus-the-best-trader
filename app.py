@@ -36,6 +36,8 @@ from trader.paper_lifecycle import (
 from trader.paper_display import annotate_open_paper,annotate_paper_history
 from trader.paper_sounds import new_paper_events,wav_notice,SOUND_EVENTS,alert_audio
 from trader.paper_reporting import daily_weekly,performance_by_policy
+from trader.paper_learning import strategy_scorecard
+from trader.forecast_audit import forecast_metrics
 from trader.remote_checkpoint import RemoteCheckpoint,remote_view_db,RemoteError,dump_state
 from trader.telegram_alerts import dispatch_alerts, record_stale_event
 from trader.auth import (capital_credentials, active_credential, test_capital_login,
@@ -193,6 +195,8 @@ def paper_view_db():
         st.session_state['_paper_remote_auto_ai']=payload.get('auto_ai') or {}
         st.session_state['_paper_remote_candidates']=payload.get('candidate_feed') or []
         st.session_state['_paper_remote_news']=payload.get('news_radar') or {}
+        st.session_state['_paper_remote_forecasts']=payload.get('forecast_research') or {}
+        st.session_state['_paper_remote_learning']=payload.get('learning_report') or {}
         return db
     return connect()
 
@@ -1567,6 +1571,48 @@ with reports_tab:
                 st.caption('Lokalna historia PAPER v3; w Streamlit Cloud może zniknąć podczas redeploy.')
             all_positions=[p for p in recent_positions(paper_db,200)
                 if p['source']=='Capital.com DEMO REST' and p['epic']==instrument]
+            # Self-updating SHADOW learning: derived only from CLOSED v3 records.
+            # Never retune production thresholds from this small biased sample.
+            with st.expander('🧠 UCZENIE NA BŁĘDACH — WYNIKI STRATEGII (SHADOW)',expanded=True):
+                ranking=strategy_scorecard(paper_db,epic=instrument)
+                st.caption('Każda transakcja policzona raz po zamknięciu. Train/holdout 70/30, '
+                           'oddzielnie FIXED/ADAPTIVE. To nie dowód przewagi ani automatyczna zmiana decyzji.')
+                if ranking['strategies']:
+                    rows=[]
+                    for row in ranking['strategies']:
+                        rows.append({
+                            'Strategia':row['strategy'],'Wyjście':row['exit_policy'],
+                            'Zamknięte':row['total'],
+                            'Train suma pkt':row['train']['sum_pts'],
+                            'Holdout n':row['holdout']['n'],
+                            'Holdout suma pkt':row['holdout']['sum_pts'],
+                            'Holdout średnio pkt':row['holdout']['mean_pts'],
+                            'Dolna granica trafień 95%':row['holdout']['win_rate_lower95_pct'],
+                            'Ocena':row['shadow_priority']})
+                    st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True)
+                    if ranking['closed_positions']<100:
+                        st.warning('Wciąż mała próba. Do wstępnej selekcji potrzebujemy '
+                                   'co najmniej 100 zamkniętych PAPER na strategię/politykę.')
+                else:
+                    st.info('Brak zakończonych PAPER v3 — bot nie ma z czego się uczyć.')
+            if remote_paper_view_enabled():
+                with st.expander('🔮 PROGNOZA CENY NASTĘPNEJ ŚWIECY — KONTROLA BŁĘDÓW (SHADOW)',expanded=True):
+                    forecasts=st.session_state.get('_paper_remote_forecasts') or {}
+                    metrics=forecast_metrics(forecasts)
+                    st.write('Status:',metrics['status'], '| Ocenione:',metrics['observations'],
+                             '| Model:',metrics['model'])
+                    st.caption('MAE '+str(metrics['mae'])+
+                               ' pkt vs naiwny brak zmiany: '+str(metrics['baseline_mae'])+
+                               ' pkt; kierunek trafiony '+str(metrics['direction_accuracy_pct'])+
+                               '%. Brak gwarantowanej pewności i brak wpływu na PAPER.')
+                    pending=forecasts.get('pending')
+                    if pending:
+                        st.info('Prognoza SHADOW utworzona na zamkniętej świecy '+
+                            str(pending.get('at_utc'))+'; cena następnego zamknięcia: '+
+                            str(pending.get('predicted'))+' (tylko badanie).')
+                    if not metrics['observations']:
+                        st.warning('Brak rozliczonych kolejnych świec; to NIE jest '
+                                   'potwierdzona prognoza.')
             days,weeks,summary=daily_weekly(paper_db,epic=instrument)
             x1,x2,x3,x4=st.columns(4)
             x1.metric('Zamknięte PAPER v3',summary['liczba'])
