@@ -52,5 +52,5 @@ def test_ui_has_explicit_secret_only_test_and_no_false_saved_label():
     assert "TESTUJ ZAPISANE SECRETS (BEZ WPISYWANIA)" in app
     assert "drop_capital_session_overrides(existing)" in app
     assert "saved_api,saved_login,saved_password=capital_credentials(secret,{})" in app
-    assert "to NIE jest zamknięty rynek (CLOSED)" in app
+    assert "To NIE jest zamknięty rynek (CLOSED)" in app
     assert "KLUCZE API — TESTY / ZMIANY (już zapisane w Secrets)" not in app
