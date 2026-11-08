@@ -400,8 +400,9 @@ with st.sidebar:
     sources=capital_credential_sources(secret,overrides)
     st.caption('Źródło danych Capital.com (bez wartości): '+
         ' | '.join(name.replace('CAPITAL_','')+'='+where for name,where in sources.items()))
-    if not capital_client_matches(st.session_state.get('_capital_client'),
-                                  cap_api_key,cap_identifier,cap_password,capital_env):
+    if (st.session_state.get('_capital_client') is not None and
+            not capital_client_matches(st.session_state.get('_capital_client'),
+                                       cap_api_key,cap_identifier,cap_password,capital_env)):
         # Reboot or changed Secrets/temporary overrides must not reuse a stale API session.
         for key in ('_capital_client','market_snap','ai_context','source_override',
                     'initial_scan_attempted','last_feed_error','epic_matches'):
