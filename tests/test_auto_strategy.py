@@ -82,8 +82,10 @@ def test_counts_one_of_two_then_two_of_three_and_unchanged_conflict_veto(monkeyp
     veto = {1}
     def rule(frame,name,spread):
         i = auto_strategy.ALL_STRATEGIES.index(name)
-        return (Decision("LONG",name,"controlled",100,98,103,2)
-                if sides[i]=="LONG" else Decision("WAIT",name,"none"))
+        return (Decision(sides[i],name,"controlled",100,
+                         98 if sides[i]=="LONG" else 102,
+                         103 if sides[i]=="LONG" else 97,2)
+                if sides[i] in ("LONG","SHORT") else Decision("WAIT",name,"none"))
     def screen(d,snaps,asof):
         i = auto_strategy.ALL_STRATEGIES.index(d.strategy)
         return (Decision("WAIT",d.strategy,"MTF veto"),[]) if i in veto else (d,[])
