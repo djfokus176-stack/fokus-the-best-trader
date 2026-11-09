@@ -173,12 +173,12 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
     job that crashes after sending but before checkpointing).
     """
     version,payload=remote.fetch()
+    browser_clock_override=(clock_confirmed_open is not None)
     if clock_confirmed_open is None:
-        # Original GitHub/foreground mode remains unchanged.
+        # Existing CLI/GitHub path keeps its original gate and metadata.
         clock_confirmed_open=(os.getenv("FOKUS_CANDLE_TIME_CONFIRMED","").strip().lower()=="open")
-    if not clock_confirmed_open:
-        # For explicit dashboard mode, even an accidental caller default
-        # cannot create new PENDING from an unverified candle clock.
+    if browser_clock_override and not clock_confirmed_open:
+        # Fail closed for the new owner-dashboard entry point only.
         enable_setups=False
     auto_state=payload.get("auto_ai",{})
     candidates=payload.get("candidate_feed",[])
