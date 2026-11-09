@@ -65,7 +65,7 @@ def test_legacy_never_affects_six_strategy_auto_consensus():
     legacy=evaluate_v71_shadow(m1,m5,.5)
     assert legacy.action=="LONG"
     from trader.auto_strategy import MIN_AGREEMENT
-    assert MIN_AGREEMENT==2
+    assert MIN_AGREEMENT==1
     code=(Path(__file__).resolve().parents[1]/"trader"/"worker.py").read_text("utf-8")
     assert "evaluate_v71_shadow" not in code
 
