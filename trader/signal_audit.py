@@ -78,7 +78,9 @@ def audit_recent_closed_bars(frame: pd.DataFrame, snapshots: dict, *,
     mtf_matching = bool(
         anchor is not None and getattr(anchor, "resolution", None)=="MINUTE"
         and getattr(anchor,"good",False)
-        and len(anchor.frame)>0 and anchor.frame.index[-1]==frame.index[-1])
+        and len(anchor.frame)>0 and frame.index[-1] in anchor.frame.index
+        and frame.index[-1] <= anchor.frame.index[-1]
+        and float(frame.Close.iloc[-1]) == float(anchor.frame.loc[frame.index[-1],"Close"]))
     if mtf_matching:
         mtf_matching = all(
             tf in snapshots and getattr(snapshots[tf],"good",False)
