@@ -60,6 +60,14 @@ def evaluate_timeframes(snapshots: dict, now=None, asof=None) -> tuple[list[TFVi
             ready, reason = False, "Niezgodny instrument, interwał lub źródło"
         # Future bars in a fetched HTF series are never included in calculations.
         frame = sn.frame.loc[sn.frame.index <= pd.Timestamp(anchor_time)]
+        # For historical asof the latest usable HTF candle is NOT the
+        # newest candle in the fetched snapshot. Reject gaps and never
+        # reuse a stale historical trend as if it were contemporaneous.
+        actual_closed = frame.index[-1] if len(frame) else None
+        if actual_closed is not None:
+            lag_seconds=(pd.Timestamp(anchor_time)-actual_closed).total_seconds()
+            if lag_seconds<0 or lag_seconds>=PERIOD[tf]:
+                ready,reason=False,"Brak współczesnej zamkniętej świecy "+LABELS[tf]
         if len(frame) < 70:
             ready, reason = False, "Za mało potwierdzonych świec"
         trend = trend_from_closed(frame)
@@ -69,7 +77,7 @@ def evaluate_timeframes(snapshots: dict, now=None, asof=None) -> tuple[list[TFVi
         rows.append(TFView(tf, trend, float(last.Close) if last is not None else None,
             round(float(last.ATR), 3) if last is not None else None,
             round(float(last.RSI), 2) if last is not None else None,
-            bool(ready), reason, sn.confirmed_utc))
+            bool(ready), reason, actual_closed))
     if not all(r.ready for r in rows):
         return rows, "WAIT"
     ups = sum(r.trend == "UP" for r in rows[1:])
