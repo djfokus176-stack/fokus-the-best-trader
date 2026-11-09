@@ -112,10 +112,13 @@ def timeframe_refresh_needed(snapshot, timeframe: str, *, elapsed: float,
     """
     if timeframe not in PERIOD:
         raise ValueError("Nieznany interwał MTF")
-    if snapshot is None:
-        return True
+    # A missing snapshot is not permission to hammer Capital.com after
+    # HTTP 429/network errors. The UI records the time of *every attempt*.
+    # A genuinely never-attempted TF is passed elapsed=inf for immediate boot.
     if elapsed < retry_after:
         return False
+    if snapshot is None:
+        return True
     if elapsed >= max(60,PERIOD[timeframe])-2:
         return True
     if not getattr(snapshot,"good",False):
