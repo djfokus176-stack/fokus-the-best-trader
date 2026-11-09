@@ -15,6 +15,7 @@ from trader.strategy import indicators, backtest
 from trader.strategies_pro import decide_any, ALL_STRATEGIES
 from trader.ema50_wave import STRATEGY_NAME as WAVE_NAME
 from trader.auto_strategy import AUTO_MODE, evaluate_auto, vote_summary
+from trader.signal_audit import audit_recent_closed_bars
 from trader.legacy_v71_shadow import (evaluate_v71_shadow, LEGACY_V71_LABEL,
                                      SENSITIVITIES as LEGACY_V71_SENSITIVITIES)
 from trader.mtf import TIMEFRAMES, LABELS, evaluate_timeframes, filter_mtf_decision
@@ -1569,6 +1570,88 @@ with strategies_tab:
         st.dataframe(pd.DataFrame(all_rows),hide_index=True,use_container_width=True)
         st.info('Jednoczesne różne sygnały NIE oznaczają, że należy je sumować. Każda strategia wymaga oddzielnego, rozliczonego testu.')
 
+        with st.expander('🔍 DLACZEGO BRAK LONG/SHORT? — AUDYT OSTATNICH ŚWIEC M1',
+                         expanded=False):
+            st.caption('Prześwietlenie historycznych ZAMKNIĘTYCH M1: każda z 6 strategii '
+                       'oceniana na każdej świecy z ówcześnie dostępnymi danymi. '
+                       'GŁOSY 0/0 = brak układu po filtrach ryzyka PRZED MTF, '
+                       'nie dowód, że MTF nie działa. To nie są faktyczne pozycje.')
+            if tf != 'MINUTE':
+                st.warning('Wybierz M1, aby porównywać tę samą częstotliwość scalpingu.')
+            elif len(snap.frame) < 85:
+                st.warning('Brakuje minimum 85 świec do odtworzenia historycznych sygnałów.')
+            else:
+                # Selecting historical candle allows a direct review of 20:50 UTC
+                # after more live bars arrive, without future candles in decisions.
+                choices=list(reversed(snap.frame.index[84:]))
+                selected_end=st.selectbox(
+                    'Świeca końcowa audytu (czas ZAMKNIĘCIA UTC)',
+                    choices,index=0,format_func=lambda x:x.strftime('%Y-%m-%d %H:%M UTC'),
+                    key='signal_audit_end_m1')
+                audit_count=st.select_slider(
+                    'Liczba świec do prześwietlenia',
+                    options=[5,10,12,20,30,40],value=20,
+                    key='signal_audit_window')
+                run_audit=st.button('🔎 SPRAWDŹ KAŻDĄ ŚWIECĘ I POWODY WAIT',
+                                    key='run_causal_signal_audit')
+                cache=st.session_state.get('_causal_signal_audit')
+                if run_audit:
+                    try:
+                        upto=snap.frame.loc[:selected_end]
+                        audit_timeline,audit_detail,audit_summary=audit_recent_closed_bars(
+                            upto,st.session_state.get('mtf_snapshots',{}),
+                            lookback=audit_count)
+                        cache={'end':selected_end,'count':audit_count,
+                               'timeline':audit_timeline,'details':audit_detail,
+                               'summary':audit_summary,
+                               'source':str(snap.source)}
+                        st.session_state['_causal_signal_audit']=cache
+                    except (ValueError,TypeError,KeyError) as exc:
+                        st.error('Nie mogę uczciwie odtworzyć tych świec: '+str(exc))
+                        st.session_state.pop('_causal_signal_audit',None)
+                        cache=None
+                if cache is not None:
+                    if (cache.get('end')!=selected_end or
+                        cache.get('count')!=audit_count or
+                        cache.get('source')!=str(snap.source)):
+                        st.info('Zmieniono koniec audytu lub zakres — kliknij ponownie SPRAWDŹ.')
+                    else:
+                        summary=cache['summary']
+                        st.info(f"Świece przeanalizowane: {summary['analysed_bars']} | "
+                                f"potwierdzone MTF: {summary['fully_ready_mtf']} | "
+                                f"hipotezy LONG: {summary['historical_long_candidates']} | "
+                                f"hipotezy SHORT: {summary['historical_short_candidates']}.")
+                        st.caption('To REKONSTRUKCJA sygnałów z aktualnej historii, '
+                                   'nie rzeczywiste otwarcia: nie odtwarza starego '
+                                   'kalendarza makro, działania workera ani '
+                                   'cen wykonania. Nie sumuj hipotetycznych '
+                                   'sygnałów jako zysku.')
+                        timeline=cache['timeline']
+                        st.dataframe(timeline.iloc[::-1],use_container_width=True,
+                                     hide_index=True)
+                        details=cache['details']
+                        if not details.empty:
+                            st.markdown('**Co zatrzymywało poszczególne strategie?**')
+                            st.dataframe(details.groupby(['Strategia','Etap']).size()
+                                         .rename('Liczba świec').reset_index()
+                                         .sort_values(['Strategia','Liczba świec'],
+                                                      ascending=[True,False]),
+                                         use_container_width=True,hide_index=True)
+                            detail_candle=st.selectbox(
+                                'Pełne 6 powodów dla konkretnej świecy',
+                                list(reversed(details['Świeca UTC'].unique().tolist())),
+                                key='signal_audit_detail_candle')
+                            st.dataframe(details[details['Świeca UTC']==detail_candle],
+                                         use_container_width=True,hide_index=True)
+                            st.download_button('⬇️ POBIERZ DOKŁADNE POWODY WAIT (CSV)',
+                                data=details.to_csv(index=False).encode('utf-8-sig'),
+                                file_name='FOKUS_audyt_6_strategii_M1.csv',
+                                mime='text/csv',key='download_signal_audit_csv')
+                            st.caption('Jeśli wiersz pokazuje OPÓR / WSPARCIE, '
+                                       'to formacja mogła istnieć, ale strategia '
+                                       'odrzuciła ryzyko jeszcze PRZED MTF.')
+
+
         st.markdown('#### 🔬 METODA ZE STAREGO SYSTEMU v7.1 — LEGACY SHADOW')
         st.caption('SP500 SIGNAL AI PRO v7.1 (sp500-kolega-gemini): '
                    'odtworzone WARUNKI WEJŚCIA M1 (formacja + EMA + RSI + zamknięte M5). '
@@ -1627,7 +1710,7 @@ with strategies_tab:
                 {'Strategia':'VOLATILITY BREAKOUT','Warunki':'Wcześniejsza kompresja zakresu i silne wybicie z konsolidacji'}
             ]),hide_index=True,use_container_width=True)
             st.caption('Każdy kandydat przechodzi koszty, RR, przeszkody oraz '
-                       'MTF. AUTO wymaga dwóch zgodnych strategii i braku konfliktu. '
+                       'MTF. AUTO PAPER może dopuścić jeden zatwierdzony sygnał po MTF, przy braku konfliktu. '
                        'To nie jest potwierdzona przewaga statystyczna.')
 
 
