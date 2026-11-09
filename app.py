@@ -18,7 +18,8 @@ from trader.auto_strategy import AUTO_MODE, evaluate_auto, vote_summary
 from trader.signal_audit import audit_recent_closed_bars
 from trader.legacy_v71_shadow import (evaluate_v71_shadow, LEGACY_V71_LABEL,
                                      SENSITIVITIES as LEGACY_V71_SENSITIVITIES)
-from trader.mtf import TIMEFRAMES, LABELS, evaluate_timeframes, filter_mtf_decision
+from trader.mtf import TIMEFRAMES, LABELS, evaluate_timeframes, filter_mtf_decision, timeframe_refresh_needed
+from trader.early_watch import evaluate_early_watch, recent_watch_markers
 from trader.research import chronological_report, rolling_oos, replay, stats
 from trader.mtf_replay import compare_mtf_on_m1_csv
 from trader.news_radar import fetch_headlines, fetch_bls_schedule, macro_blackout
@@ -272,6 +273,9 @@ with st.sidebar:
                    'wszystkich blokad i ustawieniu trybu w GitHub Actions.')
     st.toggle('🧭 Potwierdzenie M1/M5/M15/H1 (veto)',value=True,key='mtf_enabled',
         help='Bot nie pokaże nowego LONG/SHORT gdy nie ma 4 zgodnych i świeżych odczytów.')
+    st.toggle('👀 Wczesne LONG/SHORT na wykresie — OBSERWUJ (bez transakcji)',
+              value=True,key='early_watch_enabled',
+              help='Wskazania na zamkniętych M1. Puste kółka, nie strzałki PAPER. Nie otwierają transakcji ani nie omijają filtra MTF, BLS i workera.')
     st.caption('Każda strategia jest HIPOTEZĄ PAPER, nie potwierdzonym systemem zarobkowym.')
     max_spread=st.slider('Maksymalny spread (pkt)',.2,5.0,2.0,.1)
     st.toggle('🔄 AUTO-SKAN — tylko gdy aplikacja otwarta',value=_early_secret('AUTO_SCAN_DEFAULT','true').lower() in ('true','1','yes'),key='auto_scan_active',
@@ -650,7 +654,10 @@ with market_tab:
                             errors.pop(horizon,None)
                             continue
                         seconds=PERIOD[horizon]
-                        if horizon not in snapshots or stamp-due.get(horizon,0)>=max(60,seconds)-2:
+                        if timeframe_refresh_needed(
+                                snapshots.get(horizon),horizon,
+                                elapsed=stamp-due.get(horizon,0),
+                                anchor_closed=st.session_state['market_snap'].confirmed_utc):
                             try:
                                 snapshots[horizon]=client.candles(instrument,horizon,
                                     count=350,max_spread=max_spread)
@@ -889,6 +896,34 @@ with market_tab:
             if current_ready and not status_ready:
                 st.warning(f'🟡 WAIT / STATUS BROKERA: {market_status}. Bez potwierdzenia TRADEABLE brak nowych sygnałów.')
             ready=current_ready and status_ready
+            if st.session_state.get('early_watch_enabled',True) and tf=='MINUTE' and ready:
+                # WATCH is a separate read-only heuristic, never a trade arrow.
+                bias=evaluate_early_watch(snap.frame)
+                watch_points=recent_watch_markers(snap.frame,last_bars=35,limit=8)
+                for watch_side,watch_color in (('LONG','#49d5ce'),('SHORT','#ffb15c')):
+                    points=[p for p in watch_points if p['side']==watch_side]
+                    if points:
+                        fig.add_trace(go.Scatter(
+                            x=[p['time'] for p in points],
+                            y=[p['low']-.15 if watch_side=='LONG' else p['high']+.15 for p in points],
+                            mode='markers',
+                            name='👀 OBSERWUJ '+watch_side+' (NIE PAPER)',
+                            marker={'symbol':'circle-open','size':12,
+                                    'color':watch_color,
+                                    'line':{'width':2,'color':watch_color}},
+                            text=['👀 OBSERWUJ '+p['side']+' — '+p['reason']
+                                  for p in points],
+                            hovertemplate='%{x}<extra>%{text}</extra>'))
+                if bias.side in ('LONG','SHORT'):
+                    st.info('👀 **OBSERWUJ '+bias.side+'** — '+bias.reason+
+                            ' Wynik heurystyki: '+str(bias.score)+
+                            '/6. To NIE jest wejście PAPER. '
+                            'Nie uwzględnia pełnego MTF, BLS ani RR.')
+                else:
+                    st.caption('👀 Wczesny kierunek: '+bias.reason)
+                st.caption('◯ Kółko turkusowe = obserwacja LONG, pomarańczowe = SHORT. '
+                           'Tylko potwierdzone ZAMKNIĘTE świece. Kółka to nie '
+                           'strzałki wejścia; PAPER pozostaje oddzielną symulacją.')
             remote_health=st.session_state.get('_paper_remote_meta') or {}
             remote_is_on=remote_paper_view_enabled()
             worker_calendar=(worker_calendar_health(remote_health)
@@ -997,6 +1032,37 @@ with market_tab:
                         hide_index=True,use_container_width=True)
                     st.caption('Brak danych na stronie nie oznacza automatycznie, '
                         'że ostatni zdalny skan workera miał błąd MTF.')
+                    if st.button('🔄 POBIERZ PONOWNIE BRAKUJĄCE MTF (TYLKO DANE)',
+                                 key='retry_missing_mtf',
+                                 disabled=not has_cap or not st.session_state.get('mtf_enabled',False)):
+                        last_retry=st.session_state.get('_manual_mtf_retry_monotonic',0)
+                        retry_time=time.monotonic()
+                        if retry_time-last_retry<30:
+                            st.info('Próba MTF jest limitowana do jednej co 30 s (ochrona API).')
+                        elif st.session_state.get('_capital_client') is None:
+                            st.error('Brak sesji Capital.com — najpierw SKANUJ ŚWIECE.')
+                        else:
+                            st.session_state['_manual_mtf_retry_monotonic']=retry_time
+                            client=st.session_state['_capital_client']
+                            snapshots=dict(st.session_state.get('mtf_snapshots',{}))
+                            errors=dict(st.session_state.get('mtf_errors',{}))
+                            due=dict(st.session_state.get('_mtf_due',{}))
+                            for missing in (v for v in tf_views if not v.ready):
+                                horizon=missing.timeframe
+                                try:
+                                    snapshots[horizon]=(snap if horizon==tf else
+                                        client.candles(instrument,horizon,count=350,
+                                                       max_spread=max_spread))
+                                    errors.pop(horizon,None)
+                                    due[horizon]=retry_time
+                                except (FeedError,ValueError,TypeError) as exc:
+                                    snapshots.pop(horizon,None)
+                                    errors[horizon]=str(exc)[:200]
+                            st.session_state['mtf_snapshots']=snapshots
+                            st.session_state['mtf_errors']=errors
+                            st.session_state['_mtf_due']=due
+                            st.rerun()
+                    st.caption('Odnawianie danych nie obchodzi MTF. Brak interwału nadal daje WAIT.')
                 if health.get('historical_worker_flags'):
                     st.info('📜 Ostatni zarejestrowany skan workera (HISTORYCZNY): '+
                         ', '.join(health['historical_worker_flags'])+

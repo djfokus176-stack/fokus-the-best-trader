@@ -103,6 +103,34 @@ def filter_mtf_decision(decision: Decision, snapshots: dict, now=None, asof=None
     return decision, rows
 
 
+def timeframe_refresh_needed(snapshot, timeframe: str, *, elapsed: float,
+                             anchor_closed=None, retry_after: float=58.) -> bool:
+    """Refresh cached HTF when a newer CLOSED interval is due or data failed.
+
+    Bounded by retry_after seconds to avoid retry storms / Capital.com 429.
+    Never turns a stale HTF into an accepted MTF result by itself.
+    """
+    if timeframe not in PERIOD:
+        raise ValueError("Nieznany interwał MTF")
+    if snapshot is None:
+        return True
+    if elapsed < retry_after:
+        return False
+    if elapsed >= max(60,PERIOD[timeframe])-2:
+        return True
+    if not getattr(snapshot,"good",False):
+        return True
+    if anchor_closed is None or getattr(snapshot,"confirmed_utc",None) is None:
+        return True
+    try:
+        lag=(pd.Timestamp(anchor_closed)-pd.Timestamp(snapshot.confirmed_utc)).total_seconds()
+    except (TypeError,ValueError):
+        return True
+    if lag < 0 or lag >= PERIOD[timeframe]:
+        return True
+    return not current_feed_status(snapshot,snapshot.source)[0]
+
+
 def fetch_all_timeframes(client, epic: str, max_spread: float=2.0, count: int=250):
     """Four read-only candle queries; explicit per-timeframe error reporting."""
     from .market import FeedError
