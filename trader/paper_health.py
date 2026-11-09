@@ -32,6 +32,19 @@ def worker_calendar_health(meta, now=None):
         return {"ok":False,"source":"BRAK","expires":None,
                 "reason":"Brak świeżego checkpointu workera (maksymalnie 15 minut)."}
     summary=str((meta or {}).get("last_scan_summary") or "")
+    if re.search(r"(?:^|[ /])NO_FEED(?:[ /]|$)",summary):
+        # Feed retrieval stopped the worker BEFORE the BLS test. It is not
+        # evidence that BLS failed, nor grounds to mark calendar safe.
+        excerpt=summary.split("NO_FEED",1)[-1].strip(" /")[:190]
+        return {"ok":False,"source":"NOT_CHECKED","expires":None,
+                "reason":"Worker nie pobrał świec M1 (NO_FEED), więc NIE sprawdził BLS."+
+                         (" Szczegóły: "+excerpt if excerpt else "")}
+    if re.search(r"(?:^|[ /])DATA_STALE(?:[ /]|$)",summary):
+        return {"ok":False,"source":"NOT_CHECKED","expires":None,
+                "reason":"Dane workera były nieaktualne (DATA_STALE); skan zakończył się przed kontrolą BLS."}
+    if re.search(r"(?:^|[ /])MARKET_CLOSED(?:[ /]|$)",summary):
+        return {"ok":False,"source":"NOT_CHECKED","expires":None,
+                "reason":"Rynek był zamknięty w ostatnim skanie workera; BLS nie został oceniony."}
     if not re.search(r"(?:^|[ /])GATES=OK(?:[ /]|$)",summary):
         return {"ok":False,"source":"BRAK","expires":None,
                 "reason":"Ostatni skan workera nie potwierdza GATES=OK."}

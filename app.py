@@ -922,6 +922,35 @@ with market_tab:
                         st.write('• '+obstacle)
                 st.dataframe(pd.DataFrame(health['checks']),
                     hide_index=True,use_container_width=True)
+                if remote_is_on:
+                    worker_summary=str(remote_health.get('last_scan_summary') or '')
+                    if ' / NO_FEED / ' in worker_summary:
+                        st.error('🔍 PRZYCZYNA: ostatni skan workera NIE pobrał świec M1 '
+                                 '(NO_FEED), dlatego nie doszedł do kontroli BLS. '
+                                 'To nie oznacza, że BLS jest błędny.')
+                        st.code(worker_summary[:350],language=None)
+                        if 'HTTP 429' in worker_summary:
+                            st.warning('HTTP 429: limit zapytań Capital.com. '
+                                       'Wyłącz inne równoległe skanery i sprawdź ponownie '
+                                       'po ustaniu limitu. Nie zmieniaj zegara ani bramek.')
+                        elif 'HTTP 401' in worker_summary or 'HTTP 403' in worker_summary:
+                            st.warning('HTTP 401/403: osobna sesja workera nie zalogowała '
+                                       'się prawidłowo do Capital.com DEMO. '
+                                       'Sprawdź źródło zapisanych Secrets i status '
+                                       'logowania w panelu.')
+                        elif 'HTTP 404' in worker_summary:
+                            st.warning('HTTP 404: sprawdź EPIC instrumentu używany '
+                                       'przez workera. Nie zmieniaj go na ślepo.')
+                        else:
+                            st.info('Pełny komunikat z workera jest wyżej. '
+                                    'Bez konkretnego błędu M1 nie da się wskazać '
+                                    'przyczyny połączenia z brokerem.')
+                    elif ' / DATA_STALE / ' in worker_summary:
+                        st.warning('Ostatni worker miał nieaktualne dane świec. '
+                                   'Nie doszedł do kontroli BLS.')
+                    elif ' / MARKET_CLOSED / ' in worker_summary:
+                        st.info('Ostatni worker widział zamknięty rynek. '
+                                'Nie oceniał wówczas kalendarza BLS.')
                 st.caption('ℹ️ Zegar/worker: ostatni zapis Supabase; '
                            'MTF/rynek: bieżąca sesja Streamlit. '
                            'Kalendarz: w trybie REMOTE z ostatniego zapisu workera, '
