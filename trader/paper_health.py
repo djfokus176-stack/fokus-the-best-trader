@@ -48,7 +48,7 @@ def worker_calendar_health(meta, now=None):
     if not re.search(r"(?:^|[ /])GATES=OK(?:[ /]|$)",summary):
         return {"ok":False,"source":"BRAK","expires":None,
                 "reason":"Ostatni skan workera nie potwierdza GATES=OK."}
-    match=re.search(r"MACRO_SOURCE=(BLS_OFFICIAL_LIVE|BLS_VERIFIED_SNAPSHOT_NOT_LIVE)(?:[ /;]|$)",
+    match=re.search(r"MACRO_SOURCE=(BLS_OFFICIAL_LIVE|BLS_VERIFIED_SNAPSHOT_NOT_LIVE|BLS_VERIFIED_MANUAL_NOT_LIVE)(?:[ /;]|$)",
                     summary)
     if not match:
         return {"ok":False,"source":"BRAK","expires":None,
