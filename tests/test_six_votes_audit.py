@@ -37,7 +37,8 @@ def test_vote_audit_persists_all_six_without_unlocking_wait(monkeypatch):
     tf=[SimpleNamespace(timeframe=n,ready=True,trend="DOWN",
           reason="OK",candle_utc=now) for n in ("MINUTE","MINUTE_5","MINUTE_15","HOUR")]
     snapshot=SimpleNamespace(good=False,confirmed_utc=now,epic="US500",
-                             source="Capital.com DEMO REST",resolution="MINUTE")
+                             source="Capital.com DEMO REST",resolution="MINUTE",
+                             frame=pd.DataFrame())
     decision=SimpleNamespace(action="WAIT",strategy=AUTO_MODE,reason="0/2")
     def fake_scan(client,epic,tfname,strategy,max_spread,db,*,reviewer,**kwargs):
         calls.append((epic,strategy,kwargs.get("strict_macro")))
