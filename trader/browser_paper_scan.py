@@ -49,6 +49,18 @@ def run_browser_paper_scan(*, cloud_url, cloud_key, api_key, identifier,
     remote=remote_cls(cloud_url,cloud_key)
     _,previous=remote.fetch()
     meta=previous.get("meta") or {}
+    # Avoid launching two writers against the same checkpoint in normal use.
+    # Supabase compare-and-swap remains the final concurrency safeguard.
+    try:
+        prior_stamp=datetime.fromisoformat(str(meta.get("last_scan_utc","")))
+        age=(datetime.now(timezone.utc)-prior_stamp).total_seconds()
+        if prior_stamp.tzinfo is not None and 0 <= age < 50:
+            return {"saved":False,"result":"SKIP / ostatni worker zapisal dane mniej niz 50 sekund temu",
+                    "clock_verified":bool(meta.get("clock_confirmed_open")),
+                    "entry_gates_open":False,
+                    "scanned_utc":datetime.now(timezone.utc).isoformat()}
+    except (TypeError,ValueError,OverflowError):
+        pass
     clock=confirmed_clock_for_browser(clock_secret,meta,epic=epic)
     client=client_cls(api_key,identifier,password,environment="DEMO")
     result=scanner(remote,client,epic,"MINUTE",AUTO_MODE,max_spread,
