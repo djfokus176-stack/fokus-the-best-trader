@@ -1,3 +1,53 @@
+## ✅ AKTUALNY STAN — 9/10 LISTOPADA 2026 (PAPER DEMO, bez zleceń brokerskich)
+
+**Źródłem prawdy jest `main`, nie archiwalne opisy v0.1/v3 niżej.**
+Ostatni audyt kodu: 392 testy na Pythonie 3.11 i 3.12 po #43.
+
+- **AUTO — 6 STRATEGII:** eksperymentalnie wystarcza 1 pełny sygnał po MTF
+  przy zerowym konflikcie LONG/SHORT i wszystkich obowiązkowych bramkach.
+  Nowy dobór metody (#43) rozpoznaje reżim rynku (trend, konsolidacja,
+  kompresja, ekspansja, sweep/BOS), ale może wybrać TYLKO metodę, która
+  już wyprodukowała poprawny setup. Wiele opcji: najpierw dopasowanie
+  reżimu, następnie RR. Brak poprawnego setupu = WAIT.
+- **Obserwacje na wykresie:** `OBSERWUJ LONG/SHORT` to wczesne,
+  wyraźnie oddzielone hipotezy; NIE są wejściami PAPER ani brokerowymi.
+- **Wybór nie jest wyuczony z zysków.** Ranking historycznych pozycji
+  PAPER jest badawczy i ocenia tylko strategie faktycznie wybrane przez
+  bot. Nie stanowi bezstronnego porównania wszystkich sześciu metod;
+  nie ma potwierdzonej skuteczności i nie wolno jej wymyślać.
+- **PAPER:** stany PENDING → OPEN → CLOSED* są zaimplementowane
+  i testowane; ale nie potwierdzono ciągłego rzeczywistego cyklu
+  na koncie użytkownika z pełnym dziennikiem wykonania.
+- **Praca cykliczna:** GitHub Actions około co 5 min (best-effort,
+  opt-in), skan w otwartej przeglądarce ~1 min, lokalny lub
+  dedykowany host może uruchamiać pętlę ~65 s. **Bez
+  działającego workera nie ma autonomicznego 24/7 M1.**
+  Nie uruchamiaj jednocześnie dwóch niezależnych workerów.
+- **Kalendarz BLS:** oficjalny odczyt, potem awaryjne sprawdzone
+  źródło `data/macro_calendar_manual.json` gdy BLS zwraca HTTP 403;
+  ręczna zweryfikowana kopia ważna tylko do
+  **2026-11-16T20:00:00+00:00**. Po wygaśnięciu i braku oficjalnego
+  odczytu nowe PAPER zostaje zablokowane. FED/BEA to dodatkowy
+  **radar informacyjny**, a nie kompletny filtr veto FOMC/PCE.
+- **Telegram CLOUD:** zdalne alerty nadal nie są gwarantowane /
+  są wyłączone z powodu atomowej deduplikacji przy awarii.
+  Opcjonalna analiza GPT jest komentarzem, nie sygnałem wejścia.
+
+### Jutro: minimalna kontrola bez zmiany progów
+
+1. W Streamlit wybierz DEMO, US500, M1 i `AUTO — 6 STRATEGII`.
+   W sekcji STRATEGIE sprawdź
+   `AUTO — SAM DOBIERAM METODĘ DO WARUNKÓW RYNKU`.
+2. Sprawdź świeże M1/M5/M15/H1 oraz status TRADEABLE, potem
+   `GATES=OK` w ostatnim SKANIE WORKERA (to osobny system od strony).
+3. Jeśli `WAIT`, zobacz głosy `0/0`, `1/2`, `2/3`, powód
+   i historyczny audyt ostatnich 20–40 zamkniętych M1.
+4. W RAPORTY zweryfikuj `QUEUE`, `PENDING`, `OPEN`, `CLOSED_*`
+   i rzeczywiste punkty **po modelowanych kosztach**.
+5. Przed 16.11 ponownie zweryfikuj kalendarz BLS. Nie ustawiaj
+   żadnej bramki na zielono ręcznie tylko po to, aby uruchomić LONG.
+
+---
 ## ✅ AKTYWACJA 8.11.2026 — AUTO GPT + FED/BEA + PAPER (tylko DEMO)
 
 Właściciel zlecił aktywację automatycznych analiz GPT oraz radaru FED/BEA. 
@@ -55,16 +105,18 @@ tych samych zamkniętych świecach co wykres ocenia niezależnie:
 DRUGA FALA, EMA TREND, LIQUIDITY SWEEP, BREAKOUT RETEST,
 EMA PULLBACK i VOLATILITY BREAKOUT.
 
-**Deterministyczny filtr badawczy:** przynajmniej **2 zgodne**
-setupy LONG lub SHORT, brak choćby jednego przeciwnego surowego
-setupu oraz obowiązkowe w AUTO aktualne potwierdzenie M1/M5/M15/H1.
-Brak tych warunków → **WAIT**, a tabela pokazuje wszystkie
-6 ocen i powody. Gdy kilka zgodnych strategii pozostanie, wybór
-kandydata jest deterministyczny po deklarowanym RR (nie po
-zweryfikowanej przewadze). To nie model ML, nie samouczenie, nie
-prawdopodobieństwo wygranej ani automatyczne zlecenie brokerskie.
+**Deterministyczny filtr badawczy:** co najmniej **1 sygnał**
+LONG lub SHORT zatwierdzony po MTF, brak choćby jednego przeciwnego
+surowego setupu i wszystkie aktualne M1/M5/M15/H1 oraz pozostałe bramki.
+Brak tych warunków → **WAIT**, a tabela pokazuje sześć ocen i powody.
+Gdy kilka zgodnych strategii pozostanie, bot wybiera deterministycznie
+metodę najlepiej pasującą do aktualnego reżimu MARKET DNA,
+a przy równym dopasowaniu po deklarowanym RR. To nie model ML,
+nie udowodnione samouczenie, nie prawdopodobieństwo wygranej ani
+automatyczne zlecenie brokerskie.
 
-AUTO-SKAN **co 300 sekund (5 minut)**, wyłącznie przy otwartej
+AUTO-SKAN interfejsu (zwykle około **60 sekund** dla zamkniętych M1;
+szybsza cena LIVE co 5 s), wyłącznie przy otwartej
 sesji przeglądarki Streamlit; historyczne strzałki AUTO są
 przeliczeniem OHLC **bez pełnego historycznego MTF/makro** i nie
 są rozliczonymi pozycjami. Osobny worker GitHub Actions też ma
@@ -89,12 +141,12 @@ z chmury i zapisem po skanie, opcjonalny podgląd remote w Streamlit,
 opcjonalny workflow GitHub Actions co około 5 minut oraz przycisk
 diagnostyki czasu świec Capital.com.
 
-**Żaden z tych komponentów nie jest jeszcze podłączony do działającej,
-dedykowanej bazy projektu ani nie jest uruchomiony z rzeczywistymi
-kluczami użytkownika.** GitHub Actions jest domyślnie wyłączony zmienną
-`FOKUS_PAPER_WORKER_ENABLED`. Bez niej ani bez wymaganych Secrets
-nie uruchamia skanów. Zegar 5-minutowy GitHub Actions jest best-effort,
-nie jest usługą 24/7 co minutę.
+**Ten opis pochodzi z początkowego wdrożenia.** W obecnych logach
+potwierdzono poprawne zapisy checkpointu do Supabase, ale brak
+gwarancji, że worker jest włączony nieprzerwanie. Stan Secrets
+i bieżącego workera trzeba odczytać w działającym środowisku.
+GitHub Actions wymaga `FOKUS_PAPER_WORKER_ENABLED=true` i Secrets;
+zegar 5-minutowy jest best-effort, nie jest usługą 24/7 co minutę.
 
 **Instrukcja jednorazowego uruchomienia:**
 [dokumentacja/PAPER_V4_SETUP.md](dokumentacja/PAPER_V4_SETUP.md)
@@ -133,11 +185,12 @@ Alerty są wyłączone domyślnie. Deduplikacja ogranicza próby wysyłki do
 jednej na event_id, ale może utracić wiadomość przy błędzie sieci.
 
 **Pełny opis i ograniczenia:** [dokumentacja/PAPER_V3_LIFECYCLE.md](dokumentacja/PAPER_V3_LIFECYCLE.md).
-Nie istnieje jeszcze serwer 24/7 ani zewnętrzna trwała baza.
-**Worker jest już przełączony na PAPER v3**, ale działa tylko wtedy, gdy go
-ręcznie uruchomisz (np. `python -m trader.worker --once`). Nie ma wspólnej
-bazy pomiędzy oddzielnymi serwerami Streamlit i workera. Lokalne SQLite
-w Community Cloud może zniknąć po restarcie lub wdrożeniu.
+**Powyższe historyczne ograniczenie dotyczyło etapu lokalnego SQLite.**
+Aktualnie obsługiwany jest osobny trwały checkpoint Supabase, pod
+warunkiem że użytkownik rzeczywiście podał prywatne Secrets.
+GitHub cron nadal nie gwarantuje pracy 24/7; dedykowany
+`trader.worker_service` może działać bez otwartej przeglądarki na
+osobnym hoście. Nie uruchamiaj równoległych writerów.
 Konwencja `snapshotTimeUTC` (czas OPEN czy CLOSE świecy) pozostaje
 niepotwierdzona na rzeczywistym feedzie użytkownika.
 
@@ -266,7 +319,7 @@ wersji bibliotek. Zmiana w `trader/chart_tracker.py` zastępuje
 - **NIE POTWIERDZONO:** pełnego działania z prawdziwymi kluczami Capital.com / OpenAI, poprawności historycznych statystyk na realnym rynku, stałej pracy 24/7 i wydajności w Streamlit Cloud.
 
 
-## Co rzeczywiście jest w v0.1
+## Archiwum: co rzeczywiście było w v0.1 (NIE bieżący stan)
 
 - Streamlit + Plotly: świece M1/M5/M15/H1 i EMA9/21/50 z danych Capital.com DEMO REST (wymagają osobnych API), albo edukacyjny import CSV.
 - Deterministyczne strategie badawcze `DRUGA FALA` i `EMA TREND`: LONG/SHORT/WAIT, geometria SL/TP, filtr spreadu, ATR, wsparcia/oporu.
@@ -275,7 +328,7 @@ wersji bibliotek. Zmiana w `trader/chart_tracker.py` zastępuje
 - Opcjonalny asystent OpenAI objaśnia **te same numeryczne OHLC**, które widzisz na wykresie (to NIE jest AI analizujące screenshot).
 - Samodzielny proces `worker` do uruchomienia na stale włączonym hoście (tylko PAPER). Żadnych metod do handlu brokerowego.
 
-## Czego jeszcze nie ma (nie udawać)
+## Archiwum: czego nie było w v0.1 (NIE bieżący stan)
 
 - Brak gwarantowanego live streaming/WebSocket i 24/7 hostingu. Streamlit Cloud nie służy jako worker stale działający.
 - Brak wdrożonego WebSocket, kalendarza makro, źródeł news, Telegram alertów, walidowanego OOS/walk-forward czy automatycznej nauki AI.
