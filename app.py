@@ -14,7 +14,7 @@ from trader.market import CapitalReadOnly, FeedError, evaluate_snapshot, PERIOD
 from trader.strategy import indicators, backtest
 from trader.strategies_pro import decide_any, ALL_STRATEGIES
 from trader.ema50_wave import STRATEGY_NAME as WAVE_NAME
-from trader.auto_strategy import AUTO_MODE, evaluate_auto
+from trader.auto_strategy import AUTO_MODE, evaluate_auto, vote_summary
 from trader.legacy_v71_shadow import (evaluate_v71_shadow, LEGACY_V71_LABEL,
                                      SENSITIVITIES as LEGACY_V71_SENSITIVITIES)
 from trader.mtf import TIMEFRAMES, LABELS, evaluate_timeframes, filter_mtf_decision
@@ -261,9 +261,9 @@ with st.sidebar:
     st.session_state['_prev_capital_env'] = capital_env
     tf=st.selectbox('Interwał',['MINUTE','MINUTE_5','MINUTE_15','HOUR'],format_func=lambda x:{'MINUTE':'M1','MINUTE_5':'M5','MINUTE_15':'M15','HOUR':'H1'}[x])
     strategy=st.selectbox('Tryb analizy / strategia', (AUTO_MODE,)+ALL_STRATEGIES+(WAVE_NAME,), index=0,
-        help='AUTO ocenia sześć hipotez na tym samym wykresie. Wymaga min. dwóch zgodnych i kompletnych M1/M5/M15/H1; konflikt = WAIT. Nie jest to model uczący się ani zlecenie.')
+        help='AUTO PAPER: już jedna zaakceptowana strategia może wystarczyć po MTF. Konflikt LONG/SHORT = WAIT, podobnie jak brak świec, kalendarza, zbyt duży spread czy inne blokady. Wyłącznie symulacja.')
     if strategy==AUTO_MODE:
-        st.caption('🤖 AUTO: 6 strategii, minimum 2 zgodne, brak przeciwnego LONG/SHORT, obowiązkowy filtr MTF. Własna ocena PAPER, nie autotrading.')
+        st.caption('🧪 AUTO PAPER: 6 strategii, już 1 po MTF może wystarczyć. Konflikt LONG/SHORT = WAIT. Wszystkie blokady danych, ryzyka, zegara i kalendarza pozostają. Brak realnych zleceń.')
     elif strategy==WAVE_NAME:
         st.caption('🔬 EMA50 WAVE: wariant porównawczy zasad starego bota, '
                    'bez kopiowania jego archiwum ani fałszywych wejść. '
@@ -1008,7 +1008,19 @@ with market_tab:
                     decision,auto_audit=evaluate_auto(
                         snap.frame,snap.spread,st.session_state.get('mtf_snapshots',{}),
                         asof=snap.confirmed_utc,use_mtf=True)
-                    st.caption('🤖 AUTO analizuje wszystkie 6 strategii. MINIMUM 2 zgodne po MTF i żadnego przeciwnego sygnału. To filtr badawczy, nie miara skuteczności.')
+                    st.caption('🧪 AUTO analizuje 6 strategii. Eksperyment PAPER: już jeden zatwierdzony sygnał może wystarczyć, ale konflikt LONG/SHORT = WAIT i wszystkie bramki muszą przejść. To nie miara skuteczności.')
+                    counts=vote_summary(auto_audit)
+                    st.info(f"🗳️ GŁOSY (po MTF / surowe): **{counts['label']}** | "
+                            f"LONG {counts['long']} | SHORT {counts['short']} | "
+                            f"Odrzucone przez MTF {counts['vetoed']} | "
+                            f"Konflikt kierunków: {'TAK' if counts['conflict'] else 'NIE'}")
+                    st.caption('Licznik 1/2 oznacza: jeden sygnał przeszedł MTF z dwóch wykrytych przed MTF. To NIE skuteczność ani prawdopodobieństwo.')
+                    with st.sidebar:
+                        st.markdown('### 🗳️ GŁOSOWANIE AUTO — M1')
+                        st.metric('Po MTF / przed MTF',counts['label'])
+                        st.caption(f"LONG {counts['long']} | SHORT {counts['short']} | "
+                                   f"MTF veto: {counts['vetoed']}. "
+                                   'Tylko zamknięta świeca; brak zleceń LIVE.')
                     raw_candidates=[r for r in auto_audit if r.get('Setup OHLC') in ('LONG','SHORT')]
                     if raw_candidates:
                         st.markdown('#### 🔎 RADAR KANDYDATÓW (PRZED WERYFIKACJĄ MTF)')
@@ -1741,6 +1753,14 @@ with reports_tab:
                     st.caption('Świeca UTC: '+str(stamp or 'BRAK')+
                                ' | Decyzja workera: '+str(audit.get('decision','BRAK')))
                     if audit.get('rows'):
+                        wrows=[{'Setup OHLC':x.get('raw','WAIT'),
+                                'Po filtrze MTF':x.get('after_mtf','WAIT'),
+                                'Strategia':x.get('strategy','')} for x in audit['rows']]
+                        wc=vote_summary(wrows)
+                        st.info(f"🗳️ Ostatni zapis WORKERA: **{wc['label']}** "
+                                f"po MTF / przed MTF | LONG {wc['long']} | SHORT {wc['short']} | "
+                                f"MTF veto {wc['vetoed']} | "
+                                f"konflikt: {'TAK' if wc['conflict'] else 'NIE'}")
                         st.dataframe(pd.DataFrame(audit['rows']).rename(columns={
                             'strategy':'Strategia','raw':'Sygnał OHLC',
                             'after_mtf':'Po filtrze MTF','reason':'Powód'}),
