@@ -1,4 +1,4 @@
-# FOKU$ THE BEST TRADER — audyt techniczny po zmianach #38–#42
+# FOKU$ THE BEST TRADER — audyt techniczny po zmianach #38–#43
 
 **Zakres i moment:** stan repozytorium `djfokus176-stack/fokus-the-best-trader`, 9 listopada 2026 UTC, ostatni odczyt GitHub Actions. Testy po poprawce #43 są wykonywane osobno. **Brak dostępu do prywatnych wartości Secrets, przeglądarki użytkownika i bieżących rekordów Supabase; nie deklarujemy rzeczywistej pracy 24/7 ani zysku.**
 
@@ -16,7 +16,7 @@ Kod i testy są w dużo lepszym stanie niż potwierdzony system operacyjny. Osta
 | Kapital.com DEMO OHLC | Kontrola poprawności, świeżości, spreadu, luk, statusu rynku | `trader/market.py`; połączenie było udane w skanie 20:50, ale nie jest weryfikowane stale |
 | LIVE 5 s | Osobny fragment pobiera niepełną świecę/quote i jawnie oznacza syntetyczny podgląd | `trader/live_chart_fragment.py`; tylko przy otwartej sesji |
 | MTF M1/M5/M15/H1 | Cztery niezależne interwały, kompletność i synchronizacja czasowa | `trader/mtf.py`; lokalna przeglądarka może mieć czerwone MTF, gdy worker ma zielone |
-| AUTO 6 strategii | `MIN_AGREEMENT=1`, przeciwne sygnały veto, po MTF tylko poprawny układ | `trader/auto_strategy.py`; tryb **eksperymentalny**, nieprzebadany statystycznie |
+| AUTO 6 strategii | `MIN_AGREEMENT=1`, przeciwne sygnały veto, po MTF tylko poprawny układ; #43 wybiera spośród ZATWIERDZONYCH kandydatów według reżimu rynku, potem RR | `trader/auto_strategy.py` i `trader/strategy_selector.py`; ranking oparty na stałych heurystykach, nie na zmierzonym wyniku ekonomicznym |
 | Wczesne `OBSERWUJ LONG/SHORT` | Osobna heurystyka z zamkniętych świec; puste kółka, nie transakcje | `trader/early_watch.py`; bez MTF/RR/BLS i bez dowodu opłacalności |
 | Porównanie v7.1 | `SHADOW`, nie siódmy głos AUTO | `trader/legacy_v71_shadow.py` |
 | Historyczny audyt pominiętych wejść | Diagnoza reguł po każdej świecy, bez historii prawdziwych wykonań | `trader/signal_audit.py` |
@@ -26,7 +26,7 @@ Kod i testy są w dużo lepszym stanie niż potwierdzony system operacyjny. Osta
 | Telegram chmurowy | **Wyłączony** | Log `TELEGRAM_REMOTE=DISABLED`; panel nie wyśle wiadomości po zamknięciu strony |
 | Prognozy / uczenie | Badawcze `SHADOW` rankingi i prognozy; bez strojenia głównej strategii | `trader/paper_learning.py`, `trader/forecast_audit.py` |
 
-## Najważniejsze problemy i ryzyka (kolejność)
+**Dodatkowa zmiana #43:** kod selektora reżimu rynku został scalony po poprawce MTF. Nie tworzy nowych sygnałów, tylko priorytetyzuje kilka już zaakceptowanych strategii. Jego wagi są regułami eksperckimi, nie wynikami kalibracji ani szacowanymi procentami wygranej.\n\n## Najważniejsze problemy i ryzyka (kolejność)
 
 ### P0 — brak potwierdzenia ciągłego wykonywania workera
 
