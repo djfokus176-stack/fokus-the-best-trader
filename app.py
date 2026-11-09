@@ -656,13 +656,20 @@ with market_tab:
                         seconds=PERIOD[horizon]
                         if timeframe_refresh_needed(
                                 snapshots.get(horizon),horizon,
-                                elapsed=stamp-due.get(horizon,0),
+                                elapsed=stamp-due[horizon] if horizon in due else float('inf'),
                                 anchor_closed=st.session_state['market_snap'].confirmed_utc):
+                            # Remember both successes AND failed API attempts.
+                            # Missing TF must remain a hard WAIT, not a retry storm.
+                            due[horizon]=stamp
                             try:
-                                snapshots[horizon]=client.candles(instrument,horizon,
+                                obtained_htf=client.candles(instrument,horizon,
                                     count=350,max_spread=max_spread)
-                                due[horizon]=stamp
-                                errors.pop(horizon,None)
+                                if not obtained_htf.good:
+                                    snapshots.pop(horizon,None)
+                                    errors[horizon]=str(obtained_htf.reason)[:180]
+                                else:
+                                    snapshots[horizon]=obtained_htf
+                                    errors.pop(horizon,None)
                             except (FeedError,ValueError) as ex:
                                 snapshots.pop(horizon,None)
                                 errors[horizon]=str(ex)[:180]
