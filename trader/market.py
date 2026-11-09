@@ -180,6 +180,37 @@ def capital_prices_as_close_times(raw: pd.DataFrame, resolution: str) -> pd.Data
     return result
 
 
+
+def _is_verified_h1_weekend_gap(earlier, later) -> bool:
+    """Recognize a market weekend ONLY, never interpolate missing candles.
+
+    Hours are UTC broker H1 labels. A Friday -> Sunday/Monday 24..78h
+    interruption is compatible with market closure. Any other >4h
+    interruption remains INVALID, including unexplained weekday holes.
+    """
+    if earlier.tzinfo is None or later.tzinfo is None:
+        return False
+    delta=(later-earlier).total_seconds()
+    return (earlier.weekday()==4 and later.weekday() in (6,0)
+            and 24*3600 <= delta <= 78*3600)
+
+
+def _unexpected_recent_gap(index, resolution: str) -> bool:
+    """Reject anomalous H1 gaps but don't misclassify the weekend close."""
+    step=PERIOD[resolution]
+    tail=index[-20:]
+    if len(tail)<2 or not tail.is_monotonic_increasing or tail.has_duplicates:
+        return True
+    for before,after in zip(tail[:-1],tail[1:]):
+        seconds=(after-before).total_seconds()
+        if seconds<=0:
+            return True
+        if seconds>step*4:
+            if resolution!="HOUR" or not _is_verified_h1_weekend_gap(before,after):
+                return True
+    return False
+
+
 def evaluate_snapshot(raw: pd.DataFrame, epic: str, resolution: str,
                       now: datetime | None = None, max_spread: float = 2.0,
                       source: str = 'Capital.com DEMO REST') -> Snapshot:
@@ -262,8 +293,8 @@ def evaluate_snapshot(raw: pd.DataFrame, epic: str, resolution: str,
         reason = f'Bieżący spread: {quote_spread:.2f} > {max_spread:.2f}'
     elif confirmed[['Open','High','Low','Close']].tail(25).isna().any().any():
         reason = 'Puste OHLC'
-    elif (confirmed.index[-20:].to_series().diff().dt.total_seconds().dropna() > step * 4).any():
-        reason = 'Wykryto duże luki w świecach'
+    elif _unexpected_recent_gap(confirmed.index, resolution):
+        reason = 'Wykryto duże luki w świecach (poza rozpoznaną przerwą weekendową H1)'
     else:
         reason = 'OK: poprzednia świeca ma nowszego następcę (nie potwierdza ticków ani jakości feedu)'
     if reason.startswith('OK:') and warning:
