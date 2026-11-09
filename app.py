@@ -1592,6 +1592,9 @@ with strategies_tab:
                     'Liczba świec do prześwietlenia',
                     options=[5,10,12,20,30,40],value=20,
                     key='signal_audit_window')
+                legacy_diag_mode=st.selectbox('Stary bot v7.1 — czułość porównania SHADOW',
+                    LEGACY_V71_SENSITIVITIES,index=0,
+                    key='signal_audit_old_sensitivity')
                 run_audit=st.button('🔎 SPRAWDŹ KAŻDĄ ŚWIECĘ I POWODY WAIT',
                                     key='run_causal_signal_audit')
                 cache=st.session_state.get('_causal_signal_audit')
@@ -1600,8 +1603,11 @@ with strategies_tab:
                         upto=snap.frame.loc[:selected_end]
                         audit_timeline,audit_detail,audit_summary=audit_recent_closed_bars(
                             upto,st.session_state.get('mtf_snapshots',{}),
-                            lookback=audit_count)
+                            lookback=audit_count,
+                            legacy_sensitivity=legacy_diag_mode,
+                            expected_epic=snap.epic,expected_source=snap.source)
                         cache={'end':selected_end,'count':audit_count,
+                               'legacy_mode':legacy_diag_mode,
                                'timeline':audit_timeline,'details':audit_detail,
                                'summary':audit_summary,
                                'source':str(snap.source)}
@@ -1613,6 +1619,7 @@ with strategies_tab:
                 if cache is not None:
                     if (cache.get('end')!=selected_end or
                         cache.get('count')!=audit_count or
+                        cache.get('legacy_mode')!=legacy_diag_mode or
                         cache.get('source')!=str(snap.source)):
                         st.info('Zmieniono koniec audytu lub zakres — kliknij ponownie SPRAWDŹ.')
                     else:
@@ -1620,8 +1627,13 @@ with strategies_tab:
                         st.info(f"Świece przeanalizowane: {summary['analysed_bars']} | "
                                 f"potwierdzone MTF: {summary['fully_ready_mtf']} | "
                                 f"hipotezy LONG: {summary['historical_long_candidates']} | "
-                                f"hipotezy SHORT: {summary['historical_short_candidates']}.")
-                        st.caption('To REKONSTRUKCJA sygnałów z aktualnej historii, '
+                                f"hipotezy SHORT: {summary['historical_short_candidates']} | "
+                                f"stary LEGACY SHADOW: LONG {summary['legacy_shadow_long']}, "
+                                f"SHORT {summary['legacy_shadow_short']}.")
+                        st.caption('Stary v7.1 jest tylko historycznym SHADOW i nie wchodzi do AUTO. '
+                                   'Jeśli jego sygnał pojawił się wcześniej niż sygnał FOKU$, '
+                                   'nie oznacza to, że stara metoda jest zyskowna. '
+                                   'To REKONSTRUKCJA sygnałów z aktualnej historii, ')
                                    'nie rzeczywiste otwarcia: nie odtwarza starego '
                                    'kalendarza makro, działania workera ani '
                                    'cen wykonania. Nie sumuj hipotetycznych '
