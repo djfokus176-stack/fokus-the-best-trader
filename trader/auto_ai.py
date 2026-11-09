@@ -79,8 +79,10 @@ def review_closed_candle(previous, snapshot, decision, votes, mtf_views,
                     return state
             except (ValueError, TypeError):
                 pass
-    daily = _limit(e.get("FOKUS_AUTO_AI_DAILY_LIMIT", 24), 24, 288)
-    monthly = _limit(e.get("FOKUS_AUTO_AI_MONTHLY_LIMIT", 200), 200, 8640)
+    # HARD maximum attempts independent of older permissive Actions vars.
+    # Limits count requests, NOT guaranteed USD spending ceilings.
+    daily = _limit(e.get("FOKUS_AUTO_AI_DAILY_LIMIT", 6), 6, 6)
+    monthly = _limit(e.get("FOKUS_AUTO_AI_MONTHLY_LIMIT", 60), 60, 60)
     if state.get("daily_calls", 0) >= daily or state.get("monthly_calls", 0) >= monthly:
         state["status"] = "CALL_CAP_REACHED"
         return state
