@@ -16,7 +16,7 @@ def make_market(tf, before="2026-11-06 21:00:00+00:00",
     if extra_gap:
         # Add an anomalous midweek data gap INSIDE the last 20 H1 bars.
         # Missing market hour after Sunday reopening must still be caught.
-        last=last.delete(6)
+        last=last.delete([3,4,5,6,7])  # six-hour unexplained interval
         dates=first.append(last)
     frame=pd.DataFrame({"Open":[100.0]*len(dates),
                         "High":[101.0]*len(dates),
