@@ -16,6 +16,7 @@ import pandas as pd
 from .auto_strategy import evaluate_auto, vote_summary
 from .mtf import TIMEFRAMES, evaluate_timeframes
 from .strategy import indicators
+from .legacy_v71_shadow import evaluate_v71_shadow, DEFAULT_SENSITIVITY, SENSITIVITIES
 
 MIN_HISTORY = 85
 MAX_LOOKBACK = 40
@@ -65,7 +66,10 @@ def _validate(frame, timeframe_snapshots, lookback):
 
 
 def audit_recent_closed_bars(frame: pd.DataFrame, snapshots: dict, *,
-                             lookback: int = 20) -> tuple[pd.DataFrame,pd.DataFrame,dict]:
+                             lookback: int = 20,
+                             legacy_sensitivity: str = DEFAULT_SENSITIVITY,
+                             expected_epic: str | None = None,
+                             expected_source: str | None = None) -> tuple[pd.DataFrame,pd.DataFrame,dict]:
     """Causally replay one rule-evaluation for each historical closed M1 bar.
 
     The MTF filters see only HTF bars whose CLOSE <= signal-bar CLOSE.
@@ -73,6 +77,8 @@ def audit_recent_closed_bars(frame: pd.DataFrame, snapshots: dict, *,
     exact execution/spread dynamics and future trade fills are not recreated.
     """
     _validate(frame,snapshots,lookback)
+    if legacy_sensitivity not in SENSITIVITIES:
+        raise ValueError("Nieznana czułość porównawczej metody v7.1.")
     # Protect the owner from retrospectively reusing unrelated feeds.
     anchor = snapshots.get("MINUTE")
     mtf_matching = bool(
@@ -80,7 +86,9 @@ def audit_recent_closed_bars(frame: pd.DataFrame, snapshots: dict, *,
         and getattr(anchor,"good",False)
         and len(anchor.frame)>0 and frame.index[-1] in anchor.frame.index
         and frame.index[-1] <= anchor.frame.index[-1]
-        and float(frame.Close.iloc[-1]) == float(anchor.frame.loc[frame.index[-1],"Close"]))
+        and float(frame.Close.iloc[-1]) == float(anchor.frame.loc[frame.index[-1],"Close"])
+        and (expected_epic is None or anchor.epic == expected_epic)
+        and (expected_source is None or anchor.source == expected_source))
     if mtf_matching:
         mtf_matching = all(
             tf in snapshots and getattr(snapshots[tf],"good",False)
@@ -117,6 +125,22 @@ def audit_recent_closed_bars(frame: pd.DataFrame, snapshots: dict, *,
         mtf_ready=bool(mtf_matching and all(v.ready for v in views))
         row=full_ind.iloc[i]
         causes=Counter()
+        # Historical legacy comparator uses ONLY the M5 bars closed as of
+        # this M1 candle. It remains SHADOW, not a seventh AUTO vote.
+        if mtf_ready and views[1].ready:
+            old=evaluate_v71_shadow(window,mtf["MINUTE_5"].frame,spread,
+                                    sensitivity=legacy_sensitivity)
+            old_action=old.action
+            old_reason=old.reason
+        elif mtf_matching and views[1].ready:
+            old=evaluate_v71_shadow(window,mtf["MINUTE_5"].frame,spread,
+                                    sensitivity=legacy_sensitivity)
+            old_action=old.action
+            old_reason=old.reason
+        else:
+            old_action="WAIT / BRAK M5"
+            old_reason="Niezweryfikowany historyczny M5, nie wymyślam głosu starego bota."
+
         for entry in rows:
             stage=("ZATWIERDZONY" if entry["Po filtrze MTF"] in ("LONG","SHORT")
                    else rejection_stage(entry["Powód"]))
@@ -138,6 +162,9 @@ def audit_recent_closed_bars(frame: pd.DataFrame, snapshots: dict, *,
             "Spread":round(spread,3),
             "Po MTF / surowe":counts["label"],
             "LONG":counts["long"],"SHORT":counts["short"],
+            "LEGACY v7.1 (SHADOW)":old_action,
+            "Powód LEGACY":old_reason,
+            "Najczęstszy filtr":causes.most_common(1)[0][0] if causes else "BRAK",
             "Wynik":decision.action if mtf_ready else "WAIT / MTF NIEZWERYFIKOWANE",
             "MTF":consensus if mtf_ready else "BRAK",
             "Przyczyna":(
@@ -152,6 +179,8 @@ def audit_recent_closed_bars(frame: pd.DataFrame, snapshots: dict, *,
         "historical_long_candidates":sum(x.get("Wynik")=="LONG" for x in timeline),
         "historical_short_candidates":sum(x.get("Wynik")=="SHORT" for x in timeline),
         "raw_signal_bars":sum(x.get("Po MTF / surowe","0/0").split("/")[-1].isdigit() and int(x["Po MTF / surowe"].split("/")[-1])>0 for x in timeline),
+        "legacy_shadow_long":sum(x.get("LEGACY v7.1 (SHADOW)")=="LONG" for x in timeline),
+        "legacy_shadow_short":sum(x.get("LEGACY v7.1 (SHADOW)")=="SHORT" for x in timeline),
         "confirmed_utc":frame.index[-1].isoformat(),
         "scope":"HISTORYCZNY AUDYT REGUŁ, NIE wykonane PAPER, BEZ retrospektywnego kalendarza ani weryfikacji egzekucji",
     }
