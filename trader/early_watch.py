@@ -116,4 +116,16 @@ def recent_watch_markers(frame: pd.DataFrame, *, last_bars=45, limit=8):
                 "score":got.score, "reason":got.reason,
             })
         previous=got.side
+    # If a directional watch has persisted longer than the visible window,
+    # still mark the most recent CLOSED bar, not an unverified live tick.
+    latest=evaluate_early_watch(frame)
+    if latest.side in ("LONG","SHORT"):
+        newest=frame.iloc[-1]
+        if not result or result[-1]["time"]!=latest.closed_utc:
+            result.append({
+                "time":latest.closed_utc,"side":latest.side,
+                "close":float(newest.Close),"high":float(newest.High),
+                "low":float(newest.Low),"countertrend":latest.countertrend,
+                "score":latest.score,"reason":latest.reason,
+            })
     return result[-limit:]
