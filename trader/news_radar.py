@@ -238,7 +238,13 @@ def fetch_bls_schedule(get=requests.get, timeout=12, *, now=None):
             if getattr(getattr(html_exc,"response",None),"status_code",None)!=403:
                 raise
             from .bls_verified_snapshot import verified_schedule
-            return verified_schedule(now=now)
+            try:
+                return verified_schedule(now=now)
+            except ValueError as snapshot_exc:
+                if str(snapshot_exc)!="BLS_VERIFIED_SNAPSHOT_EXPIRED":
+                    raise
+                from .manual_bls_calendar import load_verified_manual_bls
+                return load_verified_manual_bls(now=now)
     if len(r.content)>1_500_000:raise ValueError("Zbyt duży kalendarz")
     full=parse_bls_calendar(r.content.decode("utf-8-sig",errors="replace"),limit=0)
     cutoff=(now or datetime.now(timezone.utc))-timedelta(days=7)
