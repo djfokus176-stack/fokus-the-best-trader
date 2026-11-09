@@ -96,7 +96,8 @@ def test_worker_logs_snapshot_source_and_expiry_without_changing_paper_gate():
     from pathlib import Path
     root=Path(__file__).resolve().parents[1]
     code=(root/"trader"/"worker.py").read_text(encoding="utf8")
-    assert "MACRO_SOURCE=BLS_VERIFIED_SNAPSHOT_NOT_LIVE" in code
+    assert '"BLS_VERIFIED_SNAPSHOT_NOT_LIVE","BLS_VERIFIED_MANUAL_NOT_LIVE"' in code
+    assert '"MACRO_SOURCE="+calendar_source+' in code
     assert "MACRO_BLACKOUT" in code
     assert 'if not reasons and verdict.action in ("LONG","SHORT")' in code
     app=(root/"app.py").read_text(encoding="utf8")
