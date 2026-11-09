@@ -72,7 +72,10 @@ def test_cached_missing_mtf_is_refetched_but_never_reused_stale():
     last=now-timedelta(seconds=25)
     snap=SimpleNamespace(good=True,confirmed_utc=last,
                          source="Capital.com DEMO REST",resolution="MINUTE_5")
-    assert timeframe_refresh_needed(None,"MINUTE_5",elapsed=0,anchor_closed=now)
+    assert not timeframe_refresh_needed(None,"MINUTE_5",elapsed=0,anchor_closed=now)
+    assert not timeframe_refresh_needed(None,"MINUTE_5",elapsed=30,anchor_closed=now)
+    assert timeframe_refresh_needed(None,"MINUTE_5",elapsed=60,anchor_closed=now)
+    assert timeframe_refresh_needed(None,"MINUTE_5",elapsed=float("inf"),anchor_closed=now)
     assert not timeframe_refresh_needed(snap,"MINUTE_5",elapsed=20,anchor_closed=now)
     assert not timeframe_refresh_needed(snap,"MINUTE_5",elapsed=90,anchor_closed=now)
     assert timeframe_refresh_needed(snap,"MINUTE_5",elapsed=90,
