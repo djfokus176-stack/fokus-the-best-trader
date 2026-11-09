@@ -94,7 +94,7 @@ def test_ui_is_exclusively_watch_not_broker_or_paper_queuing():
     assert "POBIERZ PONOWNIE BRAKUJĄCE MTF" in ui
     assert "annotate_watch_markers(fig,snap.frame" in ui
     assert "circle-open" in src
-    assert "👀 OBSERWUJ " in ui
+    assert "👀 OBSERWUJ " in src
     assert "queue_paper" not in src
     assert "progress_paper" not in src
     assert "api_key" not in src
@@ -108,7 +108,7 @@ def test_real_plotly_watch_trace_is_visible_and_never_a_paper_arrow():
             x=data.index,open=data.Open,high=data.High,low=data.Low,close=data.Close))
         watches=annotate_watch_markers(chart,data,last_bars=30)
         assert watches and watches[-1]["side"]==side
-        dot=[trace for trace in chart.data if "OBSERWUJ "+side in trace.name]
+        dot=[trace for trace in chart.data if "OBSERWUJ "+side in str(trace.name or "")]
         assert len(dot)==1
         assert dot[0].mode=="markers"
         assert dot[0].marker.symbol=="circle-open"
