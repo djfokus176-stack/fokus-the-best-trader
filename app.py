@@ -39,6 +39,7 @@ from trader.paper_reporting import daily_weekly,performance_by_policy
 from trader.paper_learning import strategy_scorecard
 from trader.forecast_audit import forecast_metrics
 from trader.remote_checkpoint import RemoteCheckpoint,remote_view_db,RemoteError,dump_state
+from trader.browser_paper_scan import run_browser_paper_scan
 from trader.telegram_alerts import dispatch_alerts, record_stale_event
 from trader.auth import (capital_credentials, active_credential, test_capital_login,
     test_openai_model, test_telegram_token, drop_capital_session_overrides,
@@ -491,6 +492,81 @@ def read_csv(file):
     return read_ohlc_csv(file)
 
 with market_tab:
+    if remote_paper_view_enabled():
+        with st.expander('☁️ PAPER W CHMURZE — URUCHOM SKAN BEZ GITHUB I CRON',expanded=True):
+            st.caption('Twój wykres działa niezależnie. Tu uruchamiasz RZECZYWISTY '
+                       'skan silnika PAPER DEMO, zapisujący checkpoint do Supabase. '
+                       'Bez brokerowych zleceń. Brak kalendarza BLS nadal blokuje nowe pozycje.')
+            def owner_cloud_scan():
+                if not has_cap or capital_env!='DEMO':
+                    raise ValueError('Brak danych Capital.com DEMO — nie uruchamiam PAPER.')
+                outcome=run_browser_paper_scan(
+                    cloud_url=secret('FOKUS_SUPABASE_URL'),
+                    cloud_key=secret('FOKUS_SUPABASE_SECRET_KEY'),
+                    api_key=cap_api_key,identifier=cap_identifier,password=cap_password,
+                    environment=capital_env,epic=instrument,
+                    clock_secret=secret('FOKUS_CANDLE_TIME_CONFIRMED',''),
+                    max_spread=max_spread)
+                st.session_state.pop('_paper_remote_read_cache',None)
+                st.session_state['_last_browser_worker_result']=outcome
+                return outcome
+            manual=st.button('▶ URUCHOM SKAN PAPER TERAZ (DEMO)',key='owner_one_cloud_scan',
+                             use_container_width=True,disabled=not has_cap or capital_env!='DEMO')
+            if manual:
+                try:
+                    with st.spinner('Pobieram M1/M5/M15/H1, sprawdzam BLS i zapisuję Supabase...'):
+                        owner_cloud_scan()
+                except (RemoteError,FeedError,ValueError,RuntimeError,OSError,TypeError) as exc:
+                    st.session_state['_last_browser_worker_error']=type(exc).__name__+': '+str(exc)[:150]
+            st.toggle('🔄 AUTO PAPER CO OK. MINUTĘ — tylko przy otwartej karcie',
+                      key='_owner_browser_paper_auto',value=False,
+                      disabled=not has_cap or capital_env!='DEMO',
+                      help='Nie działa po zamknięciu karty, uśpieniu PC ani wstrzymaniu Streamlit Cloud. '
+                           'Przed włączeniem wyłącz inny worker zapisujący to samo Supabase.')
+            @st.fragment(run_every="65s")
+            def owner_cloud_auto_pulse():
+                if not st.session_state.get('_owner_browser_paper_auto',False):
+                    return
+                tick=time.monotonic()
+                if tick-st.session_state.get('_owner_browser_paper_last',0)<58:
+                    return
+                st.session_state['_owner_browser_paper_last']=tick
+                try:
+                    result=owner_cloud_scan()
+                    # A real BLS block must not be hidden by a fresh checkpoint.
+                    if 'MACRO_CALENDAR_UNAVAILABLE' in result['result']:
+                        st.session_state['_owner_browser_paper_auto']=False
+                        st.warning('AUTO wstrzymane: oficjalny kalendarz BLS niedostępny. '
+                                   'Nie odblokowuję bramki.')
+                    elif result['saved']:
+                        st.caption('☁️ AUTO PAPER: zapisano skan w Supabase. '
+                                   'Decyzje pozostają tylko na zamkniętych świecach.')
+                except (RemoteError,FeedError,ValueError,RuntimeError,OSError,TypeError) as exc:
+                    st.session_state['_owner_browser_paper_auto']=False
+                    st.session_state['_last_browser_worker_error']=type(exc).__name__
+                    st.error('AUTO PAPER zatrzymane: '+type(exc).__name__+
+                             '. Sprawdź dane DEMO, Supabase i kalendarz.')
+            owner_cloud_auto_pulse()
+            cloud_error=st.session_state.get('_last_browser_worker_error')
+            if cloud_error:
+                st.error('Ostatni skan PANELU: '+str(cloud_error)[:180])
+            last=st.session_state.get('_last_browser_worker_result')
+            if last:
+                if last.get('saved'):
+                    st.success('✅ Skan PAPER zapisany w Supabase — to NIE oznacza sygnału LONG.')
+                else:
+                    st.info('Niedawny skan innego workera już istnieje — nie uruchomiłem drugiego.')
+                summary=str(last.get('result',''))
+                st.code(summary[:950],language=None)
+                if not last.get('clock_verified'):
+                    st.warning('Potwierdzenie czasu świec nie jest dostępne. '
+                               'PAPER zbiera dane, ale nowe wejścia są zablokowane.')
+                if last.get('saved') and not last.get('entry_gates_open'):
+                    st.warning('Skan przeszedł, lecz bramki mogą nadal blokować '
+                               'nowe pozycje. Szczegóły w GATES powyżej.')
+            st.caption('⚠️ Ten tryb działa tylko w otwartej sesji przeglądarki. '
+                       'Nie zastępuje całodobowego hostingu. Dwa niezależne '
+                       'workery nie powinny pracować jednocześnie.')
     col1,col2=st.columns([1,2])
     with col1:
         csv=st.file_uploader('Opcjonalnie własne dane OHLC CSV (wyłącznie do nauki / replay)',type=['csv'])

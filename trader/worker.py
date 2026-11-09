@@ -163,7 +163,8 @@ def scan_once(client,epic,tf,strategy,max_spread,db, *,
 
 def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
                      enable_setups=True,strict_macro=True,
-                     calendar_fetch=fetch_bls_schedule):
+                     calendar_fetch=fetch_bls_schedule,
+                     clock_confirmed_open=None):
     """Single-worker cloud cycle; fail closed on missing/changed checkpoint.
 
     Cloud checkpoint is loaded before the scan and CAS-saved after.
@@ -172,6 +173,13 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
     job that crashes after sending but before checkpointing).
     """
     version,payload=remote.fetch()
+    browser_clock_override=(clock_confirmed_open is not None)
+    if clock_confirmed_open is None:
+        # Existing CLI/GitHub path keeps its original gate and metadata.
+        clock_confirmed_open=(os.getenv("FOKUS_CANDLE_TIME_CONFIRMED","").strip().lower()=="open")
+    if browser_clock_override and not clock_confirmed_open:
+        # Fail closed for the new owner-dashboard entry point only.
+        enable_setups=False
     auto_state=payload.get("auto_ai",{})
     candidates=payload.get("candidate_feed",[])
     forecast_state=payload.get("forecast_research",{})
@@ -279,7 +287,7 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             "source":"Capital.com DEMO REST",
             "timeframe":tf,"epic":epic,
             "strategy":strategy,
-            "clock_confirmed_open":os.getenv("FOKUS_CANDLE_TIME_CONFIRMED","").strip().lower()=="open",
+            "clock_confirmed_open":bool(clock_confirmed_open),
             "setups_enabled":bool(enable_setups),
             "news_status":news_feed.get("status","NO_DATA"),
             "news_last_fetch_utc":news_feed.get("last_fetch_utc"),
