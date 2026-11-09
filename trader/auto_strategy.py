@@ -9,6 +9,7 @@ from dataclasses import replace
 from .strategy import Decision
 from .strategies_pro import ALL_STRATEGIES, decide_any
 from .mtf import filter_mtf_decision
+from .strategy_selector import select_approved
 
 AUTO_MODE = "AUTO — 6 STRATEGII"
 MIN_AGREEMENT = 1
@@ -72,9 +73,12 @@ def evaluate_auto(frame, spread, snapshots=None, *, asof=None, use_mtf=True):
         return (Decision("WAIT", AUTO_MODE, prefix +
             f"Zatwierdzonych setupów: {len(approved)}, wymagane: {MIN_AGREEMENT}. "
             "Nie wymuszam PAPER.", atr=atr), rows)
-    selected = sorted(approved, key=lambda d: (-float(d.rr or 0), d.strategy))[0]
+    selected,selection=select_approved(frame,approved)
+    if selected is None:
+        return (Decision("WAIT",AUTO_MODE,prefix+
+            "Błąd wyboru: brak prawidłowego zatwierdzonego kandydata."),rows)
     return (replace(selected, reason=(
-        prefix + "AUTO PAPER (eksperyment 1 sygnału): zatwierdzone strategie: "
-        + ", ".join(d.strategy for d in approved) +
-        f". Wybrano {selected.strategy} po RR. Bez potwierdzonej przewagi "
-        "statystycznej. " + selected.reason)), rows)
+        prefix + "AUTO PAPER (eksperyment 1 sygnału): zatwierdzone: "
+        + ", ".join(d.strategy for d in approved) + ". "
+        + selection.selection_reason +
+        " Bez potwierdzonej przewagi statystycznej. " + selected.reason)), rows)
