@@ -19,7 +19,7 @@ from trader.signal_audit import audit_recent_closed_bars
 from trader.legacy_v71_shadow import (evaluate_v71_shadow, LEGACY_V71_LABEL,
                                      SENSITIVITIES as LEGACY_V71_SENSITIVITIES)
 from trader.mtf import TIMEFRAMES, LABELS, evaluate_timeframes, filter_mtf_decision, timeframe_refresh_needed
-from trader.early_watch import evaluate_early_watch, recent_watch_markers
+from trader.early_watch import evaluate_early_watch, annotate_watch_markers
 from trader.research import chronological_report, rolling_oos, replay, stats
 from trader.mtf_replay import compare_mtf_on_m1_csv
 from trader.news_radar import fetch_headlines, fetch_bls_schedule, macro_blackout
@@ -906,21 +906,7 @@ with market_tab:
             if st.session_state.get('early_watch_enabled',True) and tf=='MINUTE' and ready:
                 # WATCH is a separate read-only heuristic, never a trade arrow.
                 bias=evaluate_early_watch(snap.frame)
-                watch_points=recent_watch_markers(snap.frame,last_bars=35,limit=8)
-                for watch_side,watch_color in (('LONG','#49d5ce'),('SHORT','#ffb15c')):
-                    points=[p for p in watch_points if p['side']==watch_side]
-                    if points:
-                        fig.add_trace(go.Scatter(
-                            x=[p['time'] for p in points],
-                            y=[p['low']-.15 if watch_side=='LONG' else p['high']+.15 for p in points],
-                            mode='markers',
-                            name='👀 OBSERWUJ '+watch_side+' (NIE PAPER)',
-                            marker={'symbol':'circle-open','size':12,
-                                    'color':watch_color,
-                                    'line':{'width':2,'color':watch_color}},
-                            text=['👀 OBSERWUJ '+p['side']+' — '+p['reason']
-                                  for p in points],
-                            hovertemplate='%{x}<extra>%{text}</extra>'))
+                watch_points=annotate_watch_markers(fig,snap.frame,last_bars=35,limit=8)
                 if bias.side in ('LONG','SHORT'):
                     st.info('👀 **OBSERWUJ '+bias.side+'** — '+bias.reason+
                             ' Wynik heurystyki: '+str(bias.score)+
