@@ -39,7 +39,7 @@ def test_vote_audit_persists_all_six_without_unlocking_wait(monkeypatch):
     snapshot=SimpleNamespace(good=False,confirmed_utc=now,epic="US500",
                              source="Capital.com DEMO REST",resolution="MINUTE",
                              frame=pd.DataFrame(),spread=0.5)
-    decision=SimpleNamespace(action="WAIT",strategy=AUTO_MODE,reason="0/2")
+    decision=SimpleNamespace(action="WAIT",strategy=AUTO_MODE,reason="0/2",rr=None)
     def fake_scan(client,epic,tfname,strategy,max_spread,db,*,reviewer,**kwargs):
         calls.append((epic,strategy,kwargs.get("strict_macro")))
         reviewer(snapshot,decision,votes,tf,[])
