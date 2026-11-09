@@ -15,6 +15,7 @@ from trader.strategy import indicators, backtest
 from trader.strategies_pro import decide_any, ALL_STRATEGIES
 from trader.ema50_wave import STRATEGY_NAME as WAVE_NAME
 from trader.auto_strategy import AUTO_MODE, evaluate_auto, vote_summary
+from trader.strategy_selector import market_context, PRIORITY, select_approved
 from trader.signal_audit import audit_recent_closed_bars
 from trader.legacy_v71_shadow import (evaluate_v71_shadow, LEGACY_V71_LABEL,
                                      SENSITIVITIES as LEGACY_V71_SENSITIVITIES)
@@ -1642,6 +1643,59 @@ with strategies_tab:
                 'RR':d.rr,'Powód':d.reason if filtered_action==d.action else filtered.reason})
         st.dataframe(pd.DataFrame(all_rows),hide_index=True,use_container_width=True)
         st.info('Jednoczesne różne sygnały NIE oznaczają, że należy je sumować. Każda strategia wymaga oddzielnego, rozliczonego testu.')
+
+        st.markdown('#### 🧭 AUTO — SAM DOBIERAM METODĘ DO WARUNKÓW RYNKU')
+        regime,event,regime_status=market_context(snap.frame)
+        st.caption('Warunki rynku: **'+regime+'** | Zdarzenie: '+event+
+                   '. Oceniane wyłącznie zamknięte świece. '
+                   'To regułowe dopasowanie, NIE model ML ani wyliczone prawdopodobieństwo.')
+        preferred=sorted(ALL_STRATEGIES,
+                         key=lambda n:(-PRIORITY.get(regime,{}).get(n,0),n))
+        st.caption('Metody preferowane do dalszej obserwacji: '+
+                   ', '.join(preferred[:3])+
+                   '. Preferencja nie jest jeszcze sygnałem.')
+        valid_browser=(st.session_state.get('mtf_enabled',False)
+                       and current_feed_status(snap,src)[0]
+                       and st.session_state.get('_market_status')=='TRADEABLE'
+                       and src=='Capital.com DEMO REST')
+        if not valid_browser:
+            st.warning('Dobór do wykonania PAPER niepotwierdzony w tej sesji: '
+                       'wymagane MTF, świeże dane DEMO i TRADEABLE. '
+                       'Nie interpretuj wierszy jako otwartych pozycji.')
+        else:
+            chosen,eligible_audit=evaluate_auto(
+                snap.frame,snap.spread,st.session_state.get('mtf_snapshots',{}),
+                asof=snap.confirmed_utc,use_mtf=True)
+            if chosen.action in ('LONG','SHORT'):
+                st.success('🧭 WYBRANA METODA PAPER (warunkowy setup): '+
+                           chosen.strategy+' | '+chosen.action+
+                           '. Ostateczne utworzenie pozycji zależy od '
+                           'osobnego workera oraz bramek BLS/zegara/ryzyka.')
+                st.caption('Uzasadnienie wyboru: '+chosen.reason)
+            else:
+                st.info('🧭 WYBÓR: BRAK ZATWIERDZONEJ METODY — WAIT. '+
+                        'Rynek ma rozpoznany kontekst, ale żadna metoda nie '
+                        'musi dawać sygnału. '+chosen.reason)
+            if eligible_audit:
+                from trader.strategy_selector import _rating
+                candidates=[r for r in eligible_audit
+                            if r['Po filtrze MTF'] in ('LONG','SHORT')]
+                if candidates:
+                    st.dataframe(pd.DataFrame([
+                        {'Metoda':r['Strategia'],
+                         'Sygnał':r['Po filtrze MTF'],
+                         'Dopasowanie 0–6 (NIE %)':(
+                             _rating(r['Strategia'],regime,event)
+                             if regime_status=='READY' else None),
+                         'RR':r['RR'],
+                         'Wybór': 'WYBRANA' if chosen.strategy==r['Strategia'] else ''}
+                        for r in candidates]),
+                        hide_index=True,use_container_width=True)
+        st.caption('Automatyczny wybór nie otwiera LONG/SHORT bez poprawnego '
+                   'setupu. Ranking historycznych wyników pozostaje badawczy: '
+                   'bez porównywalnych zakończonych transakcji nie nazywam '
+                   'żadnej metody najlepszą.')
+
 
         with st.expander('🔍 DLACZEGO BRAK LONG/SHORT? — AUDYT OSTATNICH ŚWIEC M1',
                          expanded=False):
