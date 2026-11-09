@@ -5,7 +5,7 @@ import json
 import sqlite3
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from dataclasses import replace as dataclass_replace
 import pandas as pd
 import plotly.graph_objects as go
@@ -959,11 +959,17 @@ with market_tab:
                            'w trybie LOCAL z tej przeglądarki. '
                            'To DWA niezależne systemy, nie jeden test.')
                 if remote_is_on and worker_calendar:
-                    if worker_calendar['source']=='BLS_VERIFIED_SNAPSHOT_NOT_LIVE':
+                    if worker_calendar['source'] in ('BLS_VERIFIED_SNAPSHOT_NOT_LIVE','BLS_VERIFIED_MANUAL_NOT_LIVE'):
                         st.warning('🗓️ Ostatni worker PAPER: kalendarz ze zweryfikowanej '
                             'kopii, NIE LIVE. Wygasa UTC: '+
                             str(worker_calendar.get('expires') or 'BRAK')+
                             '. Po wygaśnięciu nowe PAPER nie przejdzie tej bramki.')
+                        try:
+                            expire=datetime.fromisoformat(str(worker_calendar.get('expires') or ''))
+                            if expire.tzinfo is not None and timedelta(0) < expire-datetime.now(timezone.utc) <= timedelta(hours=48):
+                                st.error('🕒 KALENDARZ BLS: mniej niż 48 godzin do wygaśnięcia. Zweryfikuj oficjalny harmonogram i odśwież kopię przed terminem.')
+                        except ValueError:
+                            st.error('Nieprawidłowa data ważności BLS. Nie używaj tej kopii.')
                     elif worker_calendar['source']=='BLS_OFFICIAL_LIVE':
                         st.info('🗓️ Ostatni worker PAPER: oficjalny kalendarz BLS, '
                                 'pobrany podczas ostatniego skanu.')
@@ -1641,11 +1647,17 @@ with news_tab:
                ' | BLS: '+('OK' if calendar_is_current(st.session_state) else 'NIEDOSTĘPNY'))
     if st.session_state.get('_news_read_utc'):
         st.caption('Ostatni udany/podjęty skan źródeł (UTC): '+st.session_state['_news_read_utc'])
-    if st.session_state.get('_calendar_source')=='BLS_VERIFIED_SNAPSHOT_NOT_LIVE':
+    if st.session_state.get('_calendar_source') in ('BLS_VERIFIED_SNAPSHOT_NOT_LIVE','BLS_VERIFIED_MANUAL_NOT_LIVE'):
         st.warning('⚠️ KALENDARZ BLS — ZWERYFIKOWANA KOPIA, NIE LIVE. '+
                    'Wygasa UTC: '+str(st.session_state.get('_calendar_expires_utc'))+
                    '. Po wygaśnięciu nowe PAPER będzie zablokowane, '
                    'jeśli BLS nadal nie odpowie.')
+        try:
+            end=datetime.fromisoformat(str(st.session_state.get('_calendar_expires_utc') or ''))
+            if end.tzinfo is not None and timedelta(0) < end-datetime.now(timezone.utc) <= timedelta(hours=48):
+                st.error('🕒 KALENDARZ BLS: kończy się ważność zweryfikowanej kopii w ciągu 48 godzin. Odśwież z oficjalnego źródła.')
+        except ValueError:
+            st.error('Niepoprawna data wygaśnięcia BLS.')
     events=st.session_state.get('_macro_calendar',[])
     is_blocked,notice=macro_blackout(events)
     (st.error if is_blocked else st.info)(notice)

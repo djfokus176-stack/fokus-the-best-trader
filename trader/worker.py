@@ -119,11 +119,11 @@ def scan_once(client,epic,tf,strategy,max_spread,db, *,
                 reasons.append("MACRO_CALENDAR_UNKNOWN")
             else:
                 calendar_source=getattr(calendar,"source","BLS_OFFICIAL_LIVE")
-                if calendar_source=="BLS_VERIFIED_SNAPSHOT_NOT_LIVE":
+                if calendar_source in ("BLS_VERIFIED_SNAPSHOT_NOT_LIVE","BLS_VERIFIED_MANUAL_NOT_LIVE"):
                     # Explicit in every audit log: a short-lived manually
                     # verified schedule is NOT continuously refreshed.
                     diagnostics.append(
-                        "MACRO_SOURCE=BLS_VERIFIED_SNAPSHOT_NOT_LIVE"+
+                        "MACRO_SOURCE="+calendar_source+
                         ";EXPIRES_UTC="+str(getattr(calendar,"expires_utc","UNKNOWN")))
                 else:
                     diagnostics.append("MACRO_SOURCE=BLS_OFFICIAL_LIVE")

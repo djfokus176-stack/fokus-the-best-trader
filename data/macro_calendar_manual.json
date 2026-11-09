@@ -1,0 +1,101 @@
+{
+  "source": "BLS_VERIFIED_MANUAL_NOT_LIVE",
+  "source_urls": [
+    "https://www.bls.gov/schedule/2026/11_sched_list.htm",
+    "https://www.bls.gov/schedule/2026/12_sched_list.htm"
+  ],
+  "source_last_modified": {
+    "november": "2026-11-03",
+    "december": "2026-02-18"
+  },
+  "verified_at_utc": "2026-11-09T20:00:00+00:00",
+  "valid_until_utc": "2026-11-16T20:00:00+00:00",
+  "timezone": "America/New_York",
+  "notes": "Only verified public BLS scheduled releases. Not a live feed and does not cover all US macro releases. 08:30 ET=13:30 UTC in Nov/Dec 2026. Reverify and replace before expiry; never roll dates forward automatically.",
+  "events": [
+    {
+      "data_utc": "2026-11-10T13:30:00+00:00",
+      "wydarzenie": "Consumer Price Index for October 2026"
+    },
+    {
+      "data_utc": "2026-11-10T13:30:00+00:00",
+      "wydarzenie": "Real Earnings for October 2026"
+    },
+    {
+      "data_utc": "2026-11-13T13:30:00+00:00",
+      "wydarzenie": "Producer Price Index for October 2026"
+    },
+    {
+      "data_utc": "2026-11-17T13:30:00+00:00",
+      "wydarzenie": "U.S. Import and Export Price Indexes for October 2026"
+    },
+    {
+      "data_utc": "2026-11-18T15:00:00+00:00",
+      "wydarzenie": "Employer-Reported Workplace Injuries and Illnesses (Annual) for 2025"
+    },
+    {
+      "data_utc": "2026-11-20T15:00:00+00:00",
+      "wydarzenie": "State Employment and Unemployment (Monthly) for October 2026"
+    },
+    {
+      "data_utc": "2026-11-20T15:00:00+00:00",
+      "wydarzenie": "Total Factor Productivity for Major Industries for Annual 2025"
+    },
+    {
+      "data_utc": "2026-12-01T15:00:00+00:00",
+      "wydarzenie": "Job Openings and Labor Turnover Survey for October 2026"
+    },
+    {
+      "data_utc": "2026-12-02T15:00:00+00:00",
+      "wydarzenie": "County Employment and Wages for Second Quarter 2026"
+    },
+    {
+      "data_utc": "2026-12-02T15:00:00+00:00",
+      "wydarzenie": "Metropolitan Area Employment and Unemployment (Monthly) for October 2026"
+    },
+    {
+      "data_utc": "2026-12-04T13:30:00+00:00",
+      "wydarzenie": "Employment Situation for November 2026"
+    },
+    {
+      "data_utc": "2026-12-08T13:30:00+00:00",
+      "wydarzenie": "Productivity and Costs (R) for Third Quarter 2026"
+    },
+    {
+      "data_utc": "2026-12-10T13:30:00+00:00",
+      "wydarzenie": "Consumer Price Index for November 2026"
+    },
+    {
+      "data_utc": "2026-12-10T13:30:00+00:00",
+      "wydarzenie": "Real Earnings for November 2026"
+    },
+    {
+      "data_utc": "2026-12-15T13:30:00+00:00",
+      "wydarzenie": "Producer Price Index for November 2026"
+    },
+    {
+      "data_utc": "2026-12-16T15:00:00+00:00",
+      "wydarzenie": "Census of Fatal Occupational Injuries for Annual 2025"
+    },
+    {
+      "data_utc": "2026-12-16T15:00:00+00:00",
+      "wydarzenie": "Employer Costs for Employee Compensation for September 2026"
+    },
+    {
+      "data_utc": "2026-12-17T13:30:00+00:00",
+      "wydarzenie": "U.S. Import and Export Price Indexes for November 2026"
+    },
+    {
+      "data_utc": "2026-12-18T15:00:00+00:00",
+      "wydarzenie": "State Employment and Unemployment (Monthly) for November 2026"
+    },
+    {
+      "data_utc": "2026-12-18T15:00:00+00:00",
+      "wydarzenie": "Work Experience of the Population (Annual) for 2025"
+    },
+    {
+      "data_utc": "2026-12-30T15:00:00+00:00",
+      "wydarzenie": "Metropolitan Area Employment and Unemployment (Monthly) for November 2026"
+    }
+  ]
+}

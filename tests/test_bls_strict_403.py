@@ -31,6 +31,10 @@ def test_bls_403_is_not_reinterpreted_as_empty_safe_calendar():
         content=b"ACCESS DENIED"
         def raise_for_status(self):
             raise requests.HTTPError("403 Forbidden",response=response)
-    with pytest.raises(ValueError,match="SNAPSHOT_EXPIRED"):
+    checked=fetch_bls_schedule(get=lambda *a,**kw:Rejected(),
+        now=datetime(2026,11,10,1,0,tzinfo=timezone.utc))
+    assert checked.source=="BLS_VERIFIED_MANUAL_NOT_LIVE"
+    assert len(checked)>10
+    with pytest.raises(ValueError,match="BLS_MANUAL_VERIFICATION_EXPIRED"):
         fetch_bls_schedule(get=lambda *a,**kw:Rejected(),
-            now=datetime(2026,11,10,1,0,tzinfo=timezone.utc))
+            now=datetime(2026,11,17,1,0,tzinfo=timezone.utc))

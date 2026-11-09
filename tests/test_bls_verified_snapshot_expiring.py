@@ -58,10 +58,13 @@ def test_both_official_sources_403_use_only_short_lived_backup():
     assert cal.expires_utc==VALID_UNTIL_UTC.isoformat()
 
 
-def test_backup_expires_and_does_not_reopen_without_official_live_calendar():
+def test_legacy_backup_expires_but_checked_manual_fallback_is_separate():
     for at in [VALID_UNTIL_UTC,VALID_UNTIL_UTC+timedelta(hours=6)]:
-        with pytest.raises(ValueError,match="BLS_VERIFIED_SNAPSHOT_EXPIRED"):
-            fetch_bls_schedule(get=reject,now=at)
+        checked=fetch_bls_schedule(get=reject,now=at)
+        assert checked.source=="BLS_VERIFIED_MANUAL_NOT_LIVE"
+        assert checked.expires_utc=="2026-11-16T20:00:00+00:00"
+    with pytest.raises(ValueError,match="BLS_MANUAL_VERIFICATION_EXPIRED"):
+        fetch_bls_schedule(get=reject,now=datetime(2026,11,16,20,tzinfo=timezone.utc))
 
 
 def test_no_backup_on_bls_500():
@@ -93,7 +96,8 @@ def test_worker_logs_snapshot_source_and_expiry_without_changing_paper_gate():
     from pathlib import Path
     root=Path(__file__).resolve().parents[1]
     code=(root/"trader"/"worker.py").read_text(encoding="utf8")
-    assert "MACRO_SOURCE=BLS_VERIFIED_SNAPSHOT_NOT_LIVE" in code
+    assert '"BLS_VERIFIED_SNAPSHOT_NOT_LIVE","BLS_VERIFIED_MANUAL_NOT_LIVE"' in code
+    assert '"MACRO_SOURCE="+calendar_source+' in code
     assert "MACRO_BLACKOUT" in code
     assert 'if not reasons and verdict.action in ("LONG","SHORT")' in code
     app=(root/"app.py").read_text(encoding="utf8")
