@@ -5,7 +5,7 @@ from trader.visuals import historical_marks
 import pandas as pd
 
 
-def test_auto_requires_two_same_direction_after_mtf(monkeypatch):
+def test_auto_two_candidates_still_accepted_after_mtf(monkeypatch):
     def rule(_frame, name, spread):
         side="LONG" if name in auto_strategy.ALL_STRATEGIES[:2] else "WAIT"
         return (Decision(side,name,"synthetic",100,98,104,1.8) if side=="LONG"
@@ -36,16 +36,16 @@ def test_auto_conflicting_raw_sides_are_wait_even_if_one_vetoed(monkeypatch):
     assert len(rows)==6
 
 
-def test_auto_single_approved_wait_and_mtf_veto(monkeypatch):
+def test_auto_single_approved_enters_paper_hypothesis_and_mtf_veto_wait(monkeypatch):
     def rule(frame,name,spread):
         return Decision("LONG",name,"synthetic",100,98,104,2) if name==auto_strategy.ALL_STRATEGIES[0] else Decision("WAIT",name,"none")
     monkeypatch.setattr(auto_strategy,"decide_any",rule)
     d,_=auto_strategy.evaluate_auto(pd.DataFrame(),.6,use_mtf=False)
-    assert d.action=="WAIT" and "1/2" in d.reason
+    assert d.action=="LONG" and "1/1" in d.reason
     monkeypatch.setattr(auto_strategy,"filter_mtf_decision",
         lambda d,snaps,asof:(Decision("WAIT",d.strategy,"MTF unavailable"),[]))
     d,_=auto_strategy.evaluate_auto(pd.DataFrame(),.6,use_mtf=True)
-    assert d.action=="WAIT" and "0/2" in d.reason
+    assert d.action=="WAIT" and "0/1" in d.reason
 
 
 def test_auto_never_uses_a_vetoed_candidate_as_entry(monkeypatch):
@@ -60,7 +60,7 @@ def test_auto_never_uses_a_vetoed_candidate_as_entry(monkeypatch):
         return dec,[]
     monkeypatch.setattr(auto_strategy,"filter_mtf_decision",veto_first)
     d,_=auto_strategy.evaluate_auto(pd.DataFrame(),.6,use_mtf=True)
-    assert d.action=="WAIT"
+    assert d.action=="LONG" and d.strategy==auto_strategy.ALL_STRATEGIES[1]
 
 
 def test_historical_auto_marks_is_audit_not_trade(monkeypatch):
@@ -75,3 +75,47 @@ def test_historical_auto_marks_is_audit_not_trade(monkeypatch):
     arrows=visuals.historical_marks(df,AUTO_MODE,max_bars=60)
     assert arrows.empty
     assert list(arrows.columns)==["time","action","price","reason"]
+
+def test_counts_one_of_two_then_two_of_three_and_unchanged_conflict_veto(monkeypatch):
+    from trader.auto_strategy import vote_summary
+    sides = ["LONG", "LONG", "WAIT", "WAIT", "WAIT", "WAIT"]
+    veto = {1}
+    def rule(frame,name,spread):
+        i = auto_strategy.ALL_STRATEGIES.index(name)
+        return (Decision("LONG",name,"controlled",100,98,103,2)
+                if sides[i]=="LONG" else Decision("WAIT",name,"none"))
+    def screen(d,snaps,asof):
+        i = auto_strategy.ALL_STRATEGIES.index(d.strategy)
+        return (Decision("WAIT",d.strategy,"MTF veto"),[]) if i in veto else (d,[])
+    monkeypatch.setattr(auto_strategy,"decide_any",rule)
+    monkeypatch.setattr(auto_strategy,"filter_mtf_decision",screen)
+    d,rows=auto_strategy.evaluate_auto(pd.DataFrame(),.6,{},use_mtf=True)
+    assert d.action=="LONG"
+    assert vote_summary(rows)["label"]=="1/2"
+    assert "1/2" in d.reason
+    assert vote_summary(rows)["approved_names"]==[auto_strategy.ALL_STRATEGIES[0]]
+    sides[2] = "LONG"
+    veto = {2}
+    d,rows=auto_strategy.evaluate_auto(pd.DataFrame(),.6,{},use_mtf=True)
+    assert d.action=="LONG" and "2/3" in d.reason
+    assert vote_summary(rows)["label"]=="2/3"
+    assert len(vote_summary(rows)["approved_names"])==2
+    sides[1] = "SHORT"
+    d,rows=auto_strategy.evaluate_auto(pd.DataFrame(),.6,{},use_mtf=True)
+    assert d.action=="WAIT" and "Konflikt" in d.reason
+    assert vote_summary(rows)["conflict"] is True
+
+
+def test_counts_two_of_two_and_no_signal(monkeypatch):
+    from trader.auto_strategy import vote_summary
+    def synthetic(frame,name,spread):
+        if name in auto_strategy.ALL_STRATEGIES[:2]:
+            return Decision("LONG",name,"OK",100,98,105,2)
+        return Decision("WAIT",name,"NO")
+    monkeypatch.setattr(auto_strategy,"decide_any",synthetic)
+    d,rows=auto_strategy.evaluate_auto(pd.DataFrame(),.5,use_mtf=False)
+    assert d.action=="LONG" and vote_summary(rows)["label"]=="2/2"
+    monkeypatch.setattr(auto_strategy,"decide_any",
+        lambda frame,name,spread: Decision("WAIT",name,"no setup"))
+    d,rows=auto_strategy.evaluate_auto(pd.DataFrame(),.5,use_mtf=False)
+    assert d.action=="WAIT" and vote_summary(rows)["label"]=="0/0"
