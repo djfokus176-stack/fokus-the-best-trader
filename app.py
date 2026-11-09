@@ -15,6 +15,8 @@ from trader.strategy import indicators, backtest
 from trader.strategies_pro import decide_any, ALL_STRATEGIES
 from trader.ema50_wave import STRATEGY_NAME as WAVE_NAME
 from trader.auto_strategy import AUTO_MODE, evaluate_auto
+from trader.legacy_v71_shadow import (evaluate_v71_shadow, LEGACY_V71_LABEL,
+                                     SENSITIVITIES as LEGACY_V71_SENSITIVITIES)
 from trader.mtf import TIMEFRAMES, LABELS, evaluate_timeframes, filter_mtf_decision
 from trader.research import chronological_report, rolling_oos, replay, stats
 from trader.mtf_replay import compare_mtf_on_m1_csv
@@ -1548,6 +1550,67 @@ with strategies_tab:
                 'RR':d.rr,'Powód':d.reason if filtered_action==d.action else filtered.reason})
         st.dataframe(pd.DataFrame(all_rows),hide_index=True,use_container_width=True)
         st.info('Jednoczesne różne sygnały NIE oznaczają, że należy je sumować. Każda strategia wymaga oddzielnego, rozliczonego testu.')
+
+        st.markdown('#### 🔬 METODA ZE STAREGO SYSTEMU v7.1 — LEGACY SHADOW')
+        st.caption('SP500 SIGNAL AI PRO v7.1 (sp500-kolega-gemini): '
+                   'odtworzone WARUNKI WEJŚCIA M1 (formacja + EMA + RSI + zamknięte M5). '
+                   'Nie jest częścią AUTO 6, nie otwiera PAPER ani zleceń DEMO. '
+                   'Nie odtwarza starszych pozycji ani jego zamknięć.')
+        if tf != 'MINUTE':
+            st.info('Do porównania metody v7.1 wybierz M1 w menu bocznym.')
+        else:
+            old_sensitivity = st.selectbox(
+                'Wariant historycznej metody v7.1',
+                LEGACY_V71_SENSITIVITIES, index=0,
+                key='legacy_v71_shadow_sensitivity')
+            m5_old = st.session_state.get('mtf_snapshots',{}).get('MINUTE_5')
+            m5_verified = (m5_old is not None and m5_old.good
+                           and m5_old.epic == snap.epic
+                           and m5_old.source == snap.source
+                           and m5_old.resolution == 'MINUTE_5'
+                           and current_feed_status(m5_old, m5_old.source)[0])
+            old = evaluate_v71_shadow(
+                snap.frame, m5_old.frame if m5_verified else None,
+                snap.spread, sensitivity=old_sensitivity)
+            from trader.strategy import Decision as _ShadowDecision
+            filtered_old, _ = filter_mtf_decision(
+                _ShadowDecision(old.action, LEGACY_V71_LABEL, old.reason),
+                st.session_state.get('mtf_snapshots',{}),
+                asof=snap.confirmed_utc)
+            fresh = (current_feed_status(snap,src)[0]
+                     and st.session_state.get('_market_status')=='TRADEABLE'
+                     and not src.startswith('CSV'))
+            after = filtered_old.action if fresh else 'WAIT / DANE NIEPOTWIERDZONE'
+            st.dataframe(pd.DataFrame([{
+                'Pochodzenie':'SP500 SIGNAL AI PRO v7.1 (stary bot)',
+                'Zamknięta M1 (SHADOW)':old.action,
+                'Po MTF nowego FOKUS':after,
+                'Formacja v7.1':old.pattern,
+                'M5':old.m5_bias,
+                'RSI v7.1':round(old.rsi,1) if old.rsi is not None else None,
+                'Powód':filtered_old.reason if filtered_old.action!=old.action else old.reason
+            }]), hide_index=True, use_container_width=True)
+            if old.action in ('LONG','SHORT'):
+                st.warning('To KANDYDAT starej metody, nie zlecenie '
+                           'i nie otwarta pozycja. AUTO pozostaje bez zmian.')
+            else:
+                st.caption('Stary algorytm również nie potwierdza teraz wejścia. '
+                           'Historyczna strzałka nie jest bieżącym zleceniem.')
+            st.caption('M5 potwierdzone: '+('TAK' if m5_verified else 'NIE')+
+                       '. Procentu trafności nie podaję bez rozliczonych '
+                       'transakcji po kosztach.')
+        with st.expander('📖 CO MUSI SIĘ STAĆ? — WARUNKI SZEŚCIU STRATEGII'):
+            st.dataframe(pd.DataFrame([
+                {'Strategia':'DRUGA FALA','Warunki':'Impuls min. 1,5 ATR, korekta przy EMA9, wybicie poprzednich ekstremów'},
+                {'Strategia':'EMA TREND','Warunki':'EMA9/21/50 we właściwym kierunku, cena nad/pod EMA9, RSI LONG 47–70 / SHORT 30–53'},
+                {'Strategia':'LIQUIDITY SWEEP','Warunki':'Fałszywe wybicie lokalnego ekstremum o 0,05 ATR i powrót świecy do zakresu'},
+                {'Strategia':'BREAKOUT RETEST','Warunki':'Wybicie dawnego poziomu, powrót i zamknięcie po właściwej stronie'},
+                {'Strategia':'EMA PULLBACK','Warunki':'Trend EMA, korekta do EMA21, następnie świeca potwierdzająca'},
+                {'Strategia':'VOLATILITY BREAKOUT','Warunki':'Wcześniejsza kompresja zakresu i silne wybicie z konsolidacji'}
+            ]),hide_index=True,use_container_width=True)
+            st.caption('Każdy kandydat przechodzi koszty, RR, przeszkody oraz '
+                       'MTF. AUTO wymaga dwóch zgodnych strategii i braku konfliktu. '
+                       'To nie jest potwierdzona przewaga statystyczna.')
 
 
 with news_tab:
