@@ -175,6 +175,7 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
     auto_state=payload.get("auto_ai",{})
     candidates=payload.get("candidate_feed",[])
     forecast_state=payload.get("forecast_research",{})
+    vote_audit=payload.get("last_vote_audit") or {}
     news_feed=dict(payload.get("news_radar") or {})
     macro_watch=dict(payload.get("macro_watch") or {})
     utc=datetime.now(timezone.utc)
@@ -211,7 +212,29 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
                          "events":[],"errors":{"worker":type(exc).__name__},
                          "sources":{}}
     def review_snapshot(snapshot,decision,votes,views,blockers):
-        nonlocal auto_state,candidates,forecast_state
+        nonlocal auto_state,candidates,forecast_state,vote_audit
+        # Only a read-only audit. These results were ALREADY computed by
+        # evaluate_auto / filter_mtf_decision. Never alter trade decisions.
+        vote_audit={
+            "candle_utc":snapshot.confirmed_utc.isoformat(),
+            "epic":epic,"source":snapshot.source,
+            "mode":strategy,
+            "decision":decision.action,
+            "rows":[{
+                "strategy":str(v.get("Strategia",""))[:75],
+                "raw":str(v.get("Setup OHLC","WAIT"))[:10],
+                "after_mtf":str(v.get("Po filtrze MTF","WAIT"))[:10],
+                "reason":str(v.get("Powód",""))[:240]
+            } for v in list(votes or [])[:6]],
+            "mtf":[{
+                "timeframe":str(v.timeframe),
+                "ready":bool(v.ready),
+                "trend":str(v.trend)[:20],
+                "reason":str(v.reason)[:150],
+                "candle_utc":str(getattr(v,"candle_utc",""))
+            } for v in list(views or [])[:4]],
+            "blockers":list(blockers or [])[:10],
+        }
         from .forecast_audit import update_forecast
         # Only fresh, verified closed bars can enter future-price SHADOW audit.
         # The resulting predictions are not inputs to PAPER or risk gates.
@@ -246,6 +269,8 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
         payload["macro_watch"]=macro_watch
         if isinstance(forecast_state,dict):
             payload["forecast_research"]=forecast_state
+        if isinstance(vote_audit,dict):
+            payload["last_vote_audit"]=vote_audit
         from .paper_learning import strategy_scorecard
         payload["learning_report"]=strategy_scorecard(db,epic=epic)
         payload["meta"]={
@@ -266,7 +291,29 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             "worker":"GitHub Actions or foreground process",
             "telegram_remote":"DISABLED"}
         new_version=remote.save(version,payload)
-        return status+f" / CLOUD_CHECKPOINT_VERSION={new_version} / TELEGRAM_REMOTE=DISABLED"
+        audit_line=""
+        if (isinstance(vote_audit,dict) and vote_audit.get("rows")
+                and vote_audit.get("candle_utc")
+                and status.startswith(vote_audit["candle_utc"])):
+            # Exact six votes are printed for FUTURE scans, never backfilled.
+            # If market data is stale, do not reprint old vote snapshots.
+            import json
+            compact=[str(v.get("strategy",""))+":"+
+                     str(v.get("raw","WAIT"))+">"+
+                     str(v.get("after_mtf","WAIT"))
+                     for v in vote_audit["rows"]]
+            audit_line=" / SIX_VOTES="+json.dumps(compact,ensure_ascii=False)
+            blocked=[str(v.get("strategy",""))+":"+
+                     str(v.get("reason",""))[:125]
+                     for v in vote_audit["rows"]
+                     if v.get("raw") in ("LONG","SHORT") and v.get("after_mtf")=="WAIT"]
+            if blocked:
+                audit_line+=" / MTF_VETO="+json.dumps(blocked,ensure_ascii=False)
+            audit_line+=" / MTF_STATES="+json.dumps([
+                str(v.get("timeframe"))+":"+str(v.get("trend"))+
+                (":READY" if v.get("ready") else ":NOT_READY")
+                for v in vote_audit.get("mtf",[])],ensure_ascii=False)
+        return status+f" / CLOUD_CHECKPOINT_VERSION={new_version} / TELEGRAM_REMOTE=DISABLED"+audit_line
     finally:
         db.close()
 

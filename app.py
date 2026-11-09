@@ -201,6 +201,7 @@ def paper_view_db():
         st.session_state['_paper_remote_meta']=payload.get('meta') or {}
         st.session_state['_paper_remote_auto_ai']=payload.get('auto_ai') or {}
         st.session_state['_paper_remote_candidates']=payload.get('candidate_feed') or []
+        st.session_state['_paper_remote_vote_audit']=payload.get('last_vote_audit') or {}
         st.session_state['_paper_remote_news']=payload.get('news_radar') or {}
         st.session_state['_paper_remote_macro_watch']=payload.get('macro_watch') or {}
         st.session_state['_paper_remote_forecasts']=payload.get('forecast_research') or {}
@@ -1566,6 +1567,27 @@ with reports_tab:
                         st.info('Brak zweryfikowanych dat FED/BEA — źródło może być niedostępne.')
                     if macro.get('errors'):
                         st.error('Niepełny odczyt urzędowy: '+str(macro['errors']))
+                with st.expander('🎯 6 STRATEGII — GŁOSY PRZED I PO MTF (OSTATNI SKAN)',expanded=True):
+                    audit=st.session_state.get('_paper_remote_vote_audit') or {}
+                    stamp=audit.get('candle_utc')
+                    st.caption('Świeca UTC: '+str(stamp or 'BRAK')+
+                               ' | Decyzja workera: '+str(audit.get('decision','BRAK')))
+                    if audit.get('rows'):
+                        st.dataframe(pd.DataFrame(audit['rows']).rename(columns={
+                            'strategy':'Strategia','raw':'Sygnał OHLC',
+                            'after_mtf':'Po filtrze MTF','reason':'Powód'}),
+                            hide_index=True,use_container_width=True)
+                        if audit.get('mtf'):
+                            st.dataframe(pd.DataFrame(audit['mtf']).rename(columns={
+                                'timeframe':'Interwał','trend':'Trend',
+                                'ready':'Gotowy','reason':'Wyjaśnienie',
+                                'candle_utc':'Świeca UTC'}),
+                                hide_index=True,use_container_width=True)
+                        st.caption('To ostatnia ZAPISANA diagnoza, nie stan live. '
+                                   'Przy braku świeżego skanu wynik może być przestarzały.')
+                    else:
+                        st.warning('Historyczny checkpoint nie zawiera sześciu głosów. '
+                                   'Nowy zapis powstanie dopiero po świeżym skanie workera.')
                 with st.expander('🔎 ARCHIWUM RADARU — SUROWE SYGNAŁY I POWODY BLOKAD',expanded=True):
                     st.caption('Nie są to pozycje PAPER ani zweryfikowane typy. Zapis z workera '
                                'na kolejnych zamkniętych świecach, również gdy decyzją jest WAIT.')
