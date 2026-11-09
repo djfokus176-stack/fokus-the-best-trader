@@ -1633,7 +1633,7 @@ with strategies_tab:
                         st.caption('Stary v7.1 jest tylko historycznym SHADOW i nie wchodzi do AUTO. '
                                    'Jeśli jego sygnał pojawił się wcześniej niż sygnał FOKU$, '
                                    'nie oznacza to, że stara metoda jest zyskowna. '
-                                   'To REKONSTRUKCJA sygnałów z aktualnej historii, ')
+                                   'To REKONSTRUKCJA sygnałów z aktualnej historii, '
                                    'nie rzeczywiste otwarcia: nie odtwarza starego '
                                    'kalendarza makro, działania workera ani '
                                    'cen wykonania. Nie sumuj hipotetycznych '
