@@ -35,7 +35,10 @@ def validated_worker_args(environ=None):
     epic=str(env.get("CAPITAL_EPIC","US500")).strip()
     if not epic.replace("_","").isalnum():
         raise ValueError("Invalid instrument EPIC.")
-    return ["--interval",str(interval),"--epic",epic,"--tf","MINUTE"]
+    args=["--interval",str(interval),"--epic",epic,"--tf","MINUTE"]
+    if str(env.get("FOKUS_PAPER_ALIGN_MINUTE","false")).lower() in ("true","1","yes"):
+        args.append("--align-minute")
+    return args
 
 
 def main():

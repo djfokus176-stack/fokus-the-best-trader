@@ -318,10 +318,28 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
         db.close()
 
 
+def seconds_until_next_m1_scan(now=None,grace_seconds=8):
+    """Next UTC minute boundary + grace, no sub-minute speculative strategy.
+
+    A positive delay is always returned, even when called at the boundary.
+    If a scan overruns the next minute, skip the missed invocation instead
+    of creating duplicate overlapping cloud writers.
+    """
+    now=now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        raise ValueError("UTC-aware time required")
+    grace=max(3,min(20,int(grace_seconds)))
+    seconds=now.timestamp()
+    next_tick=(int((seconds-grace)//60)+1)*60+grace
+    return max(0.001,next_tick-seconds)
+
+
 def main(argv=None):
     parser=argparse.ArgumentParser(description="Foreground Capital DEMO PAPER v3 scanner, no live trades")
     parser.add_argument("--once",action="store_true")
     parser.add_argument("--interval",type=int,default=65)
+    parser.add_argument("--align-minute",action="store_true",
+        help="Scan just after each UTC M1 close (foreground PAPER only).")
     parser.add_argument("--epic",default=os.getenv("CAPITAL_EPIC","US500"))
     parser.add_argument("--tf",choices=list(TIMEFRAMES),default="MINUTE")
     parser.add_argument("--strategy",choices=[AUTO_MODE,*ALL_STRATEGIES,WAVE_NAME],
@@ -370,7 +388,8 @@ def main(argv=None):
                 raise SystemExit(1) from None
         if args.once:
             break
-        time.sleep(args.interval)
+        time.sleep(seconds_until_next_m1_scan() if args.align_minute
+                   else args.interval)
 
 if __name__=="__main__":
     main()
