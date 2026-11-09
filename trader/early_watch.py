@@ -129,3 +129,29 @@ def recent_watch_markers(frame: pd.DataFrame, *, last_bars=45, limit=8):
                 "score":latest.score,"reason":latest.reason,
             })
     return result[-limit:]
+
+
+def annotate_watch_markers(fig, frame: pd.DataFrame, *, last_bars=35, limit=8):
+    """Add real Plotly hollow-circle WATCH traces; never fake PAPER arrows.
+
+    Caller must validate Capital.com DEMO source, TRADEABLE broker status
+    and freshness BEFORE calling. Only completed M1 candle history is used.
+    The resulting traces are display-only; this function never writes trades.
+    """
+    import plotly.graph_objects as go
+    points = recent_watch_markers(frame,last_bars=last_bars,limit=limit)
+    for side,color in (("LONG","#49d5ce"),("SHORT","#ffb15c")):
+        matches=[p for p in points if p["side"]==side]
+        if not matches:
+            continue
+        fig.add_trace(go.Scatter(
+            x=[p["time"] for p in matches],
+            y=[p["low"]-.15 if side=="LONG" else p["high"]+.15 for p in matches],
+            mode="markers",
+            name="👀 OBSERWUJ "+side+" (NIE PAPER)",
+            marker={"symbol":"circle-open","size":12,
+                    "color":color,"line":{"width":2,"color":color}},
+            text=["👀 OBSERWUJ "+p["side"]+" — "+p["reason"]
+                  for p in matches],
+            hovertemplate="%{x}<extra>%{text}</extra>"))
+    return points

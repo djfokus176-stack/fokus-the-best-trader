@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
-from trader.early_watch import evaluate_early_watch, recent_watch_markers
+from trader.early_watch import evaluate_early_watch, recent_watch_markers, annotate_watch_markers
 from trader.mtf import timeframe_refresh_needed
 
 
@@ -92,8 +92,30 @@ def test_ui_is_exclusively_watch_not_broker_or_paper_queuing():
     src=(root/"trader"/"early_watch.py").read_text("utf-8")
     assert "OBSERWUJ (bez transakcji)" in ui
     assert "POBIERZ PONOWNIE BRAKUJĄCE MTF" in ui
-    assert "circle-open" in ui
-    assert "👀 OBSERWUJ " in ui
+    assert "annotate_watch_markers(fig,snap.frame" in ui
+    assert "circle-open" in src
+    assert "👀 OBSERWUJ " in src
     assert "queue_paper" not in src
     assert "progress_paper" not in src
     assert "api_key" not in src
+
+
+def test_real_plotly_watch_trace_is_visible_and_never_a_paper_arrow():
+    import plotly.graph_objects as go
+    for direction,side in ((1,"LONG"),(-1,"SHORT")):
+        data=candles(direction)
+        chart=go.Figure(go.Candlestick(
+            x=data.index,open=data.Open,high=data.High,low=data.Low,close=data.Close))
+        watches=annotate_watch_markers(chart,data,last_bars=30)
+        assert watches and watches[-1]["side"]==side
+        dot=[trace for trace in chart.data if "OBSERWUJ "+side in str(trace.name or "")]
+        assert len(dot)==1
+        assert dot[0].mode=="markers"
+        assert dot[0].marker.symbol=="circle-open"
+        assert dot[0].x[-1]==data.index[-1]
+        assert ("NIE PAPER" in dot[0].name)
+        assert all(t.mode=="markers" for t in chart.data[1:])
+        assert len(chart.data)>1
+    short=go.Figure()
+    assert annotate_watch_markers(short,data.iloc[:40])==[]
+    assert len(short.data)==0
