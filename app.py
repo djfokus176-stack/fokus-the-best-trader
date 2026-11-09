@@ -896,6 +896,34 @@ with market_tab:
             if current_ready and not status_ready:
                 st.warning(f'🟡 WAIT / STATUS BROKERA: {market_status}. Bez potwierdzenia TRADEABLE brak nowych sygnałów.')
             ready=current_ready and status_ready
+            if st.session_state.get('early_watch_enabled',True) and tf=='MINUTE' and ready:
+                # WATCH is a separate read-only heuristic, never a trade arrow.
+                bias=evaluate_early_watch(snap.frame)
+                watch_points=recent_watch_markers(snap.frame,last_bars=35,limit=8)
+                for watch_side,watch_color in (('LONG','#49d5ce'),('SHORT','#ffb15c')):
+                    points=[p for p in watch_points if p['side']==watch_side]
+                    if points:
+                        fig.add_trace(go.Scatter(
+                            x=[p['time'] for p in points],
+                            y=[p['low']-.15 if watch_side=='LONG' else p['high']+.15 for p in points],
+                            mode='markers',
+                            name='👀 OBSERWUJ '+watch_side+' (NIE PAPER)',
+                            marker={'symbol':'circle-open','size':12,
+                                    'color':watch_color,
+                                    'line':{'width':2,'color':watch_color}},
+                            text=['👀 OBSERWUJ '+p['side']+' — '+p['reason']
+                                  for p in points],
+                            hovertemplate='%{x}<extra>%{text}</extra>'))
+                if bias.side in ('LONG','SHORT'):
+                    st.info('👀 **OBSERWUJ '+bias.side+'** — '+bias.reason+
+                            ' Wynik heurystyki: '+str(bias.score)+
+                            '/6. To NIE jest wejście PAPER. '
+                            'Nie uwzględnia pełnego MTF, BLS ani RR.')
+                else:
+                    st.caption('👀 Wczesny kierunek: '+bias.reason)
+                st.caption('◯ Kółko turkusowe = obserwacja LONG, pomarańczowe = SHORT. '
+                           'Tylko potwierdzone ZAMKNIĘTE świece. Kółka to nie '
+                           'strzałki wejścia; PAPER pozostaje oddzielną symulacją.')
             remote_health=st.session_state.get('_paper_remote_meta') or {}
             remote_is_on=remote_paper_view_enabled()
             worker_calendar=(worker_calendar_health(remote_health)
