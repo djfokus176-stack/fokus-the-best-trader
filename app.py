@@ -2353,6 +2353,20 @@ with reports_tab:
         with y:
             research_slip=st.number_input('Poślizg na stronę (pkt)',value=.25,min_value=0.,max_value=5.,step=.05,key='research_slip')
         st.caption(f'Badany zbiór: {len(research_frame)} świec {tf}. CSV nie jest ceną wykonalną. Limit przyczynowego replay: maksimum 1 pozycja na raz.')
+        st.warning('⚠️ Ten eksperyment testuje SAME FORMACJE OHLC każdej strategii. '
+                   'Nie odtwarza pełnego workera: MTF M1/M5/M15/H1, kalendarza '
+                   'BLS, statusu brokera, kontroli freshness i jednego '
+                   'wspólnego portfela AUTO. Sygnał w replay NIE oznacza '
+                   'zatwierdzonego sygnału PAPER na Northflank.')
+        if research_spread+1e-6<float(snap.spread):
+            st.warning(f'Spread testowy {research_spread:.2f} pkt jest NIŻSZY '
+                       f'niż spread ostatniej zamkniętej świecy '
+                       f'{snap.spread:.2f} pkt. Wyniki mogą zawyżać przewagę; '
+                       'przelicz również na realistycznych kosztach.')
+        if len(research_frame)<4600:
+            st.caption('Pełne badanie historycznego MTF H1 wymaga >=4600 '
+                       'ciągłych świec M1 z poprawnymi godzinami UTC; '
+                       'obecna próbka nie wystarcza do porównania z/bez MTF.')
         if st.button('🔬 PRZELICZ WSZYSTKIE 6 STRATEGII / HOLDOUT',type='primary',key='research_run'):
             with st.spinner('Liczenie formacji i symulacji z uwzględnieniem kosztów...'):
                 try:
@@ -2366,7 +2380,17 @@ with reports_tab:
         research=st.session_state.get('_latest_research')
         if research and research['signature']==current_sig:
             table=research['table']
-            st.dataframe(table,use_container_width=True,hide_index=True)
+            st.caption('Kolumna „TP trafione” liczy tylko osiągnięty take-profit. '
+                       'Pozycja zamknięta z dodatnim P&L po 20 minutach '
+                       '(TIMEOUT) może mieć 0 trafionych TP — to NIE '
+                       'błąd matematyczny. „Zyskowne P&L” liczy wszystkie '
+                       'dodatnio rozliczone pozycje, niezależnie od przyczyny wyjścia.')
+            visible=table.rename(columns={
+                'wins':'TP trafione','win_rate_pct':'TP trafione %',
+                'profitable_trades':'Zyskowne P&L',
+                'pnl_win_rate_pct':'Zyskowne P&L %',
+                'timeouts':'TIMEOUT','positive_timeouts':'Dodatni TIMEOUT'})
+            st.dataframe(visible,use_container_width=True,hide_index=True)
             st.download_button('⬇️ EKSPORT RAPORTU CSV',data=table.to_csv(index=False).encode('utf-8-sig'),
                 file_name='FOKUS_RESEARCH_HOLDOUT.csv',mime='text/csv')
             if int(table.n.sum())<30:
