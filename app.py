@@ -15,6 +15,7 @@ from trader.strategy import indicators, backtest
 from trader.strategies_pro import decide_any, ALL_STRATEGIES
 from trader.ema50_wave import STRATEGY_NAME as WAVE_NAME
 from trader.auto_strategy import AUTO_MODE, evaluate_auto, vote_summary
+from trader.strategy_progress import progress_for_votes
 from trader.strategy_selector import market_context, PRIORITY, select_approved
 from trader.signal_audit import audit_recent_closed_bars
 from trader.legacy_v71_shadow import (evaluate_v71_shadow, LEGACY_V71_LABEL,
@@ -212,6 +213,7 @@ def paper_view_db():
         st.session_state['_paper_remote_macro_watch']=payload.get('macro_watch') or {}
         st.session_state['_paper_remote_forecasts']=payload.get('forecast_research') or {}
         st.session_state['_paper_remote_learning']=payload.get('learning_report') or {}
+        st.session_state['_paper_remote_shadow_report']=payload.get('shadow_learning_report') or {}
         return db
     return connect()
 
@@ -1082,6 +1084,36 @@ with market_tab:
                             f"Odrzucone przez MTF {counts['vetoed']} | "
                             f"Konflikt kierunków: {'TAK' if counts['conflict'] else 'NIE'}")
                     st.caption('Licznik 1/2 oznacza: jeden sygnał przeszedł MTF z dwóch wykrytych przed MTF. To NIE skuteczność ani prawdopodobieństwo.')
+                    local_blockers=([] if (ready and
+                        st.session_state.get('mtf_enabled',False) and
+                        calendar_is_current(st.session_state) and
+                        secret('FOKUS_CANDLE_TIME_CONFIRMED','').lower()=='open')
+                        else ['Lokalne dane/MTF/BLS/zegar niepotwierdzone'])
+                    progress=progress_for_votes(snap.frame,auto_audit,local_blockers)
+                    st.markdown('#### 🔎 PRZESŁANKI 0/3 → 3/3 — KTÓRA STRATEGIA?')
+                    st.caption('1/3 kontekst, 2/3 następny warunek, 3/3 pełny setup '
+                        '+ MTF + bramki. To NIE procent skuteczności ani zlecenie. '
+                        'Wynik LOCAL; decyzję workera sprawdzaj osobno w RAPORTY.')
+                    if progress:
+                        rows=[{'Strategia':p['strategy'],
+                               'Przesłanki':p['progress'],
+                               'Kierunek':p['side'],
+                               'Warunek 1':p['criteria'][0]['name']+
+                                   (' ✅' if p['criteria'][0]['ok'] else ' ❌'),
+                               'Warunek 2':p['criteria'][1]['name']+
+                                   (' ✅' if p['criteria'][1]['ok'] else ' ❌'),
+                               'Warunek 3':('✅ Setup + MTF + bramki'
+                                   if p['criteria'][2]['ok'] else '❌ Niepotwierdzone'),
+                               'Dlaczego czeka':p['reason']} for p in progress]
+                        st.dataframe(pd.DataFrame(rows),hide_index=True,
+                                     use_container_width=True)
+                        top=max(progress,key=lambda p:p['stage'])
+                        if top['stage']>0:
+                            st.info('👀 Najbliższy układ: **'+top['strategy']+' '
+                                +top['progress']+'** | '+top['side']+
+                                '. Obserwacja, NIE wejście PAPER.')
+                        else:
+                            st.info('Brak nawet przesłanki 1/3 na ostatniej M1.')
                     with st.sidebar:
                         st.markdown('### 🗳️ GŁOSOWANIE AUTO — M1')
                         st.metric('Po MTF / przed MTF',counts['label'])
@@ -1985,6 +2017,18 @@ with reports_tab:
                             'strategy':'Strategia','raw':'Sygnał OHLC',
                             'after_mtf':'Po filtrze MTF','reason':'Powód'}),
                             hide_index=True,use_container_width=True)
+                        stage_rows=audit.get('progress') or []
+                        if stage_rows:
+                            st.markdown('**Przesłanki workera: strategia + 0/3–3/3**')
+                            st.dataframe(pd.DataFrame([{
+                                'Strategia':p.get('strategy',''),
+                                'Etap':p.get('progress','0/3'),
+                                'Kierunek':p.get('side','BRAK'),
+                                'Kontekst':p.get('criteria',[{},{}])[0].get('ok'),
+                                'Warunek 2':p.get('criteria',[{},{}])[1].get('ok'),
+                                'Zatwierdzone':p.get('criteria',[{},{},{}])[2].get('ok'),
+                                'Powód':p.get('reason','')} for p in stage_rows]),
+                                hide_index=True,use_container_width=True)
                         if audit.get('mtf'):
                             st.dataframe(pd.DataFrame(audit['mtf']).rename(columns={
                                 'timeframe':'Interwał','trend':'Trend',
@@ -2006,6 +2050,35 @@ with reports_tab:
                     else:
                         st.warning('Historyczny checkpoint nie zawiera sześciu głosów. '
                                    'Nowy zapis powstanie dopiero po świeżym skanie workera.')
+                with st.expander('🧠 SAMOUCZENIE — NIEZALEŻNE WYNIKI 6 STRATEGII (SHADOW)',expanded=True):
+                    learned=st.session_state.get('_paper_remote_shadow_report') or {}
+                    st.caption('Każda strategia ma osobną chronologiczną symulację '
+                               'z zamkniętych M1, z kosztami spreadu i poślizgu. '
+                               'To nie jest brokerowy wynik ani pewny zysk. '
+                               'AUTO może zastosować ranking wyników tylko wtedy, '
+                               'gdy WSZYSTKIE zatwierdzone metody mają >=100 '
+                               'zakończonych prób i dodatnią dolną granicę 95% R '
+                               'w ostatnich 30% próby. Inaczej wybiera MARKET DNA + RR.')
+                    if learned.get('strategies'):
+                        st.dataframe(pd.DataFrame(learned['strategies']).rename(columns={
+                            'strategy':'Strategia','closed':'Prób zakończonych',
+                            'train':'Wcześniejsze 70%','holdout':'Ostatnie 30%',
+                            'win_rate_pct':'Trafność % (SHADOW)',
+                            'mean_r_holdout':'Średni R ostatnie',
+                            'lower95_r_holdout':'Dolny 95% R',
+                            'eligible':'Może być użyta',
+                            'invalidated':'Unieważnione'}),
+                            hide_index=True,use_container_width=True)
+                        if learned.get('leader'):
+                            st.info('Lider badania SHADOW: '+str(learned['leader'])+
+                                ' — wynik eksperymentalny, nie obietnica zysku.')
+                        else:
+                            st.warning('Niewystarczająca liczba wiarygodnych '
+                                       'prób do uczenia wyboru. AUTO nadal '
+                                       'wybiera według reżimu rynku i RR.')
+                    else:
+                        st.info('Nowe próby SHADOW zaczną się zapisywać po '
+                                'kolejnych skanach Northflank w trybie AUTO.')
                 with st.expander('🔎 ARCHIWUM RADARU — SUROWE SYGNAŁY I POWODY BLOKAD',expanded=True):
                     st.caption('Nie są to pozycje PAPER ani zweryfikowane typy. Zapis z workera '
                                'na kolejnych zamkniętych świecach, również gdy decyzją jest WAIT.')
