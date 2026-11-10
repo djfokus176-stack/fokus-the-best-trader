@@ -44,10 +44,10 @@ def _finish(name, side, reason, entry, stop, target, spread, min_rr, atr, checks
     reward=target-entry if side=="LONG" else entry-target
     if not (risk>0 and reward>0 and all(isfinite(v)
             for v in (risk,reward,entry,stop,target,spread))):
-        return _wait(name,"Niepoprawna geometria SL/TP.",side,checks,atr)
+        return _wait(name,"Niepoprawna geometria SL/TP.",side,checks[:2]+(False,),atr)
     rr=(reward-spread)/(risk+spread)
     if risk<=spread*1.5 or rr<min_rr:
-        return _wait(name,"Zbyt duży spread lub mały RR po kosztach.",side,checks,atr)
+        return _wait(name,"Zbyt duży spread lub mały RR po kosztach.",side,checks[:2]+(False,),atr)
     return (Decision(side,name,reason,round(entry,2),round(stop,2),
                      round(target,2),round(rr,2),round(atr,2),side),
             _assessment(name,side,checks,reason))
@@ -161,7 +161,7 @@ def _ema_pullback_retest(frame, spread, min_rr):
     room=structural_room(frame,side,entry,risk,min_rr)
     if room.blocked:
         return _wait(name,"Potwierdzony swing ogranicza miejsce na TP.",
-                     side,checks=(True,True,True),atr=atr)
+                     side,checks=(True,True,False),atr=atr)
     return _finish(name,side,
                    "Badanie: trend EMA, wybicie potwierdzonego swingu, retest EMA21 i świeca.",
                    entry,stop,target,spread,min_rr,atr,(True,True,True))
