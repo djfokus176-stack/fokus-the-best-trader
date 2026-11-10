@@ -77,7 +77,7 @@ def _rating(name, regime, event):
     return score
 
 
-def select_approved(frame, approved):
+def select_approved(frame, approved, *, learning=None):
     """Return (approved decision or None, market summary).
 
     A single eligible strategy is selected without extra veto. With several
@@ -101,12 +101,35 @@ def select_approved(frame, approved):
             "strategy":decision.strategy,"side":decision.action,
             "regime_fit":_rating(decision.strategy,regime,event),
             "rr":rr,"decision":decision})
-    candidates.sort(key=lambda c:(-c["regime_fit"] if status=="READY" else 0,
-                                   -c["rr"],c["strategy"]))
+    # Learn relative preference only from independent, forward SHADOW results.
+    # If any currently approved method lacks >=100 completed examples and a
+    # positive conservative holdout lower bound, do NOT cherry-pick the lone
+    # eligible one. Until all candidates qualify, retain deterministic regime
+    # selection. Never unlock a WAIT or change any SL/TP/risk veto.
+    shadow=(learning or {}).get("strategies",[]) if isinstance(learning,dict) else []
+    evidence={r.get("strategy"):r for r in shadow
+              if r.get("eligible") is True and
+              isinstance(r.get("lower95_r_holdout"),(float,int))}
+    comparable=(len(candidates)>=2 and
+                all(c["strategy"] in evidence for c in candidates))
+    if comparable:
+        candidates.sort(key=lambda c:(-evidence[c["strategy"]]["lower95_r_holdout"],
+                                      -c["regime_fit"] if status=="READY" else 0,
+                                      -c["rr"],c["strategy"]))
+    else:
+        candidates.sort(key=lambda c:(-c["regime_fit"] if status=="READY" else 0,
+                                      -c["rr"],c["strategy"]))
     selected=candidates[0]["decision"] if candidates else None
     if selected is None:
         why=("Brak zatwierdzonego setupu po MTF. Reżim rynku służy tylko "
              "do kolejności obserwacji, nie tworzy LONG/SHORT.")
+    elif comparable:
+        why=(f"FORWARD SHADOW: {len(candidates)} niezależnie rozliczone metody "
+             "spełniają minimalną próbę 100 i dodatni konserwatywny dolny "
+             "przedział średniego R w chronologicznym holdoucie. "
+             f"Wybrano {selected.strategy} po dolnej granicy R, "
+             "następnie reżimie i RR. Uczenie eksploracyjne PAPER, "
+             "NIE dowód przyszłego zysku. ")
     elif status=="READY":
         why=(f"Reżim: {regime}; zdarzenie: {event}. "
              f"Wybrano {selected.strategy} spośród {len(candidates)} "
@@ -123,5 +146,8 @@ def select_approved(frame, approved):
         ranking=tuple({"Strategia":c["strategy"],
                        "Kierunek":c["side"],
                        "Dopasowanie (nie %)":c["regime_fit"] if status=="READY" else None,
-                       "RR":c["rr"] if isfinite(c["rr"]) else None}
+                       "RR":c["rr"] if isfinite(c["rr"]) else None,
+                      "SHADOW n":(next((r["closed"] for r in shadow
+                           if r.get("strategy")==c["strategy"]),0)),
+                      "SHADOW lower95 R":(evidence.get(c["strategy"]) or {}).get("lower95_r_holdout")}
                       for c in candidates))
