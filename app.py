@@ -1085,9 +1085,12 @@ with market_tab:
                             f"Odrzucone przez MTF {counts['vetoed']} | "
                             f"Konflikt kierunków: {'TAK' if counts['conflict'] else 'NIE'}")
                     st.caption('Licznik 1/2 oznacza: jeden sygnał przeszedł MTF z dwóch wykrytych przed MTF. To NIE skuteczność ani prawdopodobieństwo.')
+                    local_blackout,_=macro_blackout(
+                        st.session_state.get('_macro_calendar',[]))
                     local_blockers=([] if (ready and
                         st.session_state.get('mtf_enabled',False) and
                         calendar_is_current(st.session_state) and
+                        not local_blackout and
                         secret('FOKUS_CANDLE_TIME_CONFIRMED','').lower()=='open')
                         else ['Lokalne dane/MTF/BLS/zegar niepotwierdzone'])
                     progress=progress_for_votes(snap.frame,auto_audit,local_blockers)
