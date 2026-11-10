@@ -101,9 +101,22 @@ def replay(frame: pd.DataFrame, strategy: str, spread: float=.6,
         if trade_gate is not None and not trade_gate(decision,frame.index[i-1]):
             i+=1
             continue
-        future=frame.iloc[i:i+holding]
-        status,pnl=_outcome(future,decision.action,decision.entry,
-                            decision.stop,decision.target,spread,slippage,holding)
+        future,gap=_consecutive_future(frame.iloc[i:i+holding],frame.index[i-1])
+        if future.empty:
+            status,pnl="INVALIDATED_GAP",None
+        else:
+            # M1 Spread is measured at candle CLOSE, so the following OPEN
+            # can only use the PREVIOUS confirmed candle's observation.
+            exit_spreads=(list(frame.Spread.iloc[i-1:i+len(future)-1].astype(float))
+                          if spread_mode=="historical" else None)
+            timeout_exit_spread=(float(future.Spread.iloc[-1])
+                                 if spread_mode=="historical" else None)
+            status,pnl=_outcome(future,decision.action,decision.entry,
+                                decision.stop,decision.target,entry_spread,
+                                slippage,holding,exit_spreads=exit_spreads,
+                                timeout_exit_spread=timeout_exit_spread)
+            if gap and status=="PENDING":
+                status,pnl="INVALIDATED_GAP",None
         if status=="PENDING":  # no incomplete positions in performance stats
             i+=holding
             continue
@@ -112,15 +125,30 @@ def replay(frame: pd.DataFrame, strategy: str, spread: float=.6,
             # different independent setup. Previously skipped full horizon.
             i+=1
             continue
-        consumed=(_bars_through_exit(future,decision.action,
-                                    float(decision.stop),float(decision.target))
-                  if status in ("WIN","LOSS") else holding)
-        risk=abs(float(decision.entry)-float(decision.stop))+spread+2*slippage
+        exit_bars=(_bars_through_exit(future,decision.action,
+                                     float(decision.stop),float(decision.target))
+                   if status in ("WIN","LOSS") else None)
+        consumed=(exit_bars if exit_bars is not None else
+                  max(1,len(future)+1) if status=="INVALIDATED_GAP" else holding)
+        if status not in FINAL_STATUSES:
+            exit_spread=None
+        elif spread_mode=="fixed":
+            exit_spread=entry_spread
+        elif exit_bars is not None:
+            # The last closed bar BEFORE the SL/TP-touching candle.
+            exit_spread=float(frame.Spread.iloc[i+exit_bars-2])
+        else:
+            # TIMEOUT at the end of a fully observed close bar.
+            exit_spread=float(future.Spread.iloc[-1])
+        risk=abs(float(decision.entry)-float(decision.stop))+entry_spread+2*slippage
         events.append(dict(time_utc=frame.index[i-1],strategy=strategy,
-            side=decision.action,status=status,pnl_pts=round(float(pnl),2),
-            r_net=round(float(pnl)/risk,4) if risk>0 else 0,
+            side=decision.action,status=status,
+            pnl_pts=round(float(pnl),2) if pnl is not None else None,
+            r_net=(round(float(pnl)/risk,4) if risk>0 and pnl is not None else None),
             entry_mid=decision.entry,sl_mid=decision.stop,tp_mid=decision.target,
-            spread=spread,reason=decision.reason))
+            spread=entry_spread,entry_spread=entry_spread,
+            exit_spread=exit_spread,spread_mode=spread_mode,reason=decision.reason))
+        # A gap is audited but NEVER scored as a profitable or losing trade.
         # One active position at a time, but release the slot ON the first
         # actual SL/TP candle, not automatically after all 20 future bars.
         i+=max(1,consumed)
