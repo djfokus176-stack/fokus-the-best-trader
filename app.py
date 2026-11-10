@@ -13,6 +13,7 @@ import streamlit as st
 from trader.market import CapitalReadOnly, FeedError, evaluate_snapshot, PERIOD
 from trader.strategy import indicators, backtest
 from trader.strategies_pro import decide_any, ALL_STRATEGIES
+from trader.strategies_pro import research_decide_any as research_guard_decide_any
 from trader.ema50_wave import STRATEGY_NAME as WAVE_NAME
 from trader.range_rejection import NAME as RANGE_NAME
 from trader.auto_strategy import AUTO_MODE, evaluate_auto, vote_summary
@@ -67,6 +68,8 @@ from trader.auth import (capital_credentials, active_credential, test_capital_lo
 from trader.access import access_configured, password_matches
 from trader.owner_auth import auth_mode, owner_email_configured, google_identity_matches, google_oidc_ready
 from trader.market_dna import analyze_market
+from trader.research_setups import RESEARCH_STRATEGIES, evaluate_research
+from trader.research_comparison import compare_research_methods
 from trader.feed_audit import inspect_labels,compare_clock_observations
 
 st.set_page_config(page_title='FOKU$ THE BEST TRADER',page_icon='📈',layout='wide')
@@ -1131,6 +1134,21 @@ with market_tab:
                                 '. Obserwacja, NIE wejście PAPER.')
                         else:
                             st.info('Brak nawet przesłanki 1/3 na ostatniej M1.')
+                    st.markdown('#### 🧪 DWA NOWE UKŁADY — 0/3–3/3 (BADANIE, NIE AUTO)')
+                    research_bars=[]
+                    for name in RESEARCH_STRATEGIES:
+                        candidate,stage=evaluate_research(snap.frame,name,spread=snap.spread)
+                        research_bars.append({
+                            'Hipoteza':name,'Przesłanki':str(stage['stage'])+'/3',
+                            'Kierunek':stage['side'],
+                            'Potwierdzenie formacji':'TAK (TYLKO BADANIE)'
+                                 if candidate.action in ('LONG','SHORT') else 'NIE',
+                            'Dlaczego':candidate.reason})
+                    st.dataframe(pd.DataFrame(research_bars),hide_index=True,
+                                 use_container_width=True)
+                    st.caption('Nawet 3/3 nie upoważnia do otwarcia PAPER: '
+                               'te hipotezy NIE są głosami sześciu AUTO. '
+                               'NY OPEN TRAP dotyczy godzin otwarcia Nowego Jorku.')
                     with st.sidebar:
                         st.markdown('### 🗳️ GŁOSOWANIE AUTO — M1')
                         st.metric('Po MTF / przed MTF',counts['label'])
@@ -1683,6 +1701,48 @@ with strategies_tab:
                 'RR':d.rr,'Powód':d.reason if filtered_action==d.action else filtered.reason})
         st.dataframe(pd.DataFrame(all_rows),hide_index=True,use_container_width=True)
         st.info('Jednoczesne różne sygnały NIE oznaczają, że należy je sumować. Każda strategia wymaga oddzielnego, rozliczonego testu.')
+
+        with st.expander('🧪 7. I 8. HIPOTEZA — NY OPEN TRAP + EMA PULLBACK / RETEST (TYLKO BADANIA)',expanded=True):
+            st.caption('NOWE METODY NIE NALEŻĄ DO AUTO 6. Zero automatycznych '
+                       'pozycji, alertów wejścia ani zmian reguł Northflank. '
+                       'Wynik 1/3–3/3 to liczba spełnionych warunków, NIE prawdopodobieństwo.')
+            if tf!='MINUTE':
+                st.info('Nowe hipotezy badawcze analizujemy wyłącznie na M1.')
+            else:
+                experiment=[]
+                for name in RESEARCH_STRATEGIES:
+                    d,progress=evaluate_research(snap.frame,name,spread=snap.spread)
+                    experiment.append({
+                        'Hipoteza':name,'Etap':f"{progress['stage']}/3",
+                        'Kierunek obserwacji':progress['side'],
+                        'Warunek 1':bool(progress['checks'][0]),
+                        'Warunek 2':bool(progress['checks'][1]),
+                        'Warunek 3':bool(progress['checks'][2]),
+                        'Gotowy układ (badanie)':d.action if d.action!='WAIT' else 'NIE',
+                        'RR':d.rr,'Powód':d.reason})
+                st.dataframe(pd.DataFrame(experiment),hide_index=True,use_container_width=True)
+                st.caption('NY OPEN TRAP: kompletne świece 09:31–09:45 ET, wcześniejszy '
+                           'fałszywy breakout i zamknięcie z powrotem w zakresie. '
+                           'PULLBACK + RETEST: trend EMA, historyczny potwierdzony swing '
+                           'oraz świeca zamykająca potwierdzenie. Godziny NY uwzględniają DST; '
+                           'brak osobnej weryfikacji dni świątecznych giełdy.')
+                st.markdown('**Czy zwykłe ekstremum czy potwierdzony swing blokuje TP?**')
+                guard_rows=[]
+                for name in ('EMA TREND','EMA PULLBACK'):
+                    # Research experiment bypasses any patched LIVE mock and
+                    # never updates the AUTO votes or worker decisions.
+                    old=research_guard_decide_any(snap.frame,name,spread=snap.spread)
+                    swing=research_guard_decide_any(snap.frame,name,spread=snap.spread,
+                                                    obstacle_mode='confirmed_swings')
+                    guard_rows.extend([
+                        {'Strategia':name,'Wariant':'OBECNY (bez zmian)',
+                         'Surowy kierunek':old.action,'Powód':old.reason},
+                        {'Strategia':name,'Wariant':'POTWIERDZONE SWINGI (badanie)',
+                         'Surowy kierunek':swing.action,'Powód':swing.reason}])
+                st.dataframe(pd.DataFrame(guard_rows),hide_index=True,use_container_width=True)
+                st.warning('Więcej sygnałów po zmianie poziomów nie oznacza lepszego wyniku. '
+                           'Żadnego z tych wariantów NIE wdrażamy do AUTO bez wyników '
+                           'z zamkniętych pozycji i kosztów.')
 
         st.markdown('#### 🧭 AUTO — SAM DOBIERAM METODĘ DO WARUNKÓW RYNKU')
         regime,event,regime_status=market_context(snap.frame)
@@ -2440,6 +2500,88 @@ with reports_tab:
             if len(later) and (later.n<30).any():
                 st.warning('Część wyników późniejszego holdout ma mniej niż 30 zakończonych transakcji. NIE wyciągaj wniosku o skuteczności MTF na tak małej próbie.')
             st.warning('Wyniki OFFLINE nie obejmują rzeczywistych ticków, poślizgu dynamicznego, brokerowych blackoutów makro, prowizji i historycznej zmienności spreadu. Nie testują połączenia Capital.com LIVE.')
+    with st.expander('🏆 RANKING BADAWCZY — 6 AUTO + NOWE STRATEGIE + SWING HIGH/LOW (TYLKO CSV)',expanded=False):
+        st.caption('Korzysta z CSV M1 wgranego wyżej LUB z historii M1 '
+                   'odczytanej już w tej sesji z Supabase. Nie trzeba drugi raz '
+                   'pobierać tego samego pliku. Porównuje 6 strategii AUTO, '
+                   '2 warianty blokad swing, NY OPEN TRAP, EMA PULLBACK + RETEST '
+                   'oraz EMA50 WAVE i RANGE REJECTION. '
+                   'Nie uruchamia skanera, nie zmienia AUTO ani nie tworzy PAPER.')
+        cached_export=st.session_state.get('_cloud_m1_research_export') or {}
+        research_bytes=(offline_csv.getvalue() if offline_csv is not None else
+                        cached_export.get('csv') if cached_export.get('epic')==instrument
+                        else None)
+        if research_bytes:
+            st.caption('Źródło: '+('wgrany CSV' if offline_csv is not None
+                       else 'eksport Supabase z tej sesji')+
+                       f' | {len(research_bytes)} bajtów')
+        research_mtf=st.checkbox('Zastosuj historyczny MTF (70 pełnych H1 wymagane)',
+                                 value=False,key='research_compare_mtf')
+        if st.button('🏆 PRZELICZ RANKING I ROZLICZENIA (BADANIE)',
+                     key='run_research_compare',use_container_width=True):
+            if not research_bytes:
+                st.warning('Wczytaj CSV M1 albo pobierz zamknięte M1 z Supabase '
+                           'przyciskiem w sekcji powyżej.')
+            else:
+                try:
+                    import io as _research_io
+                    data=research_bytes
+                    if (offline_spread_choice=='historical' and
+                            'Spread' not in pd.read_csv(_research_io.BytesIO(data),nrows=0).columns):
+                        raise ValueError('Tryb historyczny wymaga rzeczywistej kolumny Spread.')
+                    history=read_ohlc_csv(_research_io.BytesIO(data),
+                                          default_spread=offline_spread)
+                    with st.spinner('Chronologiczne porównanie bez przyszłych świec; '
+                                    '12 przypadków, 2 okresy. Bez zleceń...'):
+                        ranked,details,meta=compare_research_methods(
+                            history,spread=offline_spread,slippage=offline_slip,
+                            spread_mode=offline_spread_choice,mtf=research_mtf)
+                    st.session_state['_research_comparison']={
+                        'sha256':hashlib.sha256(data).hexdigest(),
+                        'params':(offline_spread,offline_slip,
+                                  offline_spread_choice,research_mtf),
+                        'ranked':ranked,'details':details,'meta':meta}
+                except (ValueError,TypeError,KeyError,OverflowError) as exc:
+                    st.session_state.pop('_research_comparison',None)
+                    st.error('Badanie nieukończone: '+str(exc)[:220])
+        research_result=st.session_state.get('_research_comparison')
+        if research_result:
+            same_csv=(bool(research_bytes) and
+                      hashlib.sha256(research_bytes).hexdigest()==research_result['sha256'])
+            same_params=research_result['params']==(
+                offline_spread,offline_slip,offline_spread_choice,research_mtf)
+            if not (same_csv and same_params):
+                st.warning('Zmieniono CSV lub parametry — kliknij PRZELICZ ponownie.')
+            else:
+                ranking=research_result['ranked']
+                later=ranking[ranking.okres=='POZNIEJSZE 30%']
+                st.subheader('Późniejszy okres 30% — ranking TYLKO warunkowy')
+                st.dataframe(later.sort_values(['kwalifikuje_ranking','sum_pts'],
+                    ascending=[False,False]),use_container_width=True,hide_index=True)
+                leader=research_result['meta']['leader']
+                if leader:
+                    st.success('Lider według predefiniowanego kryterium: '+str(leader)+
+                               '. To nadal badanie historyczne, nie dowód realnej przewagi.')
+                else:
+                    st.warning('BRAK WIARYGODNEGO LIDERA: potrzebne >=30 rozliczeń '
+                               'na metodę w późniejszym okresie oraz dodatnia dolna '
+                               'granica wyniku. Nie wybieraj metody po samym plusie.')
+                st.caption('MTF: '+('TAK — kompletne M5/M15/H1' if research_mtf else
+                           'NIE — tylko wstępna skuteczność formacji PRZED bramkami workera')+
+                           '. Próby zależne od ceny i zmiennego spreadu; historyczny '
+                           'feed nie odtwarza dokładnych ticków ani kalendarza makro.')
+                with st.expander('Pełny raport 70/30 oraz rozliczenia badań'):
+                    st.dataframe(ranking,hide_index=True,use_container_width=True)
+                    st.download_button('⬇️ RANKING BADAWCZY CSV',
+                        data=ranking.to_csv(index=False).encode('utf-8-sig'),
+                        file_name='FOKUS_RANKING_NY_EMA_SWING.csv',
+                        mime='text/csv',key='research_rank_export')
+                    detail=research_result['details']
+                    if not detail.empty:
+                        st.download_button('⬇️ KAŻDE ROZLICZENIE BADAWCZE CSV',
+                            data=detail.to_csv(index=False).encode('utf-8-sig'),
+                            file_name='FOKUS_RANKING_POZYCJE.csv',
+                            mime='text/csv',key='research_trades_export')
     st.markdown('### 📉 Podstawowy replay bieżącej serii')
     if snap is None or len(snap.frame)<125:
         st.warning('Do raportu potrzeba >=125 zamkniętych świec. Najlepiej kilkadziesiąt tysięcy świec z wiarygodnego archiwum, a nie tylko 350 z REST.')

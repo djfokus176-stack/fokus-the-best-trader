@@ -35,7 +35,9 @@ def _trend(df):
     if a.EMA9<a.EMA21<a.EMA50:return 'DOWN'
     return 'NEUTRAL'
 
-def decide(frame: pd.DataFrame,strategy='DRUGA FALA',htf=None,spread=.6,min_rr=1.5)->Decision:
+def decide(frame: pd.DataFrame,strategy='DRUGA FALA',htf=None,spread=.6,min_rr=1.5, *, obstacle_mode='legacy')->Decision:
+    if obstacle_mode not in ('legacy','confirmed_swings'):
+        raise ValueError('Nieznany model oporów/wsparć (research).')
     if len(frame)<70 or spread<0:
         return Decision('WAIT',strategy,'Brak świec lub ujemny spread')
     df=indicators(frame)
@@ -78,18 +80,30 @@ def decide(frame: pd.DataFrame,strategy='DRUGA FALA',htf=None,spread=.6,min_rr=1
         stop=float(min(swing.Low.min()-.15*atr,entry-1.15*atr))
         risk=entry-stop
         target=entry+2*risk
-        resistance=df.High.iloc[-60:-10]
-        obstacles=resistance[resistance>entry]
-        if len(obstacles) and obstacles.min()-entry<min_rr*risk:
-            return Decision('WAIT',strategy,'Zbyt bliski opór',atr=atr,bias=bias)
+        if obstacle_mode=='confirmed_swings':
+            from .structure_levels import structural_room
+            blocked=structural_room(frame,'LONG',entry,risk,min_rr).blocked
+        else:
+            resistance=df.High.iloc[-60:-10]
+            obstacles=resistance[resistance>entry]
+            blocked=bool(len(obstacles) and obstacles.min()-entry<min_rr*risk)
+        if blocked:
+            return Decision('WAIT',strategy,'Zbyt bliski opór'+
+                            (' (potwierdzony swing)' if obstacle_mode=='confirmed_swings' else ''),atr=atr,bias=bias)
     else:
         stop=float(max(swing.High.max()+.15*atr,entry+1.15*atr))
         risk=stop-entry
         target=entry-2*risk
-        support=df.Low.iloc[-60:-10]
-        obstacles=support[support<entry]
-        if len(obstacles) and entry-obstacles.max()<min_rr*risk:
-            return Decision('WAIT',strategy,'Zbyt bliskie wsparcie',atr=atr,bias=bias)
+        if obstacle_mode=='confirmed_swings':
+            from .structure_levels import structural_room
+            blocked=structural_room(frame,'SHORT',entry,risk,min_rr).blocked
+        else:
+            support=df.Low.iloc[-60:-10]
+            obstacles=support[support<entry]
+            blocked=bool(len(obstacles) and entry-obstacles.max()<min_rr*risk)
+        if blocked:
+            return Decision('WAIT',strategy,'Zbyt bliskie wsparcie'+
+                            (' (potwierdzony swing)' if obstacle_mode=='confirmed_swings' else ''),atr=atr,bias=bias)
     if risk<=spread*1.5 or not np.isfinite(target):
         return Decision('WAIT',strategy,'Geometria ryzyka niepoprawna',atr=atr,bias=bias)
     rr=(abs(target-entry)-spread)/(risk+spread)

@@ -16,9 +16,15 @@ ALL_STRATEGIES = LEGACY + EXTRA  # unchanged conservative AUTO consensus
 
 
 def decide_any(frame: pd.DataFrame, strategy="DRUGA FALA", spread:float=.6,
-               min_rr:float=1.35) -> Decision:
+               min_rr:float=1.35, *, obstacle_mode="legacy") -> Decision:
+    if obstacle_mode not in ("legacy","confirmed_swings"):
+        raise ValueError("Nieznany sposób liczenia oporów (research).")
     if strategy in LEGACY:
-        return decide(frame,strategy,spread=spread,min_rr=min_rr)
+        return decide(frame,strategy,spread=spread,min_rr=min_rr,
+                      obstacle_mode=obstacle_mode)
+    from .research_setups import RESEARCH_STRATEGIES, evaluate_research
+    if strategy in RESEARCH_STRATEGIES:
+        return evaluate_research(frame,strategy,spread=spread,min_rr=min_rr)[0]
     if strategy == WAVE_NAME:
         return wave_decision(frame,spread=spread,min_rr=min_rr)
     if strategy == RANGE_NAME:
@@ -88,20 +94,40 @@ def decide_any(frame: pd.DataFrame, strategy="DRUGA FALA", spread:float=.6,
         stop=min(float(pivot)-.12*atr,float(prior.Low.min())-.08*atr,entry-1.1*atr)
         risk=entry-stop
         target=entry+2*risk
-        obstacles=df.High.iloc[-75:-8]
-        blockers=obstacles[obstacles>entry]
-        if len(blockers) and float(blockers.min())-entry<min_rr*risk:
-            return Decision("WAIT",strategy,"Zbyt bliski potwierdzony opór (room-to-target).",atr=round(atr,2),bias=bias)
+        if obstacle_mode=="confirmed_swings":
+            from .structure_levels import structural_room
+            blocked=structural_room(frame,"LONG",entry,risk,min_rr).blocked
+        else:
+            obstacles=df.High.iloc[-75:-8]
+            blockers=obstacles[obstacles>entry]
+            blocked=bool(len(blockers) and float(blockers.min())-entry<min_rr*risk)
+        if blocked:
+            return Decision("WAIT",strategy,"Zbyt bliski "+
+                            ("potwierdzony swing HIGH" if obstacle_mode=="confirmed_swings"
+                             else "opór (room-to-target)."),atr=round(atr,2),bias=bias)
     else:
         stop=max(float(pivot)+.12*atr,float(prior.High.max())+.08*atr,entry+1.1*atr)
         risk=stop-entry
         target=entry-2*risk
-        obstacles=df.Low.iloc[-75:-8]
-        blockers=obstacles[obstacles<entry]
-        if len(blockers) and entry-float(blockers.max())<min_rr*risk:
-            return Decision("WAIT",strategy,"Zbyt bliskie potwierdzone wsparcie (room-to-target).",atr=round(atr,2),bias=bias)
+        if obstacle_mode=="confirmed_swings":
+            from .structure_levels import structural_room
+            blocked=structural_room(frame,"SHORT",entry,risk,min_rr).blocked
+        else:
+            obstacles=df.Low.iloc[-75:-8]
+            blockers=obstacles[obstacles<entry]
+            blocked=bool(len(blockers) and entry-float(blockers.max())<min_rr*risk)
+        if blocked:
+            return Decision("WAIT",strategy,"Zbyt bliskie "+
+                            ("potwierdzony swing LOW" if obstacle_mode=="confirmed_swings"
+                             else "wsparcie (room-to-target)."),atr=round(atr,2),bias=bias)
     if risk<=spread*1.5 or (2*risk-spread)/(risk+spread)<min_rr:
         return Decision("WAIT",strategy,"Zbyt mały stosunek zysku do ryzyka po spreadzie.",atr=round(atr,2),bias=bias)
     return Decision(side,strategy,reason,round(entry,2),round(stop,2),
                     round(target,2),round((2*risk-spread)/(risk+spread),2),
                     round(atr,2),bias)
+
+
+# Immutable function-object reference for research UI A/B comparisons.
+# This must not be replaced when an integration harness monkeypatches the
+# ordinary decide_any dispatch to drive deterministic production checks.
+research_decide_any=decide_any
