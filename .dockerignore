@@ -12,6 +12,8 @@ __pycache__
 *.db
 *.sqlite*
 *.json
+# Checked BLS backup needed by the standalone PAPER worker Docker build.
+!data/macro_calendar_manual.json
 *.csv
 *.zip
 *.log
