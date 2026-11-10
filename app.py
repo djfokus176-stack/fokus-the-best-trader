@@ -2376,15 +2376,20 @@ with reports_tab:
                 st.dataframe(folds,hide_index=True,use_container_width=True)
         else:
             st.info('Kliknij PRZELICZ. Wyniki nie są generowane automatycznie na każdej świecy.')
-    st.markdown('#### Statystyki forward PAPER zapisane przez bota')
+    st.markdown('#### 📁 LOKALNY ARCHIWUM PAPER v2 — odrębne od Northflank')
+    st.warning('Ten starszy raport pochodzi WYŁĄCZNIE z lokalnej bazy SQLite '
+               'aplikacji Streamlit: nie ze zdalnej bazy Supabase workera, '
+               'nie z PAPER v3 i nie z niezależnego SHADOW sześciu strategii. '
+               'Wszystkie punkty są HIPOTETYCZNE. Nie sumuj wyników tych '
+               'systemów ani nie traktuj ich jako zysku na rachunku.')
     try:
         historical=paper_report(connect())
         if historical:
             resolved=pd.DataFrame(historical)
             resolved=resolved[resolved.status.isin(['WIN','LOSS','TIMEOUT'])]
             if not resolved.empty:
-                st.metric('Rozliczone v2 (bez legacy)',len(resolved))
-                st.metric('Suma punktów po kosztach',f'{resolved.pnl_pts.sum():+.2f}')
+                st.metric('Dawne rozliczenia PAPER v2 (lokalne)',len(resolved))
+                st.metric('Hipotetyczny wynik v2 po modelowanych kosztach (pkt)',f'{resolved.pnl_pts.sum():+.2f}')
                 grp=resolved.groupby(['strategy','timeframe'],as_index=False).agg(
                     liczba=('pnl_pts','size'),suma_pkt=('pnl_pts','sum'),
                     srednia_pkt=('pnl_pts','mean'))
@@ -2392,7 +2397,7 @@ with reports_tab:
             else:
                 st.info('Jeszcze brak pełnych wyników v2 do statystyki.')
         else:
-            st.info('Nie zapisano nowych rozliczonych transakcji PAPER v2.')
+            st.info('Brak lokalnych historycznych rozliczeń PAPER v2.')
     except (OSError,sqlite3.Error) as ex:
         st.warning('Archiwum niedostępne: '+type(ex).__name__)
     if st.session_state.get('_history_write_error'):
