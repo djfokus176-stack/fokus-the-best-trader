@@ -60,16 +60,29 @@ def _bars_through_exit(future: pd.DataFrame, side: str, stop: float, target: flo
 def replay(frame: pd.DataFrame, strategy: str, spread: float=.6,
            slippage: float=.25, holding: int=20,
            evaluation_start: int=85, evaluation_end: int|None=None,
-           trade_gate=None, max_history: int|None=None) -> pd.DataFrame:
+           trade_gate=None, max_history: int|None=None,
+           spread_mode: str="fixed") -> pd.DataFrame:
     """Only emit predictions using prefix [:i] and future candles [i:i+holding].
     Each setup waits for next candle OPEN, positions never overlap.
     """
     cols=["time_utc","strategy","side","status","pnl_pts","r_net",
-          "entry_mid","sl_mid","tp_mid","spread","reason"]
+          "entry_mid","sl_mid","tp_mid","spread","entry_spread",
+          "exit_spread","spread_mode","reason"]
     if frame is None or len(frame)<100:
         return pd.DataFrame(columns=cols)
     if strategy not in ALL_STRATEGIES or spread<0 or slippage<0 or holding<2:
         raise ValueError("Niepoprawne dane, strategia lub koszty.")
+    if spread_mode not in ("fixed","historical"):
+        raise ValueError("Nieznany model spreadu.")
+    if not isinstance(frame.index,pd.DatetimeIndex) or frame.index.tz is None or (
+        not frame.index.is_monotonic_increasing or frame.index.has_duplicates):
+        raise ValueError("Replay wymaga uporządkowanych, unikalnych M1 ze strefą UTC.")
+    if spread_mode=="historical":
+        if "Spread" not in frame.columns:
+            raise ValueError("Tryb historyczny wymaga kolumny Spread.")
+        spreads=pd.to_numeric(frame.Spread,errors="coerce")
+        if spreads.isna().any() or not spreads.map(math.isfinite).all() or (spreads<0).any():
+            raise ValueError("Nieprawidłowe historyczne spready.")
     end=min(int(evaluation_end or len(frame)),len(frame))
     start=max(85,int(evaluation_start))
     events=[]
@@ -79,7 +92,9 @@ def replay(frame: pd.DataFrame, strategy: str, spread: float=.6,
         # Fixed rolling warmup bounds CPU/memory on long CSV datasets.
         # Every result uses only candles fully closed before the signal.
         prefix=frame.iloc[max(0,i-max_history):i] if max_history else frame.iloc[:i]
-        decision=decide_any(prefix,strategy,spread=spread)
+        entry_spread=(float(frame.Spread.iloc[i-1]) if spread_mode=="historical"
+                      else float(spread))
+        decision=decide_any(prefix,strategy,spread=entry_spread)
         if decision.action not in ("LONG","SHORT"):
             i+=1
             continue
