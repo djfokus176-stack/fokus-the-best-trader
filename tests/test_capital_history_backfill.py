@@ -98,7 +98,7 @@ def test_backfill_uses_exact_utc_ranges_without_overwriting_or_creating_prices()
     assert result["preflight_mtf"]
     assert updated.index[0]<base.index[0]
     assert updated.index[-1]==base.index[-1]
-    pd.testing.assert_frame_equal(updated.loc[base.index],base)
+    pd.testing.assert_frame_equal(updated.loc[base.index],base,check_freq=False)
     assert client.session.calls[0]["to"]=="2026-11-05T15:28:00"
     assert not updated.index.has_duplicates
 
