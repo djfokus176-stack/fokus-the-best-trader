@@ -7,5 +7,9 @@ COPY requirements-worker.txt ./
 RUN pip install --no-cache-dir -r requirements-worker.txt \
  && useradd --create-home --uid 10001 paper
 COPY trader/ ./trader/
+# The BLS HTTP 403 backup lives outside trader; include it in the image.
+COPY data/macro_calendar_manual.json ./data/macro_calendar_manual.json
+# Fail the build if the required verified source is absent or malformed.
+RUN python -c "import json; from pathlib import Path; doc=json.loads(Path('data/macro_calendar_manual.json').read_text(encoding='utf-8')); assert doc['source'] == 'BLS_VERIFIED_MANUAL_NOT_LIVE'"
 USER paper
 CMD ["python","-m","trader.worker_service"]
