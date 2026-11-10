@@ -22,7 +22,18 @@ from trader.signal_audit import audit_recent_closed_bars
 from trader.legacy_v71_shadow import (evaluate_v71_shadow, LEGACY_V71_LABEL,
                                      SENSITIVITIES as LEGACY_V71_SENSITIVITIES)
 from trader.mtf import TIMEFRAMES, LABELS, evaluate_timeframes, filter_mtf_decision, timeframe_refresh_needed
-from trader.early_watch import evaluate_early_watch, annotate_watch_markers
+from trader.early_watch import evaluate_early_watch
+# Cloud sometimes serves an older early_watch.py while app.py is on a newer
+# revision. The annotation is visualization-only: do not crash the complete
+# S&P 500 terminal when that optional symbol has not deployed yet.
+from trader import early_watch as _early_watch_module
+
+def annotate_watch_markers(fig, frame, *, last_bars=35, limit=8):
+    render = getattr(_early_watch_module, "annotate_watch_markers", None)
+    if not callable(render):
+        return []  # Optional decoration unavailable; PAPER remains untouched.
+    return render(fig, frame, last_bars=last_bars, limit=limit)
+
 from trader.research import chronological_report, rolling_oos, replay, stats
 from trader.mtf_replay import compare_mtf_on_m1_csv
 from trader.news_radar import fetch_headlines, fetch_bls_schedule, macro_blackout
