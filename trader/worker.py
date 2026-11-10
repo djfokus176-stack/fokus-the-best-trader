@@ -410,8 +410,14 @@ def main(argv=None):
                         in ("true","1","yes"))
             print(datetime.now(timezone.utc).isoformat(),message,flush=True)
         except (FeedError,ValueError,OSError,RuntimeError) as exc:
+            # RemoteCheckpoint raises authored, redacted messages (HTTP status,
+            # invalid URL, missing main row, schema mismatch). In hosted runs,
+            # logging only "RemoteError" hid the cause and led to restart loops.
+            # Never print arbitrary exception details: Capital or other errors
+            # may include credentials, request URLs, or response bodies.
+            safe_detail=(" / "+str(exc)) if isinstance(exc, RemoteError) else ""
             print(datetime.now(timezone.utc).isoformat(),
-                "WAIT / WORKER ERROR:",type(exc).__name__,flush=True)
+                "WAIT / WORKER ERROR:",type(exc).__name__+safe_detail,flush=True)
             if use_remote:
                 # Fail the scheduled job, never claim successful durable progress.
                 raise SystemExit(1) from None
