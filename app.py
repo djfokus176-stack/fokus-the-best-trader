@@ -14,6 +14,7 @@ from trader.market import CapitalReadOnly, FeedError, evaluate_snapshot, PERIOD
 from trader.strategy import indicators, backtest
 from trader.strategies_pro import decide_any, ALL_STRATEGIES
 from trader.ema50_wave import STRATEGY_NAME as WAVE_NAME
+from trader.range_rejection import NAME as RANGE_NAME
 from trader.auto_strategy import AUTO_MODE, evaluate_auto, vote_summary
 from trader.strategy_progress import progress_for_votes
 from trader.strategy_selector import market_context, PRIORITY, select_approved
@@ -1141,6 +1142,11 @@ with market_tab:
                                'nie tworzy zlecenia i nie rysuje strzałki.')
                     st.info(f'Surowy: {shadow.action} | Po MTF: {mtf_shadow.action} '
                             f'| Powód: {mtf_shadow.reason}')
+                    range_study=decide_any(snap.frame,RANGE_NAME,spread=snap.spread)
+                    st.markdown('#### 🔬 RANGE REJECTION — NOWA METODA BADAWCZA')
+                    st.info('SHADOW (nie wchodzi do AUTO): '+range_study.action+
+                        ' | '+range_study.reason+
+                        ' Żadne z tych wskazań nie tworzy pozycji PAPER.')
                 else:
                     decision=decide_any(snap.frame,strategy,spread=snap.spread)
                     if ready and st.session_state.get('mtf_enabled',False):
@@ -1864,7 +1870,8 @@ with strategies_tab:
                 {'Strategia':'LIQUIDITY SWEEP','Warunki':'Fałszywe wybicie lokalnego ekstremum o 0,05 ATR i powrót świecy do zakresu'},
                 {'Strategia':'BREAKOUT RETEST','Warunki':'Wybicie dawnego poziomu, powrót i zamknięcie po właściwej stronie'},
                 {'Strategia':'EMA PULLBACK','Warunki':'Trend EMA, korekta do EMA21, następnie świeca potwierdzająca'},
-                {'Strategia':'VOLATILITY BREAKOUT','Warunki':'Wcześniejsza kompresja zakresu i silne wybicie z konsolidacji'}
+                {'Strategia':'VOLATILITY BREAKOUT','Warunki':'Wcześniejsza kompresja zakresu i silne wybicie z konsolidacji'},
+                {'Strategia':'RANGE REJECTION (SHADOW)','Warunki':'Odrzucenie granicy konsolidacji, RSI i miejsce do jej środka; tylko badanie'}
             ]),hide_index=True,use_container_width=True)
             st.caption('Każdy kandydat przechodzi koszty, RR, przeszkody oraz '
                        'MTF. AUTO PAPER może dopuścić jeden zatwierdzony sygnał po MTF, przy braku konfliktu. '
