@@ -1991,6 +1991,16 @@ with reports_tab:
                                 'ready':'Gotowy','reason':'Wyjaśnienie',
                                 'candle_utc':'Świeca UTC'}),
                                 hide_index=True,use_container_width=True)
+                        watch=audit.get('watch') or {}
+                        if watch.get('side') in ('LONG','SHORT'):
+                            st.info('👀 Ostatni WORKER: **OBSERWUJ '+
+                                    str(watch['side'])+'** ('+
+                                    str(watch.get('score',0))+'/6) — '+
+                                    str(watch.get('reason',''))+
+                                    ' To tylko kierunek obserwacyjny, NIE transakcja PAPER.')
+                        elif watch.get('side')=='WAIT':
+                            st.caption('👀 Ostatni WORKER: OBSERWUJ WAIT — '+
+                                       str(watch.get('reason','Brak kierunku.')))
                         st.caption('To ostatnia ZAPISANA diagnoza, nie stan live. '
                                    'Przy braku świeżego skanu wynik może być przestarzały.')
                     else:
