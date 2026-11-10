@@ -9,6 +9,9 @@ import math
 import pandas as pd
 from .strategy import simulate_outcome
 from .strategies_pro import decide_any, ALL_STRATEGIES
+from .research_setups import RESEARCH_STRATEGIES
+from .ema50_wave import STRATEGY_NAME as WAVE_NAME
+from .range_rejection import NAME as RANGE_NAME
 
 FINAL_STATUSES = {"WIN","LOSS","TIMEOUT"}
 
@@ -61,7 +64,7 @@ def replay(frame: pd.DataFrame, strategy: str, spread: float=.6,
            slippage: float=.25, holding: int=20,
            evaluation_start: int=85, evaluation_end: int|None=None,
            trade_gate=None, max_history: int|None=None,
-           spread_mode: str="fixed") -> pd.DataFrame:
+           spread_mode: str="fixed", obstacle_mode: str="legacy") -> pd.DataFrame:
     """Only emit predictions using prefix [:i] and future candles [i:i+holding].
     Each setup waits for next candle OPEN, positions never overlap.
     """
@@ -70,10 +73,13 @@ def replay(frame: pd.DataFrame, strategy: str, spread: float=.6,
           "exit_spread","spread_mode","reason"]
     if frame is None or len(frame)<100:
         return pd.DataFrame(columns=cols)
-    if strategy not in ALL_STRATEGIES or spread<0 or slippage<0 or holding<2:
+    research_allowed=RESEARCH_STRATEGIES+(WAVE_NAME,RANGE_NAME)
+    if strategy not in ALL_STRATEGIES+research_allowed or spread<0 or slippage<0 or holding<2:
         raise ValueError("Niepoprawne dane, strategia lub koszty.")
     if spread_mode not in ("fixed","historical"):
         raise ValueError("Nieznany model spreadu.")
+    if obstacle_mode not in ("legacy","confirmed_swings"):
+        raise ValueError("Nieznany wariant oporów w badaniu.")
     if not isinstance(frame.index,pd.DatetimeIndex) or frame.index.tz is None or (
         not frame.index.is_monotonic_increasing or frame.index.has_duplicates):
         raise ValueError("Replay wymaga uporządkowanych, unikalnych M1 ze strefą UTC.")
@@ -94,7 +100,8 @@ def replay(frame: pd.DataFrame, strategy: str, spread: float=.6,
         prefix=frame.iloc[max(0,i-max_history):i] if max_history else frame.iloc[:i]
         entry_spread=(float(frame.Spread.iloc[i-1]) if spread_mode=="historical"
                       else float(spread))
-        decision=decide_any(prefix,strategy,spread=entry_spread)
+        decision=decide_any(prefix,strategy,spread=entry_spread,
+                            obstacle_mode=obstacle_mode)
         if decision.action not in ("LONG","SHORT"):
             i+=1
             continue
