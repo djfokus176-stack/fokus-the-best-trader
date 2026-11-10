@@ -1,7 +1,8 @@
 """PAPER research: chronological holdout + rolling checks, with no future candles.
 
 This is validation tooling, not trained ML and not evidence of profitable live
-trading. Positions use mid-defined SL/TP and fixed BID/ASK spread model v2.
+trading. Positions use mid-defined SL/TP; historical costs are optional.
+Missing M1 bars during hypothetical positions invalidate their outcomes.
 """
 from __future__ import annotations
 import math
@@ -11,19 +12,32 @@ from .strategies_pro import decide_any, ALL_STRATEGIES
 
 FINAL_STATUSES = {"WIN","LOSS","TIMEOUT"}
 
-def _outcome(future, action, entry, stop, target, spread, slippage, holding):
-    """Conservative fixed-horizon mark-to-market after stop/target tests."""
-    status, pnl=simulate_outcome(future,action,entry,stop,target,spread,slippage)
+def _outcome(future, action, entry, stop, target, spread, slippage, holding,
+             *, exit_spreads=None, timeout_exit_spread=None):
+    """Historical spread: signal-close entry and last-known intrabar exit costs."""
+    status, pnl=simulate_outcome(future,action,entry,stop,target,spread,slippage,
+                                 exit_spreads=exit_spreads)
     if status=="PENDING" and len(future)>=holding:
         open_mid=float(future.iloc[0].Open)
         close_mid=float(future.iloc[-1].Close)
         entry_ex=(open_mid+spread/2+slippage if action=="LONG"
                   else open_mid-spread/2-slippage)
-        exit_ex=(close_mid-spread/2-slippage if action=="LONG"
-                 else close_mid+spread/2+slippage)
+        final_spread=spread if timeout_exit_spread is None else float(timeout_exit_spread)
+        exit_ex=(close_mid-final_spread/2-slippage if action=="LONG"
+                 else close_mid+final_spread/2+slippage)
         pnl=(exit_ex-entry_ex if action=="LONG" else entry_ex-exit_ex)
         return "TIMEOUT",round(pnl,2)
     return status,pnl
+
+
+def _consecutive_future(future: pd.DataFrame, signal_close) -> tuple[pd.DataFrame,bool]:
+    """Do not price unseen M1 bars. Return verified prefix and gap flag."""
+    expected=pd.Timestamp(signal_close)+pd.Timedelta(minutes=1)
+    for n,stamp in enumerate(future.index):
+        if stamp!=expected:
+            return future.iloc[:n],True
+        expected+=pd.Timedelta(minutes=1)
+    return future,False
 
 
 def _bars_through_exit(future: pd.DataFrame, side: str, stop: float, target: float) -> int:
