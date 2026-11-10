@@ -21,10 +21,13 @@ bramki bezpieczeństwa nadal mogą zwracać WAIT.
 2. Railway odczyta `railway.json`, który wskazuje `Dockerfile.paper-worker`.
    Jeśli nie wykryje pliku, ustaw zmienną:
    `RAILWAY_DOCKERFILE_PATH=Dockerfile.paper-worker`.
-3. W Railway → Variables (tylko tam, nie do repo) ustaw wartości:
+3. Obraz Docker zawiera `data/macro_calendar_manual.json`. Jego brak
+   uniemożliwia zbudowanie obrazu. Plik nie zastępuje oficjalnych źródeł BLS.
+4. W Railway → Variables (tylko tam, nie do repo) ustaw wartości:
    `FOKUS_PAPER_WORKER_ENABLED=true`,
    `FOKUS_CANDLE_TIME_CONFIRMED=open`,
    `FOKUS_PAPER_SCAN_INTERVAL_SECONDS=65`,
+   `FOKUS_PAPER_ALIGN_MINUTE=true` (UTC + ok. 8 s po zamknięciu M1),
    `CAPITAL_ENV=DEMO`,
    `CAPITAL_API_KEY`,
    `CAPITAL_IDENTIFIER`,
@@ -36,17 +39,17 @@ bramki bezpieczeństwa nadal mogą zwracać WAIT.
    `OPENAI_API_KEY`, `FOKUS_AUTO_AI_ENABLED=false` dla niskich kosztów.
    Wszystkie wymagane sekrety muszą być tymi samymi wartościami co obecny
    działający worker GitHub; NIGDY nie umieszczaj ich w kodzie lub logach.
-4. W Railway → Settings ustaw jedną replikę i sprawdź log:
+5. W Railway → Settings ustaw jedną replikę i sprawdź log:
    `PAPER HOST: DEMO READ-ONLY, durable remote checkpoint; scan loop active.`
    Kolejne skany powinny zwiększać `CLOUD_CHECKPOINT_VERSION` w Supabase.
    Najpierw obserwuj tylko jeden host; **nie dopuszczaj dwóch writerów**.
-5. Gdy Railway zapisze pierwszy checkpoint i zachowa ciągłość przez
+6. Gdy Railway zapisze pierwszy checkpoint i zachowa ciągłość przez
    kilka skanów, **wyłącz harmonogram GitHub Actions**:
    GitHub → Settings → Secrets and variables → Actions → Variables →
    `FOKUS_PAPER_WORKER_ENABLED=false`. Ta zmiana dotyczy wyłącznie
    zmiennych GitHub, nie konfiguracji usługi Railway.
    Potwierdź na ekranie, że kolejny checkpoint pochodzi z hosta.
-6. Jeśli trzeba wrócić do GitHub Actions: najpierw zatrzymaj usługę Railway,
+7. Jeśli trzeba wrócić do GitHub Actions: najpierw zatrzymaj usługę Railway,
    potem przywróć `FOKUS_PAPER_WORKER_ENABLED=true` w GitHub.
 
 ## Ważne ograniczenia
@@ -59,9 +62,10 @@ bramki bezpieczeństwa nadal mogą zwracać WAIT.
   prawidłowy. Weekend nie oznacza awarii. Odświeżanie 65 s nie daje
   sygnału 65 s — M1 zamyka się co minutę.
 - Stary potwierdzony zegar OPEN, spread, jakość świec, MTF i filtr makro
-  nadal obowiązują. Tymczasowa kopia BLS wygasa **8.11.2026 00:00 UTC**.
-  Zanim system otworzy nowe PAPER po tej godzinie, wymagany jest
-  aktualny oficjalny kalendarz lub inny rzetelny, zweryfikowany mechanizm.
+  nadal obowiązują. Weryfikowany ręcznie plik awaryjny BLS ma datę ważności
+  **16.11.2026 20:00 UTC**; odczytywany tylko po podwójnym HTTP 403
+  z oficjalnych kanałów. Po wygaśnięciu konieczna jest ponowna
+  weryfikacja aktualnego harmonogramu, bez automatycznego wydłużania daty.
 - Płatny GPT jest wyłącznie ograniczonym komentarzem, **nie zleca pozycji**.
 - Dopóki nie zobaczymy pełnego cyklu PENDING → OPEN → CLOSED w
   rzeczywistym DEMO i zweryfikowanych wyników netto, jest to narzędzie

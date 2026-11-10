@@ -50,7 +50,29 @@ def test_interval_boundaries_fail_closed(interval):
 def test_deployment_args_are_bounded():
     env=configured();env["FOKUS_PAPER_SCAN_INTERVAL_SECONDS"]="65"
     assert validated_worker_args(env)==[
-        "--interval","65","--epic","US500","--tf","MINUTE"]
+        "--interval","65","--epic","US500","--tf","MINUTE","--align-minute"]
+
+
+def test_host_can_explicitly_disable_minute_alignment_for_diagnostics():
+    env=configured()
+    env["FOKUS_PAPER_ALIGN_MINUTE"]="false"
+    assert "--align-minute" not in validated_worker_args(env)
+
+
+def test_worker_docker_build_contains_verified_bls_backup():
+    from pathlib import Path
+    from datetime import datetime, timezone
+    from trader.manual_bls_calendar import load_verified_manual_bls
+
+    root=Path(__file__).resolve().parents[1]
+    docker=(root/"Dockerfile.paper-worker").read_text(encoding="utf-8")
+    ignored=(root/".dockerignore").read_text(encoding="utf-8")
+    assert "COPY data/macro_calendar_manual.json ./data/macro_calendar_manual.json" in docker
+    assert "!data/macro_calendar_manual.json" in ignored.splitlines()
+    backup=load_verified_manual_bls(
+        now=datetime(2026,11,10,12,0,tzinfo=timezone.utc))
+    assert backup.source=="BLS_VERIFIED_MANUAL_NOT_LIVE"
+    assert len(backup)>=12
 
 
 def test_no_credentials_exposed_on_startup_refusal(monkeypatch,capsys):

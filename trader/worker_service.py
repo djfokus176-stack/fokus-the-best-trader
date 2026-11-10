@@ -36,7 +36,9 @@ def validated_worker_args(environ=None):
     if not epic.replace("_","").isalnum():
         raise ValueError("Invalid instrument EPIC.")
     args=["--interval",str(interval),"--epic",epic,"--tf","MINUTE"]
-    if str(env.get("FOKUS_PAPER_ALIGN_MINUTE","false")).lower() in ("true","1","yes"):
+    # For M1, fixed 65-second sleeps accumulate phase drift and skip bars.
+    # Align by default to UTC minute + grace; explicit false is diagnostic.
+    if str(env.get("FOKUS_PAPER_ALIGN_MINUTE","true")).lower() in ("true","1","yes"):
         args.append("--align-minute")
     return args
 
