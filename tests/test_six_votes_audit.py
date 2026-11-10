@@ -50,6 +50,9 @@ def test_vote_audit_persists_all_six_without_unlocking_wait(monkeypatch):
     result=worker.remote_scan_once(remote,object(),"US500","MINUTE",AUTO_MODE,2.0)
     assert "SIX_VOTES=" in result
     assert "MTF_VETO=" in result
+    assert "WAIT_REASONS=" in result
+    assert "EMA TREND:Brak układu" in result
+    assert "OBSERVE_M1=WAIT" in result
     assert "QUEUE=NO" in result
     assert calls==[("US500",AUTO_MODE,True)]
     audit=remote.state["last_vote_audit"]
@@ -57,6 +60,8 @@ def test_vote_audit_persists_all_six_without_unlocking_wait(monkeypatch):
     assert [x["raw"] for x in audit["rows"]]==raw
     assert [x["after_mtf"] for x in audit["rows"]]==after
     assert len(audit["mtf"])==4
+    assert audit["watch"]["side"]=="WAIT"
+    assert audit["watch"]["score"]==0
     assert remote.state["tables"]["paper_positions_v3"]==[]
 
 
