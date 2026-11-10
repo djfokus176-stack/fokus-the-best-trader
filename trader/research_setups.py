@@ -109,8 +109,10 @@ def _ema_pullback_retest(frame, spread, min_rr):
     name=EMA_PULLBACK_RETEST
     if not _ready(frame,spread):
         return _wait(name,"Wymagane >=100 poprawnych zamkniętych M1 UTC.")
-    if (frame.index[-1]-frame.index[-2]).total_seconds()!=60:
-        return _wait(name,"Przerwa między świecami potwierdzającymi.")
+    recent=frame.index[-10:]
+    if any((recent[i]-recent[i-1]).total_seconds()!=60
+           for i in range(1,len(recent))):
+        return _wait(name,"Nieciągłe ostatnie 10 zamkniętych M1.")
     df=indicators(frame)
     a,b=df.iloc[-1],df.iloc[-2]
     atr=float(a.ATR)
@@ -129,13 +131,13 @@ def _ema_pullback_retest(frame, spread, min_rr):
     candidates=reversed(highs if side=="LONG" else lows)
     for _,pivot in candidates:
         if side=="LONG":
-            breakout=bool((prior.Close>pivot+.05*atr).any()
-                          and (prior.Close.shift(1)<=pivot).any())
+            breakout=bool(((prior.Close>pivot+.05*atr) &
+                           (prior.Close.shift(1)<=pivot)).any())
             retest=(abs(float(b.Low)-pivot)<=.50*atr
                     and abs(float(b.Low)-float(b.EMA21))<=.85*atr)
         else:
-            breakout=bool((prior.Close<pivot-.05*atr).any()
-                          and (prior.Close.shift(1)>=pivot).any())
+            breakout=bool(((prior.Close<pivot-.05*atr) &
+                           (prior.Close.shift(1)>=pivot)).any())
             retest=(abs(float(b.High)-pivot)<=.50*atr
                     and abs(float(b.High)-float(b.EMA21))<=.85*atr)
         if breakout and retest:
