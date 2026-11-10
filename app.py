@@ -13,6 +13,7 @@ import streamlit as st
 from trader.market import CapitalReadOnly, FeedError, evaluate_snapshot, PERIOD
 from trader.strategy import indicators, backtest
 from trader.strategies_pro import decide_any, ALL_STRATEGIES
+from trader.strategies_pro import decide_any as research_guard_decide_any
 from trader.ema50_wave import STRATEGY_NAME as WAVE_NAME
 from trader.range_rejection import NAME as RANGE_NAME
 from trader.auto_strategy import AUTO_MODE, evaluate_auto, vote_summary
@@ -1713,9 +1714,11 @@ with strategies_tab:
                 st.markdown('**Czy zwykłe ekstremum czy potwierdzony swing blokuje TP?**')
                 guard_rows=[]
                 for name in ('EMA TREND','EMA PULLBACK'):
-                    old=decide_any(snap.frame,name,spread=snap.spread)
-                    swing=decide_any(snap.frame,name,spread=snap.spread,
-                                     obstacle_mode='confirmed_swings')
+                    # Research experiment bypasses any patched LIVE mock and
+                    # never updates the AUTO votes or worker decisions.
+                    old=research_guard_decide_any(snap.frame,name,spread=snap.spread)
+                    swing=research_guard_decide_any(snap.frame,name,spread=snap.spread,
+                                                    obstacle_mode='confirmed_swings')
                     guard_rows.extend([
                         {'Strategia':name,'Wariant':'OBECNY (bez zmian)',
                          'Surowy kierunek':old.action,'Powód':old.reason},
