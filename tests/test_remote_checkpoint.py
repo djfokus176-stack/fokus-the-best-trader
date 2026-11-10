@@ -134,3 +134,29 @@ def test_remote_candle_pagination_and_order():
     assert read.index.is_monotonic_increasing
     assert read.index[0]==ix[0] and read.index[-1]==ix[-1]
     assert read.Close.iloc[-1]==arr[-1]
+
+
+def test_worker_logs_sanitized_supabase_error_but_not_untrusted_errors(monkeypatch,capsys):
+    """Hosted PAPER troubleshooting must show status without leaking secrets."""
+    from trader import worker
+    from types import SimpleNamespace
+    monkeypatch.setattr(worker,"configured",lambda: True)
+    monkeypatch.setattr(worker,"RemoteCheckpoint",
+        SimpleNamespace(from_env=lambda: object()))
+    monkeypatch.setattr(worker,"CapitalReadOnly",lambda *args,**kw: object())
+    monkeypatch.setenv("FOKUS_CANDLE_TIME_CONFIRMED","open")
+
+    def fail_with(exc):
+        def fail(*args,**kwargs):
+            raise exc
+        monkeypatch.setattr(worker,"remote_scan_once",fail)
+        with pytest.raises(SystemExit) as stopped:
+            worker.main(["--once"])
+        assert stopped.value.code==1
+        return capsys.readouterr().out
+
+    output=fail_with(RemoteError("Supabase HTTP 401 (check secret key)"))
+    assert "WORKER ERROR: RemoteError / Supabase HTTP 401" in output
+    output=fail_with(ValueError("possible-credential-leak"))
+    assert "WORKER ERROR: ValueError" in output
+    assert "possible-credential-leak" not in output
