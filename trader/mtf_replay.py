@@ -141,7 +141,7 @@ class HistoricalMTFGate:
 
 def compare_mtf_on_m1_csv(m1:pd.DataFrame, strategies=ALL_STRATEGIES,
                            spread=.6, slippage=.25, holding=20, split=.7,
-                           max_candles=6500):
+                           max_candles=6500,spread_mode="fixed"):
     """Same fixed setup rules on chronological 70/30 split, with/without MTF.
 
     Rules are NOT optimized on either sample. This compares two independent
@@ -186,9 +186,10 @@ def compare_mtf_on_m1_csv(m1:pd.DataFrame, strategies=ALL_STRATEGIES,
                 trades=replay(m1,name,spread=spread,slippage=slippage,holding=holding,
                               evaluation_start=start,evaluation_end=end,
                               trade_gate=trade_filter if variant=="Z MTF" else None,
-                              max_history=350)
+                              max_history=350,spread_mode=spread_mode)
                 metrics=stats(trades)
                 output.append({"strategia":name,"okres":period,"wariant":variant,
+                  "model_spreadu":spread_mode,
                      "kandydaci_mtf":counted["candidates"] if variant=="Z MTF" else None,
                      "odrzucone_mtf":counted["rejected"] if variant=="Z MTF" else None,
                      "zaakceptowane_mtf":counted["passed"] if variant=="Z MTF" else None,
@@ -204,5 +205,5 @@ def compare_mtf_on_m1_csv(m1:pd.DataFrame, strategies=ALL_STRATEGIES,
                     trade_rows.append(trade_copy)
     return (pd.DataFrame(output),
             pd.concat(trade_rows,ignore_index=True) if trade_rows else
-            pd.DataFrame(columns=["time_utc","strategy","side","status","pnl_pts","wariant","okres"]),
+            pd.DataFrame(columns=["time_utc","strategy","side","status","pnl_pts","wariant","okres","spread_mode"]),
             {k:len(v) for k,v in higher.items()})

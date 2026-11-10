@@ -2349,12 +2349,21 @@ with reports_tab:
             type=['csv'],key='offline_mtf_csv',help='Potrzeba 4600–6500 kolejnych minut, w tym >=70 pełnych godzin H1. Długie przerwy mogą wykluczyć raport.')
         c_a,c_b=st.columns(2)
         with c_a:
-            offline_spread=st.number_input('Spread testowy, jeśli brak informacji w CSV (pkt)',
+            offline_spread=st.number_input('Stały spread w teście / zapasowy dla CSV (pkt)',
                 min_value=0.0,max_value=10.0,value=0.6,step=0.1,key='offline_mtf_spread')
         with c_b:
             offline_slip=st.number_input('Poślizg na stronę (pkt)',
                 min_value=0.0,max_value=5.0,value=0.25,step=0.05,key='offline_mtf_slip')
-        st.caption('⚠️ Wyniki po kosztach są symulacją ze STAŁYM spreadem zadanym powyżej. CSV Spread może zawierać rzeczywiste obserwacje, ale ten wariant replay jeszcze nie symuluje zmian spreadu w czasie. Nie zakładaj, że wyniki to rzeczywiste transakcje.')
+        offline_spread_mode=st.radio('Model spreadu w teście OFFLINE',
+            ['STAŁY','HISTORYCZNY (kolumna Spread w CSV)'],
+            key='offline_mtf_spread_mode',horizontal=True)
+        offline_spread_choice=('historical' if offline_spread_mode.startswith('HISTORYCZNY')
+                               else 'fixed')
+        st.caption('⚠️ Stały spread to założenie wpisane powyżej. HISTORYCZNY wymaga kolumny '
+                   'Spread z prawdziwymi obserwacjami na zamknięciach świec M1. '
+                   'Model używa spreadu ostatniej ZNANEJ świecy przy hipotetycznym wejściu '
+                   'i wyjściu na SL/TP, a przy TIMEOUT — spreadu świecy zamknięcia. '
+                   'To nadal przybliżenie, nie dane tickowe, rzeczywisty fill ani zysk.')
         if st.button('🔬 TEST OFFLINE: BEZ MTF vs Z MTF — 6 STRATEGII',
                      key='offline_mtf_start',type='primary',use_container_width=True):
             if offline_csv is None:
@@ -2365,14 +2374,18 @@ with reports_tab:
                         file_bytes=offline_csv.getvalue()
                         file_hash=hashlib.sha256(file_bytes).hexdigest()
                         import io as _io
+                        if (offline_spread_choice=='historical' and
+                                'Spread' not in pd.read_csv(_io.BytesIO(file_bytes),nrows=0).columns):
+                            raise ValueError('Tryb HISTORYCZNY wymaga prawdziwej kolumny Spread w CSV; '
+                                             'nie wolno zastępować jej stałą 0,60 pkt.')
                         offline=read_ohlc_csv(_io.BytesIO(file_bytes),default_spread=offline_spread)
                         table,trade_table,counts=compare_mtf_on_m1_csv(
                             offline,spread=offline_spread,slippage=offline_slip,
-                            holding=20,split=.70)
+                            holding=20,split=.70,spread_mode=offline_spread_choice)
                         st.session_state['_csv_mtf_result']={
                             'table':table,'trades':trade_table,'counts':counts,
                             'sha256':file_hash,'size':len(offline),
-                            'costs':(offline_spread,offline_slip)}
+                            'costs':(offline_spread,offline_slip,offline_spread_choice)}
                     except (ValueError,TypeError,KeyError,OverflowError) as ex:
                         st.session_state.pop('_csv_mtf_result',None)
                         st.error('Nie wykonano raportu CSV MTF: '+str(ex))
@@ -2381,7 +2394,7 @@ with reports_tab:
             current_file_sha=(hashlib.sha256(offline_csv.getvalue()).hexdigest()
                               if offline_csv is not None else None)
             if (current_file_sha!=csv_result['sha256'] or
-                csv_result['costs']!=(offline_spread,offline_slip)):
+                csv_result['costs']!=(offline_spread,offline_slip,offline_spread_choice)):
                 st.warning('⚠️ Plik CSV albo parametry kosztów zostały zmienione. Poprzedni raport ukryto — kliknij TEST OFFLINE ponownie, aby nie mieszać wyników różnych prób.')
                 csv_result=None
         if csv_result:
