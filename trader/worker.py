@@ -24,13 +24,15 @@ from .paper_lifecycle import ensure_tables,progress_paper,queue_paper,active_pos
 from .telegram_alerts import dispatch_alerts,record_stale_event
 from .remote_checkpoint import (RemoteCheckpoint, configured, dump_state,
                                 restore_state, RemoteError)
+from .strategy_progress import progress_for_votes
+from .shadow_learning import advance_shadow, shadow_scorecard
 
 
 def scan_once(client,epic,tf,strategy,max_spread,db, *,
               slippage=.25,enable_setups=True,strict_macro=True,
               calendar_fetch=fetch_bls_schedule,telegram_token="",
               telegram_chat_id="",telegram_enabled=False,remote=None,
-              reviewer=None):
+              reviewer=None,learning=None):
     """One accountable v3 scan, using Capital DEMO + closed bars only.
 
     Existing PAPER can progress independently of new-signal permissions;
@@ -79,7 +81,8 @@ def scan_once(client,epic,tf,strategy,max_spread,db, *,
         archived=remote.upsert_candles(snapshots,epic)
     if strategy==AUTO_MODE:
         verdict,auto_votes=evaluate_auto(main.frame,main.spread,snapshots,
-                                          asof=main.confirmed_utc,use_mtf=True)
+                                          asof=main.confirmed_utc,use_mtf=True,
+                                          learning=learning)
         # Keep explicit readiness checks even if AUTO returns WAIT.
         _,views=filter_mtf_decision(
             decide_any(main.frame,ALL_STRATEGIES[0],spread=main.spread),
@@ -184,6 +187,9 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
     candidates=payload.get("candidate_feed",[])
     forecast_state=payload.get("forecast_research",{})
     vote_audit=payload.get("last_vote_audit") or {}
+    shadow_state=payload.get("shadow_per_strategy") or {}
+    # Selection uses outcomes completed PRIOR to the current decision.
+    previous_shadow_report=shadow_scorecard(shadow_state)
     news_feed=dict(payload.get("news_radar") or {})
     macro_watch=dict(payload.get("macro_watch") or {})
     utc=datetime.now(timezone.utc)
@@ -220,7 +226,7 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
                          "events":[],"errors":{"worker":type(exc).__name__},
                          "sources":{}}
     def review_snapshot(snapshot,decision,votes,views,blockers):
-        nonlocal auto_state,candidates,forecast_state,vote_audit
+        nonlocal auto_state,candidates,forecast_state,vote_audit,shadow_state
         # Only a read-only audit. These results were ALREADY computed by
         # evaluate_auto / filter_mtf_decision. Never alter trade decisions.
         vote_audit={
@@ -243,6 +249,12 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             } for v in list(views or [])[:4]],
             "blockers":list(blockers or [])[:10],
         }
+        vote_audit["progress"]=progress_for_votes(snapshot.frame,votes,blockers)
+        # Independent one-slot-per-method SHADOW experiment. Never changes
+        # current PAPER verdict or models an immediate broker fill.
+        if strategy==AUTO_MODE:
+            shadow_state=advance_shadow(shadow_state,snapshot.frame,votes,
+                                        blockers,spread=snapshot.spread)
         # Informational M1 bias from completed candles only, never a PAPER
         # entry, MTF override or broker order. Persist beside the six votes.
         from .early_watch import evaluate_early_watch
@@ -276,7 +288,8 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
         status=scan_once(client,epic,tf,strategy,max_spread,db,
                          enable_setups=enable_setups,strict_macro=strict_macro,
                          calendar_fetch=calendar_fetch,telegram_enabled=False,
-                         remote=remote,reviewer=review_snapshot)
+                         remote=remote,reviewer=review_snapshot,
+                         learning=previous_shadow_report)
         payload=dump_state(db)
         if isinstance(auto_state,dict):
             payload["auto_ai"]=auto_state
@@ -290,12 +303,16 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             payload["last_vote_audit"]=vote_audit
         from .paper_learning import strategy_scorecard
         payload["learning_report"]=strategy_scorecard(db,epic=epic)
+        payload["shadow_per_strategy"]=shadow_state
+        latest_shadow_report=shadow_scorecard(shadow_state)
+        payload["shadow_learning_report"]=latest_shadow_report
         payload["meta"]={
             "last_scan_utc":datetime.now(timezone.utc).isoformat(),
             "last_scan_summary":status[:350],
             "source":"Capital.com DEMO REST",
             "timeframe":tf,"epic":epic,
             "strategy":strategy,
+            "shadow_leader":latest_shadow_report.get("leader"),
             "clock_confirmed_open":bool(clock_confirmed_open),
             "setups_enabled":bool(enable_setups),
             "news_status":news_feed.get("status","NO_DATA"),
@@ -338,11 +355,18 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             if watch.get("side") in ("LONG","SHORT","WAIT"):
                 audit_line+=(" / OBSERVE_M1="+str(watch["side"])+
                             "(score="+str(watch.get("score",0))+"/6;NOT_PAPER)")
+            preview=vote_audit.get("progress") or []
+            if preview:
+                audit_line+=" / SETUP_PROGRESS="+json.dumps([
+                    str(p.get("strategy"))+":"+str(p.get("progress"))+
+                    ":"+str(p.get("side")) for p in preview],ensure_ascii=False)
             audit_line+=" / MTF_STATES="+json.dumps([
                 str(v.get("timeframe"))+":"+str(v.get("trend"))+
                 (":READY" if v.get("ready") else ":NOT_READY")
                 for v in vote_audit.get("mtf",[])],ensure_ascii=False)
-        return status+f" / CLOUD_CHECKPOINT_VERSION={new_version} / TELEGRAM_REMOTE=DISABLED"+audit_line
+        return (status+f" / CLOUD_CHECKPOINT_VERSION={new_version} / TELEGRAM_REMOTE=DISABLED"
+                +" / SHADOW_LEARNING="+str(latest_shadow_report.get("leader") or "INSUFFICIENT_DATA")
+                +audit_line)
     finally:
         db.close()
 
