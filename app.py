@@ -1134,6 +1134,21 @@ with market_tab:
                                 '. Obserwacja, NIE wejście PAPER.')
                         else:
                             st.info('Brak nawet przesłanki 1/3 na ostatniej M1.')
+                    st.markdown('#### 🧪 DWA NOWE UKŁADY — 0/3–3/3 (BADANIE, NIE AUTO)')
+                    research_bars=[]
+                    for name in RESEARCH_STRATEGIES:
+                        candidate,stage=evaluate_research(snap.frame,name,spread=snap.spread)
+                        research_bars.append({
+                            'Hipoteza':name,'Przesłanki':str(stage['stage'])+'/3',
+                            'Kierunek':stage['side'],
+                            'Potwierdzenie formacji':'TAK (TYLKO BADANIE)'
+                                 if candidate.action in ('LONG','SHORT') else 'NIE',
+                            'Dlaczego':candidate.reason})
+                    st.dataframe(pd.DataFrame(research_bars),hide_index=True,
+                                 use_container_width=True)
+                    st.caption('Nawet 3/3 nie upoważnia do otwarcia PAPER: '
+                               'te hipotezy NIE są głosami sześciu AUTO. '
+                               'NY OPEN TRAP dotyczy godzin otwarcia Nowego Jorku.')
                     with st.sidebar:
                         st.markdown('### 🗳️ GŁOSOWANIE AUTO — M1')
                         st.metric('Po MTF / przed MTF',counts['label'])
