@@ -37,6 +37,7 @@ def annotate_watch_markers(fig, frame, *, last_bars=35, limit=8):
 from trader.research import chronological_report, rolling_oos, replay, stats
 from trader.mtf_replay import compare_mtf_on_m1_csv
 from trader.cloud_research_export import research_csv_from_closed_m1
+from trader.capital_history_backfill import backfill_before_archive
 from trader.news_radar import fetch_headlines, fetch_bls_schedule, macro_blackout
 from trader.storage import connect, archive, recent, recent_scan_decisions, audit_prior_paper_signals, paper_report, legacy_outcomes_count, archive_candles, load_candles
 from trader.assistant import numeric_context, answer_ai
@@ -2288,6 +2289,46 @@ with reports_tab:
                         f"{export['first']} → {export['last']}. "
                         f"Kompletnych H1: **{export['full_h1']}**; "
                         f"przerw ponad minutę: **{export['gaps']}**.")
+                if not export['preflight_mtf'] and has_cap and capital_env=='DEMO':
+                    st.caption('Alternatywa bez oczekiwania: przeczytaj wcześniejsze '
+                               'świece z historycznego endpointu Capital.com DEMO '
+                               '(maks. 6 przedziałów; 1000 w API na zapytanie). '
+                               'Ręczny odczyt do badań, nie drugi worker.')
+                    if st.button('📚 UZUPEŁNIJ STARSZE M1 Z CAPITAL.COM DEMO (TYLKO ODCZYT)',
+                                 key='owner_backfill_research_m1',use_container_width=True):
+                        try:
+                            cloud=RemoteCheckpoint(secret('FOKUS_SUPABASE_URL'),
+                                secret('FOKUS_SUPABASE_SECRET_KEY'))
+                            base=cloud.fetch_candles(instrument,'MINUTE',limit=5000)
+                            research_client=CapitalReadOnly(cap_api_key,cap_identifier,
+                                cap_password,environment='DEMO')
+                            filled=backfill_before_archive(research_client,base,epic=instrument)
+                            updated=research_csv_from_closed_m1(filled['frame'])
+                            updated['epic']=instrument
+                            updated['backfill']=filled
+                            st.session_state['_cloud_m1_research_export']=updated
+                            export=updated
+                            st.success(f"Uzupełniono: {filled['additional']} starszych "
+                                       f"M1 w {filled['requests']} zapytaniach DEMO. "
+                                       f"Razem {updated['count']} M1 / "
+                                       f"{updated['full_h1']} pełnych H1. "
+                                       "To wyłącznie lokalny eksport badawczy.")
+                            if not filled['overlap_verified']:
+                                st.warning('Nie potwierdzono pokrywającej się świecy '
+                                           'archiwum/API; to NIE potwierdza zegara '
+                                           'do wejść PAPER.')
+                        except (FeedError,RemoteError,ValueError,TypeError) as exc:
+                            # Never show URL, credentials, HTTP response body
+                            # or arbitrary exception text. FeedError messages
+                            # are authored and must not include raw requests.
+                            st.error('Odczyt starszych świec nie powiódł się: '
+                                     +type(exc).__name__+
+                                     (' — '+str(exc)[:140]
+                                      if isinstance(exc,(FeedError,RemoteError))
+                                      else ' — niespójne dane historyczne'))
+                if export.get('backfill'):
+                    st.caption('Źródło CSV: Supabase + historyczne /prices DEMO '
+                               '(ręczny odczyt). Bez zapisu do bazy PAPER.')
                 st.download_button('⬇️ POBIERZ CSV M1 UTC CLOSE (TYLKO OHLC + SPREAD)',
                     data=export['csv'],mime='text/csv',
                     file_name='FOKUS_SUPABASE_M1_DEMO_CLOSED.csv',
