@@ -2486,20 +2486,31 @@ with reports_tab:
                 st.warning('Część wyników późniejszego holdout ma mniej niż 30 zakończonych transakcji. NIE wyciągaj wniosku o skuteczności MTF na tak małej próbie.')
             st.warning('Wyniki OFFLINE nie obejmują rzeczywistych ticków, poślizgu dynamicznego, brokerowych blackoutów makro, prowizji i historycznej zmienności spreadu. Nie testują połączenia Capital.com LIVE.')
     with st.expander('🏆 RANKING BADAWCZY — 6 AUTO + NOWE STRATEGIE + SWING HIGH/LOW (TYLKO CSV)',expanded=False):
-        st.caption('Korzysta z TEGO SAMEGO pliku CSV M1 wgranego do testu wyżej. '
-                   'Porównuje 6 strategii AUTO, 2 warianty blokad swing, NY OPEN TRAP, '
-                   'EMA PULLBACK + RETEST oraz EMA50 WAVE i RANGE REJECTION. '
+        st.caption('Korzysta z CSV M1 wgranego wyżej LUB z historii M1 '
+                   'odczytanej już w tej sesji z Supabase. Nie trzeba drugi raz '
+                   'pobierać tego samego pliku. Porównuje 6 strategii AUTO, '
+                   '2 warianty blokad swing, NY OPEN TRAP, EMA PULLBACK + RETEST '
+                   'oraz EMA50 WAVE i RANGE REJECTION. '
                    'Nie uruchamia skanera, nie zmienia AUTO ani nie tworzy PAPER.')
+        cached_export=st.session_state.get('_cloud_m1_research_export') or {}
+        research_bytes=(offline_csv.getvalue() if offline_csv is not None else
+                        cached_export.get('csv') if cached_export.get('epic')==instrument
+                        else None)
+        if research_bytes:
+            st.caption('Źródło: '+('wgrany CSV' if offline_csv is not None
+                       else 'eksport Supabase z tej sesji')+
+                       f' | {len(research_bytes)} bajtów')
         research_mtf=st.checkbox('Zastosuj historyczny MTF (70 pełnych H1 wymagane)',
                                  value=False,key='research_compare_mtf')
         if st.button('🏆 PRZELICZ RANKING I ROZLICZENIA (BADANIE)',
                      key='run_research_compare',use_container_width=True):
-            if offline_csv is None:
-                st.warning('Najpierw wybierz CSV M1 w sekcji powyżej.')
+            if not research_bytes:
+                st.warning('Wczytaj CSV M1 albo pobierz zamknięte M1 z Supabase '
+                           'przyciskiem w sekcji powyżej.')
             else:
                 try:
                     import io as _research_io
-                    data=offline_csv.getvalue()
+                    data=research_bytes
                     if (offline_spread_choice=='historical' and
                             'Spread' not in pd.read_csv(_research_io.BytesIO(data),nrows=0).columns):
                         raise ValueError('Tryb historyczny wymaga rzeczywistej kolumny Spread.')
@@ -2520,8 +2531,8 @@ with reports_tab:
                     st.error('Badanie nieukończone: '+str(exc)[:220])
         research_result=st.session_state.get('_research_comparison')
         if research_result:
-            same_csv=(offline_csv is not None and
-                      hashlib.sha256(offline_csv.getvalue()).hexdigest()==research_result['sha256'])
+            same_csv=(bool(research_bytes) and
+                      hashlib.sha256(research_bytes).hexdigest()==research_result['sha256'])
             same_params=research_result['params']==(
                 offline_spread,offline_slip,offline_spread_choice,research_mtf)
             if not (same_csv and same_params):
