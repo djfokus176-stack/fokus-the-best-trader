@@ -77,9 +77,15 @@ def test_ny_trap_requires_entire_15_minute_opening_window():
 
 def test_ny_trap_confirms_breakout_only_after_closed_candle():
     df=open_day()
+    # Range must first be wide enough for the spread and volatility filter.
+    opening=df.index.tz_convert("America/New_York")
+    inside=(opening.time>=pd.Timestamp("09:31").time()) & (
+        opening.time<=pd.Timestamp("09:45").time())
+    df.loc[inside,"High"]=101.6
+    df.loc[inside,"Low"]=98.4
     # At 09:46 the prior completed candle shows a breakout above the range.
     b=pd.Timestamp("2026-11-10 09:46",tz="America/New_York").tz_convert("UTC")
-    df.loc[b,["Open","High","Low","Close"]]=[100.8,102.,100.7,101.7]
+    df.loc[b,["Open","High","Low","Close"]]=[101.8,103.,101.7,102.5]
     partly=df.loc[:b]
     d,p=rs.evaluate_research(partly,rs.NY_OPEN_TRAP,spread=.25)
     assert d.action=="WAIT"
