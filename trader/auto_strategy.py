@@ -38,7 +38,7 @@ def vote_summary(rows):
     }
 
 
-def evaluate_auto(frame, spread, snapshots=None, *, asof=None, use_mtf=True):
+def evaluate_auto(frame, spread, snapshots=None, *, asof=None, use_mtf=True, learning=None):
     """Return PAPER hypothesis plus a six-row transparent audit.
 
     One independent after-MTF setup is sufficient in experimental PAPER.
@@ -73,7 +73,7 @@ def evaluate_auto(frame, spread, snapshots=None, *, asof=None, use_mtf=True):
         return (Decision("WAIT", AUTO_MODE, prefix +
             f"Zatwierdzonych setupów: {len(approved)}, wymagane: {MIN_AGREEMENT}. "
             "Nie wymuszam PAPER.", atr=atr), rows)
-    selected,selection=select_approved(frame,approved)
+    selected,selection=select_approved(frame,approved,learning=learning)
     if selected is None:
         return (Decision("WAIT",AUTO_MODE,prefix+
             "Błąd wyboru: brak prawidłowego zatwierdzonego kandydata."),rows)

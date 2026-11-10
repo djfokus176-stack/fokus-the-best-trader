@@ -1,6 +1,39 @@
 ## ✅ AKTUALNY STAN — 9/10 LISTOPADA 2026 (PAPER DEMO, bez zleceń brokerskich)
 
 **Źródłem prawdy jest `main`, nie archiwalne opisy v0.1/v3 niżej.**
+
+### 10.11 — AUTO: przesłanki 0/3–3/3 oraz samouczenie SHADOW
+
+- **TERMINAL → M1:** tabela sześciu nazwanych strategii pokazuje warunki
+  1/3 kontekst, 2/3 sygnał wstępny, 3/3 pełen setup po MTF i globalnych
+  blokadach. Wszystkie trzy etapy pochodzą z zamkniętych świec, nie z GPT.
+  Nie jest to 33/66/100% szans ani sygnał kupna. Konflikt LONG/SHORT
+  uniemożliwia 3/3. Brak danych i blokady nigdy nie są ukrywane.
+- **WORKER:** zapisuje wynik 0/3–3/3 wraz z nazwą w checkpoint Supabase;
+  `SETUP_PROGRESS` i `SIX_VOTES` są w logach Northflank. W RAPORTY jest
+  odczyt ostatnich wartości; gdy świeca jest stara, nie udawaj LIVE.
+- **NIEZALEŻNE SHADOW:** sześć strategii prowadzi osobne, przedkrokowe
+  papierowe statystyki z nowo nadejścia kolejnych świec M1. Dopiero
+  ZAMKNIĘTA następna świeca ujawnia retrospektywny OPEN; przy pominiętym
+  interwale wynik unieważnia się, nie dopisuje fikcyjnych filli.
+  Uwzględnione spread, poślizg oraz konserwatywne rozstrzygnięcie SL.
+- **UCZENIE OGRANICZONE:** AUTO może przestawić priorytet *tylko jeśli*
+  DWIE LUB WIĘCEJ już zatwierdzonych strategii mają KAŻDA co najmniej
+  100 niezależnie zamkniętych SHADOW z dodatnim dolnym 95% oszacowaniem
+  średniego R na ostatnich 30% wyników. Wcześniej MARKET DNA + RR
+  pozostają bez zmian. Repeated holdout peeking nie jest niezależnym
+  dowodem rentowności. Nigdy nie dostrajamy progów lub nie odblokowujemy
+  przeciwnego sygnału / RR / MTF / broker status / BLS.
+- **Nowy RANGE REJECTION:** siódma hipoteza badawcza na konsolidację.
+  Jest w terminalu i archiwum RADAR jako SHADOW, lecz NIE w zbiorze
+  sześciu strategii AUTO oraz NIE w egzekucji pozycji PAPER.
+- Wykres w Streamlit i praca Northflank to osobne procesy. Do
+  czytania checkpointów i nowych statystyk w Streamlit potrzebne są
+  prywatne `FOKUS_SUPABASE_URL` i `FOKUS_SUPABASE_SECRET_KEY`
+  w ustawieniach **Streamlit Cloud**. Nie wolno ich kopiować do GitHuba.
+  Nie uruchamiaj drugiego zapisującego skanera z przeglądarki lub Actions.
+
+
 Ostatni audyt kodu: 392 testy na Pythonie 3.11 i 3.12 po #43.
 
 - **AUTO — 6 STRATEGII:** eksperymentalnie wystarcza 1 pełny sygnał po MTF
