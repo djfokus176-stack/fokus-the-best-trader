@@ -26,6 +26,23 @@ def _outcome(future, action, entry, stop, target, spread, slippage, holding):
     return status,pnl
 
 
+def _bars_through_exit(future: pd.DataFrame, side: str, stop: float, target: float) -> int:
+    """How many consecutive future CLOSED candles were really occupied?
+
+    Uses exactly the same MID high/low SL-first priority as simulate_outcome.
+    The decision at the following candle will see the closed exit candle,
+    but nothing beyond it. A gap invalidating entry occupies just one bar.
+    """
+    if future.empty:
+        return 0
+    for offset, bar in enumerate(future.itertuples(index=False),start=1):
+        if side=="LONG" and (float(bar.Low)<=stop or float(bar.High)>=target):
+            return offset
+        if side=="SHORT" and (float(bar.High)>=stop or float(bar.Low)<=target):
+            return offset
+    return len(future)
+
+
 def replay(frame: pd.DataFrame, strategy: str, spread: float=.6,
            slippage: float=.25, holding: int=20,
            evaluation_start: int=85, evaluation_end: int|None=None,
@@ -61,26 +78,43 @@ def replay(frame: pd.DataFrame, strategy: str, spread: float=.6,
         if status=="PENDING":  # no incomplete positions in performance stats
             i+=holding
             continue
+        if status=="SKIPPED_GAP":
+            # No position ever opened; the next closed bar may create a
+            # different independent setup. Previously skipped full horizon.
+            i+=1
+            continue
+        consumed=(_bars_through_exit(future,decision.action,
+                                    float(decision.stop),float(decision.target))
+                  if status in ("WIN","LOSS") else holding)
         risk=abs(float(decision.entry)-float(decision.stop))+spread+2*slippage
         events.append(dict(time_utc=frame.index[i-1],strategy=strategy,
             side=decision.action,status=status,pnl_pts=round(float(pnl),2),
             r_net=round(float(pnl)/risk,4) if risk>0 else 0,
             entry_mid=decision.entry,sl_mid=decision.stop,tp_mid=decision.target,
             spread=spread,reason=decision.reason))
-        i+=holding
+        # One active position at a time, but release the slot ON the first
+        # actual SL/TP candle, not automatically after all 20 future bars.
+        i+=max(1,consumed)
     return pd.DataFrame(events,columns=cols)
 
 
 def stats(trades: pd.DataFrame) -> dict:
     if trades is None or trades.empty:
-        return {"n":0,"wins":0,"win_rate_pct":None,"expectancy_pts":None,
-                "profit_factor":None,"sum_pts":0.0,"max_drawdown_pts":0.0,
-                "avg_r":None,"status":"BRAK TRANSAKCJI"}
+        return {"n":0,"wins":0,"win_rate_pct":None,
+                "profitable_trades":0,"pnl_win_rate_pct":None,
+                "positive_timeouts":0,"timeouts":0,
+                "expectancy_pts":None,"profit_factor":None,"sum_pts":0.0,
+                "max_drawdown_pts":0.0,"avg_r":None,"status":"BRAK TRANSAKCJI"}
     t=trades[trades.status.isin(FINAL_STATUSES)].copy()
     if t.empty:
         return stats(pd.DataFrame())
     pnl=t.pnl_pts.astype(float)
+    # "wins" is retained for backwards compatibility and means TP HIT.
+    # A TIMEOUT can close at positive P&L without ever touching target.
     wins=int((t.status=="WIN").sum())
+    profit_wins=int((pnl>0).sum())
+    timeouts=int((t.status=="TIMEOUT").sum())
+    positive_timeouts=int(((t.status=="TIMEOUT")&(pnl>0)).sum())
     gross_positive=float(pnl[pnl>0].sum())
     gross_negative=float(-pnl[pnl<0].sum())
     equity=pnl.cumsum()
@@ -88,6 +122,9 @@ def stats(trades: pd.DataFrame) -> dict:
     n=len(t)
     return {
       "n":n,"wins":wins,"win_rate_pct":round(100*wins/n,2),
+      "profitable_trades":profit_wins,
+      "pnl_win_rate_pct":round(100*profit_wins/n,2),
+      "timeouts":timeouts,"positive_timeouts":positive_timeouts,
       "expectancy_pts":round(float(pnl.mean()),3),
       "profit_factor":round(gross_positive/gross_negative,3) if gross_negative>0 else None,
       "sum_pts":round(float(pnl.sum()),2),
