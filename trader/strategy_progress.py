@@ -74,6 +74,9 @@ def progress_for_votes(frame,votes,blockers=()):
     df=indicators(frame) if ready else None
     atr=float(df.iloc[-1].ATR) if ready else 0.0
     ready=ready and isfinite(atr) and atr>0
+    raw_sides={v.get("Setup OHLC") for v in votes
+               if v.get("Setup OHLC") in ("LONG","SHORT")}
+    conflicting=len(raw_sides)>1
     rows=[]
     for vote in votes:
         name=str(vote.get("Strategia",""))
@@ -97,7 +100,8 @@ def progress_for_votes(frame,votes,blockers=()):
                 side="BRAK"
             elif choices[0][1]==choices[1][1]:
                 side="NIEJEDNOZNACZNY"
-        done=bool(raw in ("LONG","SHORT") and after==raw and not blockers)
+        done=bool(raw in ("LONG","SHORT") and after==raw and
+                  not blockers and not conflicting)
         count=(1 if context else 0)+(1 if context and early else 0)+(1 if done else 0)
         rows.append({"strategy":name,"side":side,"stage":count,
                      "progress":f"{count}/3",
