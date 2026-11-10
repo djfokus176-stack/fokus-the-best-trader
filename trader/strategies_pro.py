@@ -125,3 +125,9 @@ def decide_any(frame: pd.DataFrame, strategy="DRUGA FALA", spread:float=.6,
     return Decision(side,strategy,reason,round(entry,2),round(stop,2),
                     round(target,2),round((2*risk-spread)/(risk+spread),2),
                     round(atr,2),bias)
+
+
+# Immutable function-object reference for research UI A/B comparisons.
+# This must not be replaced when an integration harness monkeypatches the
+# ordinary decide_any dispatch to drive deterministic production checks.
+research_decide_any=decide_any
