@@ -147,7 +147,7 @@ def select_approved(frame, approved, *, learning=None):
                        "Kierunek":c["side"],
                        "Dopasowanie (nie %)":c["regime_fit"] if status=="READY" else None,
                        "RR":c["rr"] if isfinite(c["rr"]) else None,
-                      "SHADOW n":(next((r["closed"] for r in shadow
+                      "SHADOW n":(next((r.get("closed",0) for r in shadow
                            if r.get("strategy")==c["strategy"]),0)),
                       "SHADOW lower95 R":(evidence.get(c["strategy"]) or {}).get("lower95_r_holdout")}
                       for c in candidates))
