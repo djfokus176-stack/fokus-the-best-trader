@@ -99,41 +99,50 @@ def decide(frame: pd.DataFrame,strategy='DRUGA FALA',htf=None,spread=.6,min_rr=1
                     round(entry,2),round(stop,2),round(target,2),
                     round(rr,2),round(atr,2),bias)
 
-def simulate_outcome(bars,direction,entry,stop,target,spread,slippage=.25):
+def simulate_outcome(bars,direction,entry,stop,target,spread,slippage=.25, *, exit_spreads=None):
     """PAPER: entry, SL and TP are MID price *levels*, not executable quotes.
 
     Fill a new trade at next bar OPEN ask (LONG) / bid (SHORT), with adverse
     slippage. Stop has priority if both MID barriers touch in one OHLC bar.
     Exit LONG at bid / SHORT at ask, again with adverse slippage. A stop
-    gap is filled at the worse of stop or bar opening MID. Fixed spread
-    assumption is explicit; this is NOT broker execution or tick replay.
+    gap is filled at the worse of stop or bar opening MID. Optional exit_spreads
+    must represent the LAST KNOWN closed-bar spread before each exit candle;
+    never use that candle's future close spread for an intrabar TP/SL.
+    This is NOT broker execution or tick replay.
     """
-    if len(bars)<2:
-        return 'PENDING',0.0
-    if direction not in ('LONG','SHORT') or spread<0 or slippage<0:
+    if direction not in ('LONG','SHORT') or not np.isfinite(spread) or spread<0 or not np.isfinite(slippage) or slippage<0:
         raise ValueError('Nieprawidłowy kierunek, spread lub poślizg.')
+    if exit_spreads is None:
+        exit_values=[float(spread)]*len(bars)
+    else:
+        exit_values=[float(v) for v in exit_spreads]
+        if len(exit_values)!=len(bars) or any(not np.isfinite(v) or v<0 for v in exit_values):
+            raise ValueError('Historyczne spready wyjścia są niekompletne lub ujemne.')
+    if len(bars)<1:
+        return 'PENDING',0.0
     first_mid=float(bars.iloc[0].Open)
     entry_fill=(first_mid+spread/2+slippage if direction=='LONG'
                 else first_mid-spread/2-slippage)
     if (direction=='LONG' and not stop<first_mid<target) or (
         direction=='SHORT' and not target<first_mid<stop):
         return 'SKIPPED_GAP',0.0
-    for _,r in bars.iterrows():
+    for k,(_,r) in enumerate(bars.iterrows()):
+        exit_spread=exit_values[k]
         if direction=='LONG':
             if float(r.Low)<=stop:
                 exit_mid=min(float(stop),float(r.Open))
-                exit_bid=exit_mid-spread/2-slippage
+                exit_bid=exit_mid-exit_spread/2-slippage
                 return 'LOSS',round(exit_bid-entry_fill,2)
             if float(r.High)>=target:
-                exit_bid=float(target)-spread/2-slippage
+                exit_bid=float(target)-exit_spread/2-slippage
                 return 'WIN',round(exit_bid-entry_fill,2)
         else:
             if float(r.High)>=stop:
                 exit_mid=max(float(stop),float(r.Open))
-                exit_ask=exit_mid+spread/2+slippage
+                exit_ask=exit_mid+exit_spread/2+slippage
                 return 'LOSS',round(entry_fill-exit_ask,2)
             if float(r.Low)<=target:
-                exit_ask=float(target)+spread/2+slippage
+                exit_ask=float(target)+exit_spread/2+slippage
                 return 'WIN',round(entry_fill-exit_ask,2)
     return 'PENDING',0.0
 
