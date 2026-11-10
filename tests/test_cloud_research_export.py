@@ -26,7 +26,7 @@ def test_export_is_exact_utc_close_csv_with_no_secrets():
     assert output["last"]==frame.index[-1].isoformat()
     assert b"apikey" not in output["csv"].lower()
     parsed=read_ohlc_csv(BytesIO(output["csv"]))
-    pd.testing.assert_index_equal(parsed.index,frame.index)
+    assert parsed.index.equals(frame.index)
     assert len(parsed)==len(frame)
     assert parsed.iloc[-1].Spread==.6
 
