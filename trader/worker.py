@@ -243,6 +243,15 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             } for v in list(views or [])[:4]],
             "blockers":list(blockers or [])[:10],
         }
+        # Informational M1 bias from completed candles only, never a PAPER
+        # entry, MTF override or broker order. Persist beside the six votes.
+        from .early_watch import evaluate_early_watch
+        watch=evaluate_early_watch(snapshot.frame)
+        vote_audit["watch"]={
+            "side":watch.side,"score":int(watch.score),
+            "countertrend":bool(watch.countertrend),
+            "reason":str(watch.reason)[:240],
+        }
         from .forecast_audit import update_forecast
         # Only fresh, verified closed bars can enter future-price SHADOW audit.
         # The resulting predictions are not inputs to PAPER or risk gates.
@@ -317,6 +326,18 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
                      if v.get("raw") in ("LONG","SHORT") and v.get("after_mtf")=="WAIT"]
             if blocked:
                 audit_line+=" / MTF_VETO="+json.dumps(blocked,ensure_ascii=False)
+            # The critical 0/0 case still needs explanations: WAIT was
+            # produced by the raw setup itself (e.g. RR or nearby obstacle),
+            # so there was no MTF veto to report.
+            no_setups=[str(v.get("strategy",""))+":"+
+                str(v.get("reason",""))[:115] for v in vote_audit["rows"]
+                if v.get("raw")=="WAIT"]
+            if no_setups:
+                audit_line+=" / WAIT_REASONS="+json.dumps(no_setups,ensure_ascii=False)
+            watch=vote_audit.get("watch") or {}
+            if watch.get("side") in ("LONG","SHORT","WAIT"):
+                audit_line+=(" / OBSERVE_M1="+str(watch["side"])+
+                            "(score="+str(watch.get("score",0))+"/6;NOT_PAPER)")
             audit_line+=" / MTF_STATES="+json.dumps([
                 str(v.get("timeframe"))+":"+str(v.get("trend"))+
                 (":READY" if v.get("ready") else ":NOT_READY")
