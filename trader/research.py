@@ -158,13 +158,15 @@ def replay(frame: pd.DataFrame, strategy: str, spread: float=.6,
 def stats(trades: pd.DataFrame) -> dict:
     if trades is None or trades.empty:
         return {"n":0,"wins":0,"win_rate_pct":None,
+                "invalidated_gaps":0,
                 "profitable_trades":0,"pnl_win_rate_pct":None,
                 "positive_timeouts":0,"timeouts":0,
                 "expectancy_pts":None,"profit_factor":None,"sum_pts":0.0,
                 "max_drawdown_pts":0.0,"avg_r":None,"status":"BRAK TRANSAKCJI"}
+    invalidated=int((trades.status=="INVALIDATED_GAP").sum())
     t=trades[trades.status.isin(FINAL_STATUSES)].copy()
     if t.empty:
-        return stats(pd.DataFrame())
+        return {**stats(pd.DataFrame()),"invalidated_gaps":invalidated}
     pnl=t.pnl_pts.astype(float)
     # "wins" is retained for backwards compatibility and means TP HIT.
     # A TIMEOUT can close at positive P&L without ever touching target.
@@ -179,6 +181,7 @@ def stats(trades: pd.DataFrame) -> dict:
     n=len(t)
     return {
       "n":n,"wins":wins,"win_rate_pct":round(100*wins/n,2),
+      "invalidated_gaps":invalidated,
       "profitable_trades":profit_wins,
       "pnl_win_rate_pct":round(100*profit_wins/n,2),
       "timeouts":timeouts,"positive_timeouts":positive_timeouts,
