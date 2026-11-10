@@ -36,6 +36,7 @@ def annotate_watch_markers(fig, frame, *, last_bars=35, limit=8):
 
 from trader.research import chronological_report, rolling_oos, replay, stats
 from trader.mtf_replay import compare_mtf_on_m1_csv
+from trader.cloud_research_export import research_csv_from_closed_m1
 from trader.news_radar import fetch_headlines, fetch_bls_schedule, macro_blackout
 from trader.storage import connect, archive, recent, recent_scan_decisions, audit_prior_paper_signals, paper_report, legacy_outcomes_count, archive_candles, load_candles
 from trader.assistant import numeric_context, answer_ai
@@ -2255,6 +2256,54 @@ with reports_tab:
 
     with st.expander('🧪 CSV M1 — PORÓWNAJ 6 STRATEGII BEZ MTF I Z MTF (OFFLINE)',expanded=True):
         st.info('Reprodukowalny test OFFLINE: w CSV kolumna Time oznacza UTC CZAS ZAMKNIĘCIA świecy M1, nie czas otwarcia. M5/M15/H1 są agregowane z pełnych bloków M1 (nie z odrębnego feedu brokera).')
+        if remote_paper_view_enabled():
+            st.markdown('**☁️ POBIERZ WŁASNĄ HISTORIĘ M1 Z WORKERA SUPABASE**')
+            st.caption('Tylko odczyt zamkniętych świec z Capital.com DEMO, '
+                       'które worker już archiwizował. Nie uruchamia skanera, '
+                       'nie tworzy pozycji, nie eksportuje haseł ani kluczy.')
+            if st.button('📥 ODCZYTAJ DO 5000 M1 Z SUPABASE',
+                         key='owner_export_mtf_m1',use_container_width=True):
+                try:
+                    cloud=RemoteCheckpoint(secret('FOKUS_SUPABASE_URL'),
+                        secret('FOKUS_SUPABASE_SECRET_KEY'))
+                    candles=cloud.fetch_candles(instrument,'MINUTE',limit=5000)
+                    if candles.empty:
+                        st.session_state.pop('_cloud_m1_research_export',None)
+                        st.warning('Brak archiwalnych M1 w Supabase dla tego EPIC. '
+                                   'Worker musi zebrać świece.')
+                    else:
+                        export=research_csv_from_closed_m1(candles)
+                        export['epic']=instrument
+                        st.session_state['_cloud_m1_research_export']=export
+                except (RemoteError,ValueError,TypeError,KeyError) as exc:
+                    st.session_state.pop('_cloud_m1_research_export',None)
+                    # All RemoteError messages are hand-authored, redacted.
+                    st.error('Nie udało się pobrać świec M1: '
+                             +type(exc).__name__
+                             +((': '+str(exc)) if isinstance(exc,RemoteError)
+                               else ' — dane nie spełniają walidacji czasu/OHLC'))
+            export=st.session_state.get('_cloud_m1_research_export')
+            if export and export.get('epic')==instrument:
+                st.info(f"Zapisano do eksportu **{export['count']}** zamkniętych M1: "
+                        f"{export['first']} → {export['last']}. "
+                        f"Kompletnych H1: **{export['full_h1']}**; "
+                        f"przerw ponad minutę: **{export['gaps']}**.")
+                st.download_button('⬇️ POBIERZ CSV M1 UTC CLOSE (TYLKO OHLC + SPREAD)',
+                    data=export['csv'],mime='text/csv',
+                    file_name='FOKUS_SUPABASE_M1_DEMO_CLOSED.csv',
+                    key='owner_download_mtf_m1',use_container_width=True)
+                if export['preflight_mtf']:
+                    st.success('Spełnione wstępne warunki długości/70 H1. '
+                               'Pobierz CSV i załaduj poniżej do pełnego testu.')
+                else:
+                    st.warning('Na razie brak >=4600 M1 lub >=70 pełnych H1. '
+                               'Wciąż możesz pobrać CSV, lecz test MTF '
+                               'potrzebuje dłuższej historii.')
+        else:
+            st.caption('Aby pobrać M1 prosto z bazy workera, podłącz '
+                       'serwerowe FOKUS_SUPABASE_URL i '
+                       'FOKUS_SUPABASE_SECRET_KEY w Streamlit Secrets. '
+                       'Nie wpisuj kluczy w ten formularz.')
         offline_csv=st.file_uploader('📁 Wybierz historyczny CSV M1 (Time, Open, High, Low, Close, opcjonalnie Spread)',
             type=['csv'],key='offline_mtf_csv',help='Potrzeba 4600–6500 kolejnych minut, w tym >=70 pełnych godzin H1. Długie przerwy mogą wykluczyć raport.')
         c_a,c_b=st.columns(2)
