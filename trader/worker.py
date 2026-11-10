@@ -20,6 +20,7 @@ from .storage import connect,archive_candles
 from .strategies_pro import ALL_STRATEGIES,decide_any
 from .auto_strategy import AUTO_MODE,evaluate_auto
 from .ema50_wave import STRATEGY_NAME as WAVE_NAME
+from .range_rejection import NAME as RANGE_NAME
 from .paper_lifecycle import ensure_tables,progress_paper,queue_paper,active_position
 from .telegram_alerts import dispatch_alerts,record_stale_event
 from .remote_checkpoint import (RemoteCheckpoint, configured, dump_state,
@@ -278,6 +279,11 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             research_votes.append({"Strategia":WAVE_NAME+" • SHADOW",
                 "Setup OHLC":wave.action,"Po filtrze MTF":"NIE WYLICZANO (SHADOW)",
                 "RR":wave.rr,"Powód":wave.reason})
+            range_exp=decide_any(snapshot.frame,RANGE_NAME,spread=snapshot.spread)
+            research_votes.append({"Strategia":RANGE_NAME+" • SHADOW",
+                "Setup OHLC":range_exp.action,
+                "Po filtrze MTF":"NIE WYLICZANO (SHADOW)",
+                "RR":range_exp.rr,"Powód":range_exp.reason})
         candidates=append_candidate(candidates,snapshot,decision,research_votes,blockers)
         auto_state=review_closed_candle(auto_state,snapshot,decision,votes,views,
                                       blockers,news_context=news_feed,
