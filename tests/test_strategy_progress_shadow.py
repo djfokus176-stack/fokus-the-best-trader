@@ -100,3 +100,15 @@ def test_scorecard_requires_100_independently_closed_outcomes():
     assert report["leader"]=="EMA TREND"
     assert report["strategies"][1]["closed"]==100
     assert report["strategies"][1]["holdout"]==30
+
+
+def test_extra_range_rejection_is_research_only_and_not_auto():
+    from trader.strategies_pro import ALL_STRATEGIES, decide_any
+    from trader.range_rejection import NAME, RESEARCH_ONLY
+    assert RESEARCH_ONLY is True
+    assert NAME not in ALL_STRATEGIES
+    assert len(ALL_STRATEGIES)==6
+    too_short=frame(90)
+    decision=decide_any(too_short,NAME,spread=.5)
+    assert decision.strategy==NAME
+    assert decision.action=="WAIT"
