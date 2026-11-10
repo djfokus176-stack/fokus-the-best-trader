@@ -100,8 +100,13 @@ def replay(frame: pd.DataFrame, strategy: str, spread: float=.6,
         prefix=frame.iloc[max(0,i-max_history):i] if max_history else frame.iloc[:i]
         entry_spread=(float(frame.Spread.iloc[i-1]) if spread_mode=="historical"
                       else float(spread))
-        decision=decide_any(prefix,strategy,spread=entry_spread,
-                            obstacle_mode=obstacle_mode)
+        # Preserve the old call contract for legacy methods and test shims.
+        # Only opt-in structural comparison adds the new keyword parameter.
+        if obstacle_mode=="legacy":
+            decision=decide_any(prefix,strategy,spread=entry_spread)
+        else:
+            decision=decide_any(prefix,strategy,spread=entry_spread,
+                                obstacle_mode=obstacle_mode)
         if decision.action not in ("LONG","SHORT"):
             i+=1
             continue
