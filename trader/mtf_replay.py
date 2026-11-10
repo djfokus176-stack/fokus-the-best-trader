@@ -115,6 +115,29 @@ class HistoricalMTFGate:
         expected="UP" if decision.action=="LONG" else "DOWN"
         return self.consensus(signal_closed_utc)==expected
 
+    def reject_reason(self, decision, signal_closed_utc) -> str:
+        """Explain historical MTF veto without changing any trade filter.
+
+        An H1 opposing a setup gets an explicit name, even when the
+        overall consensus is NEUTRAL due to mixed M5/M15/H1 trends.
+        Do not infer an H1 trend from an incomplete or future candle.
+        """
+        expected="UP" if decision.action=="LONG" else "DOWN"
+        consensus=self.consensus(signal_closed_utc)
+        if consensus==expected:
+            return "OK"
+        if consensus=="WAIT":
+            return "BRAK_AKTUALNYCH_MTF"
+        t=pd.Timestamp(signal_closed_utc)
+        h1=self.series["HOUR"]
+        idx=int(h1.index.searchsorted(t,side="right")-1)
+        if idx>=0 and str(h1.iloc[idx]) in ("UP","DOWN"):
+            if str(h1.iloc[idx])!=expected:
+                return "H1_PRZECIWNY"
+        if consensus=="NEUTRAL":
+            return "BRAK_ZGODNOSCI_M5_M15_H1"
+        return "INNY_KIERUNEK_MTF"
+
 
 def compare_mtf_on_m1_csv(m1:pd.DataFrame, strategies=ALL_STRATEGIES,
                            spread=.6, slippage=.25, holding=20, split=.7,
@@ -149,11 +172,16 @@ def compare_mtf_on_m1_csv(m1:pd.DataFrame, strategies=ALL_STRATEGIES,
         for period,start,end in (("WCZEŚNIEJSZE / 70%",warmup,bound),
                                  ("PÓŹNIEJSZE / 30%",bound,len(m1))):
             for variant in ("BEZ MTF","Z MTF"):
-                counted={"candidates":0,"rejected":0,"passed":0}
+                counted={"candidates":0,"rejected":0,"passed":0,
+                         "H1_PRZECIWNY":0,"BRAK_ZGODNOSCI_M5_M15_H1":0,
+                         "BRAK_AKTUALNYCH_MTF":0,"INNY_KIERUNEK_MTF":0}
                 def trade_filter(decision,stamp):
                     counted["candidates"]+=1
-                    accepted=gate.allow(decision,stamp)
+                    reason=gate.reject_reason(decision,stamp)
+                    accepted=reason=="OK"
                     counted["passed" if accepted else "rejected"]+=1
+                    if not accepted:
+                        counted[reason]+=1
                     return accepted
                 trades=replay(m1,name,spread=spread,slippage=slippage,holding=holding,
                               evaluation_start=start,evaluation_end=end,
@@ -164,6 +192,10 @@ def compare_mtf_on_m1_csv(m1:pd.DataFrame, strategies=ALL_STRATEGIES,
                      "kandydaci_mtf":counted["candidates"] if variant=="Z MTF" else None,
                      "odrzucone_mtf":counted["rejected"] if variant=="Z MTF" else None,
                      "zaakceptowane_mtf":counted["passed"] if variant=="Z MTF" else None,
+                     "mtf_przeciwny_H1":counted["H1_PRZECIWNY"] if variant=="Z MTF" else None,
+                     "mtf_brak_zgodnosci":counted["BRAK_ZGODNOSCI_M5_M15_H1"] if variant=="Z MTF" else None,
+                     "mtf_brak_danych":counted["BRAK_AKTUALNYCH_MTF"] if variant=="Z MTF" else None,
+                     "mtf_inny_kierunek":counted["INNY_KIERUNEK_MTF"] if variant=="Z MTF" else None,
                      **metrics})
                 if not trades.empty:
                     trade_copy=trades.copy()

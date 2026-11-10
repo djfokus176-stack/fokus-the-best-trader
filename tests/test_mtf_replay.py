@@ -117,3 +117,43 @@ def test_historical_mtf_veto_measures_rejections_not_phantom_trades(monkeypatch)
     assert baseline["n"]>0
     assert filtered["odrzucone_mtf"]>0
     assert filtered["n"]<=baseline["n"]
+
+
+def test_mtf_diagnostic_classifies_opposing_h1_without_changing_gate():
+    from trader.strategy import Decision
+    df=m1_sample(4900)
+    gate=HistoricalMTFGate(df,build_higher_closed_bars(df))
+    # Synthetic slowly rising H1, while SHORT signals may occur on M1.
+    future=df.index[-180:]
+    eligible=[t for t in future if
+              gate.series["HOUR"].iloc[int(
+                  gate.series["HOUR"].index.searchsorted(t,side="right")-1)]=="UP"
+              and gate.consensus(t) in ("UP","NEUTRAL")]
+    assert eligible
+    short=Decision("SHORT","EMA TREND","test",entry=5000,stop=5002,target=4996)
+    assert gate.reject_reason(short,eligible[-1])=="H1_PRZECIWNY"
+    assert not gate.allow(short,eligible[-1])
+    long=Decision("LONG","EMA TREND","test",entry=5000,stop=4998,target=5004)
+    if gate.consensus(eligible[-1])=="UP":
+        assert gate.reject_reason(long,eligible[-1])=="OK"
+        assert gate.allow(long,eligible[-1])
+
+
+def test_mtf_rejections_are_partitioned_into_exhaustive_reason_counts(monkeypatch):
+    df=m1_sample(4800)
+    import trader.research as research
+    from trader.strategy import Decision
+    def always_short(frame,strategy,spread):
+        px=float(frame.Close.iloc[-1])
+        return Decision("SHORT",strategy,"test",
+                        entry=px,stop=px+2,target=px-4,rr=1.5)
+    monkeypatch.setattr(research,"decide_any",always_short)
+    table,_,_=compare_mtf_on_m1_csv(
+        df,strategies=("EMA TREND",),holding=10)
+    filtered=table[table.wariant=="Z MTF"]
+    assert filtered.kandydaci_mtf.sum()>0
+    for _,row in filtered.iterrows():
+        assert row.odrzucone_mtf==(
+            row.mtf_przeciwny_H1+row.mtf_brak_zgodnosci+
+            row.mtf_brak_danych+row.mtf_inny_kierunek)
+        assert row.kandydaci_mtf==row.odrzucone_mtf+row.zaakceptowane_mtf

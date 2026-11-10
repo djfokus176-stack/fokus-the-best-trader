@@ -2388,6 +2388,30 @@ with reports_tab:
             st.success(f"Raport offline: {csv_result['size']} świec M1; hash pliku SHA256: {csv_result['sha256'][:18]}…; agregaty pełne: {csv_result['counts']}.")
             st.caption('Podział 70/30 liczony PO rozgrzaniu 70 pełnych godzin H1. Reguły strategii identyczne; wariant Z MTF może odrzucać sygnały, ale nie otwiera ich sam. Każdy wariant ma własną, niepokrywającą się historię pozycji PAPER.')
             comp=csv_result['table']
+            mtf_diag=comp[comp['wariant']=='Z MTF']
+            if not mtf_diag.empty:
+                n_candidates=int(mtf_diag['kandydaci_mtf'].fillna(0).sum())
+                n_accepted=int(mtf_diag['zaakceptowane_mtf'].fillna(0).sum())
+                n_h1=int(mtf_diag['mtf_przeciwny_H1'].fillna(0).sum())
+                n_mixed=int(mtf_diag['mtf_brak_zgodnosci'].fillna(0).sum())
+                n_stale=int(mtf_diag['mtf_brak_danych'].fillna(0).sum())
+                n_other=int(mtf_diag['mtf_inny_kierunek'].fillna(0).sum())
+                st.markdown('#### 🔎 DLACZEGO MTF ODRZUCA SETUPY?')
+                st.info(f'Zbadane kandydatury MTF: **{n_candidates}**, '
+                        f'zatwierdzone: **{n_accepted}**. '
+                        f'Przeciwny H1: **{n_h1}**; '
+                        f'brak zgodności M5/M15/H1: **{n_mixed}**; '
+                        f'brak aktualnych/pełnych MTF: **{n_stale}**; '
+                        f'inny kierunek MTF: **{n_other}**. '
+                        'Jedna utrzymująca się formacja może być liczona '
+                        'w wielu kolejnych minutach, więc kandydatury '
+                        'nie są niezależnymi transakcjami.')
+                if n_candidates and not n_accepted:
+                    st.warning('Żaden historyczny kandydat nie przeszedł '
+                               'aktualnej, restrykcyjnej bramki MTF. '
+                               'To NIE jest dowód, że sama strategia nie działa. '
+                               'Przy bardzo krótkim okresie po 70 H1 '
+                               'nie wyłączaj zabezpieczenia bez większej próby.')
             st.dataframe(comp,use_container_width=True,hide_index=True)
             st.download_button('⬇️ CSV: PORÓWNANIE 6 STRATEGII',
                 data=comp.to_csv(index=False).encode('utf-8-sig'),
