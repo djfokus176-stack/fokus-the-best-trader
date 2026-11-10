@@ -112,3 +112,15 @@ def test_extra_range_rejection_is_research_only_and_not_auto():
     decision=decide_any(too_short,NAME,spread=.5)
     assert decision.strategy==NAME
     assert decision.action=="WAIT"
+
+
+def test_conflicting_raw_directions_cannot_show_full_3_of_3():
+    f=frame()
+    rows=[
+        {"Strategia":"EMA TREND","Setup OHLC":"LONG",
+         "Po filtrze MTF":"LONG","Powód":"test"},
+        {"Strategia":"LIQUIDITY SWEEP","Setup OHLC":"SHORT",
+         "Po filtrze MTF":"SHORT","Powód":"test"},
+    ]
+    result=progress_for_votes(f,rows)
+    assert all(x["progress"]=="2/3" for x in result)
