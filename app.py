@@ -13,7 +13,7 @@ import streamlit as st
 from trader.market import CapitalReadOnly, FeedError, evaluate_snapshot, PERIOD
 from trader.strategy import indicators, backtest
 from trader.strategies_pro import decide_any, ALL_STRATEGIES
-from trader.strategies_pro import decide_any as research_guard_decide_any
+from trader.strategies_pro import research_decide_any as research_guard_decide_any
 from trader.ema50_wave import STRATEGY_NAME as WAVE_NAME
 from trader.range_rejection import NAME as RANGE_NAME
 from trader.auto_strategy import AUTO_MODE, evaluate_auto, vote_summary
