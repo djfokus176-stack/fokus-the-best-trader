@@ -73,6 +73,7 @@ from trader.market_dna import analyze_market
 from trader.research_setups import RESEARCH_STRATEGIES, evaluate_research
 from trader.research_comparison import compare_research_methods
 from trader.exit_grid import compare_same_entries
+from trader.wave_ui import render_wave_reversal_research
 from trader.feed_audit import inspect_labels,compare_clock_observations
 
 st.set_page_config(page_title='FOKU$ THE BEST TRADER',page_icon='📈',layout='wide')
@@ -2107,6 +2108,7 @@ with news_tab:
 
 
 with reports_tab:
+    render_wave_reversal_research()
     st.subheader('📈 FOKU$ LAB — PORÓWNAJ 6 STRATEGII PO KOSZTACH')
     st.caption('Rejestr badań PAPER. Chronologiczny holdout 70/30 + kroczące przedziały. Żaden wynik nie jest obietnicą zysku.')
     with st.expander('🧪 PAPER v3 — POZYCJE DEMO, ZDARZENIA I RAPORT DZIENNY/TYGODNIOWY',expanded=True):
