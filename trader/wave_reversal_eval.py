@@ -34,17 +34,22 @@ COMPARE_COLUMNS=(
 
 
 
-def read_wave_m15_csv(file) -> pd.DataFrame:
-    """Strict input: Time UTC is a CLOSED M15 candle (user confirmed in UI).
+def read_wave_m15_csv(file, *, timestamp_convention="close") -> pd.DataFrame:
+    """Strict input: user declares M15 UTC timestamps OPEN or CLOSE.
 
-    Does NOT fill in historical spread, VWAP, volume, or quotes.
-    Incomplete BID/ASK quartets fail rather than silently falling back.
+    OPEN labels become CLOSE by an explicit +15 min transform, BEFORE
+    any feature detection. Never infer vendor convention silently.
+    Does NOT fill in historical spread, VWAP, volume or BID/ASK.
     """
+    if timestamp_convention not in ("open","close"):
+        raise ValueError("Wybierz znaną konwencję M15: open lub close.")
     data=pd.read_csv(file)
     required=("Time","Open","High","Low","Close")
     if not all(c in data.columns for c in required):
         raise ValueError("CSV M15: wymagane Time,Open,High,Low,Close.")
     data["Time"]=pd.to_datetime(data["Time"],utc=True,errors="raise")
+    if timestamp_convention=="open":
+        data["Time"]=data["Time"]+pd.Timedelta(minutes=15)
     data=data.set_index("Time").sort_index()
     optional=["Spread","Volume",
               "BidOpen","BidHigh","BidLow","BidClose",
@@ -56,6 +61,16 @@ def read_wave_m15_csv(file) -> pd.DataFrame:
                 "AskOpen","AskHigh","AskLow","AskClose")
     if 0<len(set(price_cols).intersection(data.columns))<len(price_cols):
         raise ValueError("Historyczne BID/ASK muszą mieć pełne 8 kolumn OHLC.")
+    if set(price_cols).issubset(data.columns):
+        b=data[["BidOpen","BidHigh","BidLow","BidClose"]].to_numpy(dtype=float)
+        a=data[["AskOpen","AskHigh","AskLow","AskClose"]].to_numpy(dtype=float)
+        if (not np.isfinite(b).all() or not np.isfinite(a).all() or
+                (b<=0).any() or (a<b).any() or
+                (b[:,1]<np.maximum.reduce([b[:,0],b[:,2],b[:,3]])).any() or
+                (b[:,2]>np.minimum.reduce([b[:,0],b[:,1],b[:,3]])).any() or
+                (a[:,1]<np.maximum.reduce([a[:,0],a[:,2],a[:,3]])).any() or
+                (a[:,2]>np.minimum.reduce([a[:,0],a[:,1],a[:,3]])).any()):
+            raise ValueError("Wadliwe historyczne BID/ASK OHLC.")
     if "Spread" in data:
         spread=data.Spread
         if spread.isna().any() or (spread<0).any() or not np.isfinite(spread.to_numpy()).all():
