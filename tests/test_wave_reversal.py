@@ -108,7 +108,7 @@ def test_dst_session_is_ny_local_not_hardcoded_utc():
 
 def test_gap_invalidates_horizon_not_fabricate_hit():
     df=history()
-    i=len(df)-20
+    i=len(df)-12  # only 11 M15 bars remain in this NY session
     probes=_probes(df,i,"SHORT")
     assert len(probes)==9
     # At this time 4h cannot fit before 16 ET; must be missing.
