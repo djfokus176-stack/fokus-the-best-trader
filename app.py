@@ -57,6 +57,7 @@ from trader.paper_lifecycle import (
 from trader.paper_display import annotate_open_paper,annotate_paper_history
 from trader.paper_sounds import new_paper_events,wav_notice,SOUND_EVENTS,alert_audio
 from trader.paper_reporting import daily_weekly,performance_by_policy
+from trader.paper_audit import paper_export_table, paper_strategy_audit
 from trader.paper_learning import strategy_scorecard
 from trader.forecast_audit import forecast_metrics
 from trader.remote_checkpoint import RemoteCheckpoint,remote_view_db,RemoteError,dump_state
@@ -1281,14 +1282,43 @@ with market_tab:
                                   if e.get('trade_id') in paper_ids]
                     if paper_rows:
                         with st.expander('📋 DZIENNIK WEJŚĆ I WYJŚĆ PAPER — GODZINA / PUNKTY'):
-                            columns=['setup_utc','opened_utc','closed_utc','side',
-                                     'status','entry_mid','stop_mid','target_mid',
-                                     'exit_mid','pnl_pts','close_reason','exit_policy']
-                            st.dataframe(pd.DataFrame([
-                                {key:r.get(key) for key in columns} for r in paper_rows[:35]
-                            ]),hide_index=True,use_container_width=True)
-                            st.caption('Punkty netto po modelowanym spreadzie i poślizgu; '
-                                       'PAPER_OPEN odtworzony dopiero po zamknięciu świecy.')
+                            # The old compact table silently dropped strategy
+                            # and trade_id: both are essential for attribution.
+                            journal=paper_export_table(paper_rows)
+                            focus=['trade_id','strategy','setup_utc',
+                                   'entry_assumed_utc','opened_utc','closed_utc',
+                                   'side','status','entry_mid','stop_mid',
+                                   'target_mid','exit_mid','pnl_pts',
+                                   'close_reason','exit_policy']
+                            st.dataframe(journal[focus].head(80),hide_index=True,
+                                         use_container_width=True)
+                            st.caption('entry_assumed_utc to hipotetyczna chwila '
+                                       'wejścia; opened_utc to zamknięcie pierwszej '
+                                       'świecy, po którym odtworzono cenę. '
+                                       'Nie są to realne zlecenia brokera.')
+                            st.download_button(
+                                '⬇️ POBIERZ PEŁNY DZIENNIK PAPER CSV '
+                                '(ZE STRATEGIĄ I ID)',
+                                data=journal.to_csv(index=False).encode('utf-8-sig'),
+                                mime='text/csv',
+                                file_name='FOKUS_PAPER_STRATEGIE_ID_WYNIKI.csv',
+                                key='paper_terminal_full_journal',
+                                use_container_width=True)
+                            audit,totals=paper_strategy_audit(paper_rows)
+                            if not audit.empty:
+                                st.markdown('**📉 ROZLICZENIA WEDŁUG STRATEGII '
+                                            'I KIERUNKU — PAPER**')
+                                st.dataframe(audit,hide_index=True,
+                                             use_container_width=True)
+                                st.caption(
+                                    f"Zamknięte: {totals['n']}; "
+                                    f"zyskowne: {totals['profitable']}; "
+                                    f"SL: {totals['sl']}; "
+                                    f"TP: {totals['tp']}; "
+                                    f"TIMEOUT: {totals['timeout']}; "
+                                    f"suma: {totals['sum_pts']:+.2f} pkt. "
+                                    "Próby <30 to wyłącznie sygnał diagnostyczny, "
+                                    "nie ranking skuteczności.")
                     active_audio=bool(st.session_state.get('paper_audio_enabled',False))
                     # Establish a baseline, NOT a playback of old ledger events.
                     # '__EMPTY__' makes a first future OPEN audible when archive
