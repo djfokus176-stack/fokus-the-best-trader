@@ -36,9 +36,15 @@ def render_wave_reversal_research():
             type=["csv"],key="wave_rev_m15_source",
             help="M15 z 2021–2026: wgrywaj CZAS ZAMKNIĘCIA w UTC. "
                  "Nie przekładaj ręcznie świec M1 i nie symuluj wolumenu.")
+        clock=st.radio(
+            "Konwencja czasu w źródłowym CSV M15 (UTC)",
+            ["CLOSE — znacznik oznacza ZAMKNIĘCIE",
+             "OPEN — znacznik oznacza OTWARCIE; przesuń +15 min"],
+            index=0,key="wave_m15_clock",horizontal=True)
+        clock_value=("open" if clock.startswith("OPEN") else "close")
         checked=st.checkbox(
-            "Potwierdzam: kolumna Time oznacza UTC CZAS ZAMKNIĘCIA "
-            "każdej świecy M15, a nie jej otwarcia",
+            "Potwierdzam: sprawdziłem w dokumentacji/źródle, "
+            "czy Time oznacza OPEN czy CLOSE i poprawnie wybrałem powyżej",
             value=False,key="wave_m15_close_clock")
         c1,c2=st.columns(2)
         with c1:
@@ -69,7 +75,8 @@ def render_wave_reversal_research():
             else:
                 try:
                     raw=upload.getvalue()
-                    frame=read_wave_m15_csv(io.BytesIO(raw))
+                    frame=read_wave_m15_csv(
+                        io.BytesIO(raw),timestamp_convention=clock_value)
                     with st.spinner(
                         "Badanie M15: potwierdzone fale, BOS, 3 poziomy × "
                         "3 horyzonty, LONG/SHORT, lata, koszty i OOS..."):
@@ -78,7 +85,7 @@ def render_wave_reversal_research():
                             slippage=slippage)
                     st.session_state["_wave_reversal_results"]={
                         "file_sha256":hashlib.sha256(raw).hexdigest(),
-                        "costs":(assumed_spread,slippage),
+                        "costs":(assumed_spread,slippage,clock_value),
                         "ranking":rank,"events":events,"years":years,
                         "meta":meta}
                 except (ValueError,TypeError,KeyError,OverflowError) as exc:
@@ -93,7 +100,7 @@ def render_wave_reversal_research():
         fresh=(upload is not None and checked and
                result["file_sha256"]==hashlib.sha256(
                    upload.getvalue()).hexdigest() and
-               result["costs"]==(assumed_spread,slippage))
+               result["costs"]==(assumed_spread,slippage,clock_value))
         if not fresh:
             st.warning("Zmieniono dane, spread, poślizg lub konwencję czasu. "
                        "Poprzednie wyniki ukryte; uruchom test ponownie.")
@@ -103,6 +110,7 @@ def render_wave_reversal_research():
             f"Wczytano {meta['source_rows']} M15; "
             f"wykryte zdarzenia RAW + BOS: {meta['signals']}; "
             f"podział 70/30: {meta['split_utc']}. "
+            f"Interpretacja czasu źródłowego: {clock_value.upper()}. "
             "To WYNIKI BADAWCZE, nie przewaga handlowa.")
         st.caption(
             "Koszty: "+("pełne BID/ASK OHLC" if meta["bidask_full"]
