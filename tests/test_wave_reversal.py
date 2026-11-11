@@ -5,7 +5,7 @@ import pytest
 
 from trader.wave_reversal import detect_waves,validate_closed_m15
 from trader.wave_reversal_eval import (analyze_wave_m15,_probes,
-                                        _filter_ok,_net_result)
+                                        _filter_ok,_net_result,read_wave_m15_csv)
 
 
 def history(days=12, patterned_last=True):
@@ -171,3 +171,33 @@ def test_late_future_change_cannot_change_earlier_signal_or_filters():
             assert pd.isna(same[key])
         else:
             assert old[key]==same[key]
+
+
+def test_csv_open_clock_is_explicitly_shifted_and_never_silently_assumed():
+    import io
+    frame=history()
+    raw=frame.reset_index().rename(columns={"index":"Time"})
+    raw["Time"]=raw["Time"]-pd.Timedelta(minutes=15)
+    binary=raw.to_csv(index=False).encode()
+    shifted=read_wave_m15_csv(io.BytesIO(binary),timestamp_convention="open")
+    assert shifted.index.equals(frame.index)
+    with pytest.raises(ValueError,match="konwencj"):
+        read_wave_m15_csv(io.BytesIO(binary),timestamp_convention="unknown")
+
+
+def test_partial_bidask_rejected_without_replacing_it_with_fake_spread():
+    import io
+    frame=history()
+    frame["BidOpen"]=frame.Open-0.3
+    rows=frame.reset_index().rename(columns={"index":"Time"})
+    with pytest.raises(ValueError,match="pełne 8"):
+        read_wave_m15_csv(io.BytesIO(
+            rows.to_csv(index=False).encode()))
+
+
+def test_wave_structure_is_present_in_every_closed_bar_signal():
+    df=history()
+    events=detect_waves(df)
+    assert set(events.wave_structure).issubset({
+        "RISING PEAKS","FALLING PEAKS","RISING TROUGHS",
+        "FALLING TROUGHS","FLAT PEAKS","FLAT TROUGHS","MIXED WAVES"})
