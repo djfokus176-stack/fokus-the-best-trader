@@ -33,6 +33,40 @@ COMPARE_COLUMNS=(
 )
 
 
+
+def read_wave_m15_csv(file) -> pd.DataFrame:
+    """Strict input: Time UTC is a CLOSED M15 candle (user confirmed in UI).
+
+    Does NOT fill in historical spread, VWAP, volume, or quotes.
+    Incomplete BID/ASK quartets fail rather than silently falling back.
+    """
+    data=pd.read_csv(file)
+    required=("Time","Open","High","Low","Close")
+    if not all(c in data.columns for c in required):
+        raise ValueError("CSV M15: wymagane Time,Open,High,Low,Close.")
+    data["Time"]=pd.to_datetime(data["Time"],utc=True,errors="raise")
+    data=data.set_index("Time").sort_index()
+    optional=["Spread","Volume",
+              "BidOpen","BidHigh","BidLow","BidClose",
+              "AskOpen","AskHigh","AskLow","AskClose"]
+    columns=("Open","High","Low","Close")
+    for col in (*columns,*[x for x in optional if x in data.columns]):
+        data[col]=pd.to_numeric(data[col],errors="raise")
+    price_cols=("BidOpen","BidHigh","BidLow","BidClose",
+                "AskOpen","AskHigh","AskLow","AskClose")
+    if 0<len(set(price_cols).intersection(data.columns))<len(price_cols):
+        raise ValueError("Historyczne BID/ASK muszą mieć pełne 8 kolumn OHLC.")
+    if "Spread" in data:
+        spread=data.Spread
+        if spread.isna().any() or (spread<0).any() or not np.isfinite(spread.to_numpy()).all():
+            raise ValueError("Niepoprawny spread historyczny.")
+    if "Volume" in data:
+        volume=data.Volume
+        if volume.isna().any() or (volume<0).any() or not np.isfinite(volume.to_numpy()).all():
+            raise ValueError("Niepoprawna kolumna Volume.")
+    validate_closed_m15(data)
+    return data
+
 def _filter_ok(row, name):
     keys={
        "EMA":("ema_filter",),"RSI":("rsi_filter",),
@@ -289,6 +323,13 @@ def analyze_wave_m15(frame:pd.DataFrame, *, spread_assumption=1.5,
                 "history_valid":hit is not None,
             })
     logs=pd.DataFrame(details)
+    # Cache groups ONCE, not 6,000+ DataFrame scans of a 5-year dataset.
+    # Full Dukascopy M15 files can contain >100k bars.
+    probe_groups={}
+    for item in details:
+        key=(item["okres"],item["direction"],item["wave_count"],
+             item["confirmation"],item["horizon_h"],item["target_pct"])
+        probe_groups.setdefault(key,[]).append(item)
     summary=[]
     years=[]
     periods=("WCZESNIEJSZE","POZNIEJSZE")
@@ -304,20 +345,13 @@ def analyze_wave_m15(frame:pd.DataFrame, *, spread_assumption=1.5,
                         for filter_name in FILTERS:
                             for hours in HORIZONS:
                                 for pct in TARGETS:
-                                    if logs.empty: selected=[]
-                                    else:
-                                        subset=logs.loc[
-                                            (logs.okres==period)&
-                                            (logs.direction==side)&
-                                            (logs.wave_count==n)&
-                                            (logs.confirmation==confirm)&
-                                            (logs.horizon_h==hours)&
-                                            (logs.target_pct==pct)]
-                                        if pattern!="ANY":
-                                            subset=subset[subset.pattern==pattern]
-                                        selected=[r for r in subset.to_dict("records")
-                                                  if _filter_ok(r,filter_name)
-                                                  and r["hit"] is not None]
+                                    subset=probe_groups.get((
+                                        period,side,n,confirm,hours,pct),())
+                                    selected=[r for r in subset
+                                              if (pattern=="ANY" or
+                                                  r["pattern"]==pattern)
+                                              and _filter_ok(r,filter_name)
+                                              and r["hit"] is not None]
                                     picked=_independent_period(selected,hours)
                                     nobs=len(picked)
                                     hits=int(sum(int(r["hit"]) for r in picked))
