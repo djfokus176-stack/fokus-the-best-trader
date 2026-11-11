@@ -111,8 +111,10 @@ def test_visible_chart_has_entry_and_exit_pnl_from_positions():
       "pnl_pts":2.4}]
     annotate_paper_history(fig,positions,"US500",SRC,"MINUTE")
     assert len(fig.data)==2
-    assert any("OTWARCIE SHORT" in (t.name or "") for t in fig.data)
-    assert any("2.40 pkt" in str(t.text) for t in fig.data)
+    assert any("otwarcie SHORT" in (t.name or "") for t in fig.data)
+    assert any("+2.40 pkt" in str(t.text) for t in fig.data)
+    assert any("paper-123456789" in str(t.text) for t in fig.data)
+    assert all(t.mode=="markers" for t in fig.data)
     assert len(go.Figure().data)==0
 
 
@@ -204,13 +206,15 @@ def test_markers_are_real_paper_only_and_have_requested_shape():
        "side":"LONG","status":"PENDING","setup_utc":T0.isoformat()},
     ]
     annotate_paper_history(fig,rows,"US500",SRC,"MINUTE")
-    assert len(fig.data)==3  # LONG OPEN, LONG CLOSE, SHORT OPEN
+    assert len(fig.data)==3  # grouped LONG OPEN, SHORT OPEN, losing CLOSE
     assert [trace.marker.symbol for trace in fig.data]==[
-      "triangle-up","square","triangle-down"]
+      "triangle-up","triangle-down","square"]
     assert [trace.marker.color for trace in fig.data]==[
-      "#3de59a","#3de59a","#ff425d"]
-    assert "ZAMKNIJ -2.10 pkt" in fig.data[1].text[0]
-    assert fig.data[1].textfont.color=="#ff6575"  # not green 'profit'
+      "#3de59a","#ff425d","#ff6575"]
+    closed=next(trace for trace in fig.data if "zamknięcie −" in trace.name)
+    assert "-2.10 pkt" in closed.text[0]
+    assert "long-id" in closed.text[0]
+    assert closed.mode=="markers" and closed.showlegend
     assert len(fig.layout.shapes)==0
 
 
