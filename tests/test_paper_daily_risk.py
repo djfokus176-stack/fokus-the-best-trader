@@ -113,7 +113,8 @@ def test_zero_explicitly_disables_daily_brake_and_bad_config_fails_closed():
 
 def test_worker_blocks_new_paper_only_and_keeps_ledger_unchanged(monkeypatch):
     db=db_fixture()
-    at=pd.Timestamp.now(tz="UTC").floor("min")-pd.Timedelta(minutes=2)
+    # Deterministic day: do not make the test dependent on midnight Warsaw.
+    at=pd.Timestamp("2026-11-11T12:00:00Z")
     # A dated close in Warsaw's today, already known by the current scan.
     older=at-pd.Timedelta(minutes=11)
     closed(db,"prior-loss",older.isoformat(),-22.)
