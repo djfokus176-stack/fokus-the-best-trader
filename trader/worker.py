@@ -27,6 +27,7 @@ from .remote_checkpoint import (RemoteCheckpoint, configured, dump_state,
                                 restore_state, RemoteError)
 from .strategy_progress import progress_for_votes
 from .shadow_learning import advance_shadow, shadow_scorecard
+from .paper_daily_risk import paper_daily_risk, DEFAULT_DAILY_STOP_PTS
 
 
 def scan_once(client,epic,tf,strategy,max_spread,db, *,
@@ -139,6 +140,26 @@ def scan_once(client,epic,tf,strategy,max_spread,db, *,
             code=getattr(getattr(exc,"response",None),"status_code",None)
             diagnostics.append("BLS_CALENDAR:"+type(exc).__name__+
                                (f":HTTP{code}" if code else ""))
+    # PAPER-only daily circuit breaker, evaluated AFTER prior positions
+    # progressed on closed candles, but BEFORE any new PENDING setup.
+    # It is not a live broker order, an equity stop, or guaranteed loss cap.
+    if verdict.action in ("LONG","SHORT"):
+        try:
+            daily_limit=float(os.getenv("FOKUS_PAPER_DAILY_STOP_PTS",
+                                        str(DEFAULT_DAILY_STOP_PTS)))
+            daily=paper_daily_risk(db,epic=epic,source=main.source,
+                asof=main.confirmed_utc,max_drawdown_pts=daily_limit)
+            if daily.blocked:
+                reasons.append("PAPER_DAILY_DRAWDOWN_LIMIT")
+                diagnostics.append(
+                    f"PAPER_DAILY_STOP:{daily.day}:"
+                    f"REALIZED={daily.realized_pts:+.2f}pkt:"
+                    f"MAX_DD={daily.max_drawdown_pts:.2f}pkt:"
+                    f"LIMIT={daily.limit_pts:.2f}pkt:"
+                    "NEW_PAPER_PAUSED_ONLY")
+        except (ValueError,TypeError,OverflowError):
+            # Invalid config must never silently remove the safety gate.
+            reasons.append("PAPER_DAILY_STOP_CONFIG_INVALID")
     # Optional AI is commentary only. It cannot change verdict, gates or orders.
     if reviewer is not None:
         try:
