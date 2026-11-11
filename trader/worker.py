@@ -339,6 +339,10 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             "source":"Capital.com DEMO REST",
             "timeframe":tf,"epic":epic,
             "strategy":strategy,
+            # Nonsecret PAPER simulation threshold for the owner's read-only
+            # terminal; the worker alone decides whether entries are paused.
+            "paper_daily_stop_pts":os.getenv(
+                "FOKUS_PAPER_DAILY_STOP_PTS",str(DEFAULT_DAILY_STOP_PTS)),
             "shadow_leader":latest_shadow_report.get("leader"),
             "clock_confirmed_open":bool(clock_confirmed_open),
             "setups_enabled":bool(enable_setups),
