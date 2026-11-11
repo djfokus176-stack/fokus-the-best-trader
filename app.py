@@ -72,6 +72,7 @@ from trader.owner_auth import auth_mode, owner_email_configured, google_identity
 from trader.market_dna import analyze_market
 from trader.research_setups import RESEARCH_STRATEGIES, evaluate_research
 from trader.research_comparison import compare_research_methods
+from trader.exit_grid import compare_same_entries
 from trader.feed_audit import inspect_labels,compare_clock_observations
 
 st.set_page_config(page_title='FOKU$ THE BEST TRADER',page_icon='📈',layout='wide')
@@ -2658,6 +2659,110 @@ with reports_tab:
                             data=detail.to_csv(index=False).encode('utf-8-sig'),
                             file_name='FOKUS_RANKING_POZYCJE.csv',
                             mime='text/csv',key='research_trades_export')
+    with st.expander('⚖️ KONTROLOWANY TEST WYJŚCIA: 1R / 1,5R / 2R × 10 / 20 / 30 M1 (TYLKO BADANIE)',expanded=False):
+        st.caption('Dziewięć wariantów na IDENTYCZNYCH sygnałach, wejściu '
+                   'na następnym OPEN, stop lossie i okresach 70/30. '
+                   'W każdym wariancie rezerwuję 30 minut na pozycję, '
+                   'by dłuższe/krótsze wyjście NIE zmieniało listy wejść. '
+                   'To porównanie samej strategii OHLC M1, PRZED MTF, '
+                   'wiadomościami, bramkami workera i rzeczywistymi fillami.')
+        exit_strategy=st.selectbox('Zamrożona strategia bazowa do testu',
+            list(ALL_STRATEGIES),index=list(ALL_STRATEGIES).index('EMA TREND'),
+            key='exit_grid_strategy')
+        exit_source=(offline_csv.getvalue() if offline_csv is not None else
+            (st.session_state.get('_cloud_m1_research_export') or {}).get('csv')
+            if (st.session_state.get('_cloud_m1_research_export') or {}).get('epic')==instrument
+            else None)
+        if exit_source:
+            st.caption('Dane: '+('CSV wybrany w panelu' if offline_csv is not None
+                      else 'historia odczytana z Supabase w tej sesji')+
+                      f' | {len(exit_source)} bajtów')
+        else:
+            st.info('Najpierw wgraj CSV M1 powyżej albo pobierz historię M1 '
+                    'z Supabase. Test nie otwiera nowych pozycji PAPER.')
+        if st.button('⚖️ TESTUJ 9 WYJŚĆ NA TYCH SAMYCH WEJŚCIACH',
+                     key='exit_grid_run',use_container_width=True):
+            if not exit_source:
+                st.warning('Brak danych CSV M1. Nie wymyślam wyników.')
+            else:
+                try:
+                    import io as _exit_io
+                    if (offline_spread_choice=='historical' and
+                        'Spread' not in pd.read_csv(
+                            _exit_io.BytesIO(exit_source),nrows=0).columns):
+                        raise ValueError('Historyczny spread wymaga kolumny Spread.')
+                    exit_frame=read_ohlc_csv(_exit_io.BytesIO(exit_source),
+                                              default_spread=offline_spread)
+                    with st.spinner('Causal replay: te same wejścia, '
+                                    '9 różnych wyjść, koszty i podział 70/30...'):
+                        exit_table,exit_details,exit_meta=compare_same_entries(
+                            exit_frame,strategy=exit_strategy,
+                            spread=offline_spread,slippage=offline_slip,
+                            spread_mode=offline_spread_choice)
+                    st.session_state['_fokus_exit_grid']={
+                        'sha256':hashlib.sha256(exit_source).hexdigest(),
+                        'params':(exit_strategy,offline_spread,offline_slip,
+                                  offline_spread_choice),
+                        'table':exit_table,'details':exit_details,
+                        'meta':exit_meta}
+                except (ValueError,KeyError,TypeError,OverflowError) as exc:
+                    st.session_state.pop('_fokus_exit_grid',None)
+                    st.error('Nie wykonano testu 9 wyjść: '+str(exc)[:220])
+        exit_cached=st.session_state.get('_fokus_exit_grid')
+        if exit_cached:
+            matching=bool(exit_source) and (
+                hashlib.sha256(exit_source).hexdigest()==exit_cached['sha256']
+                and exit_cached['params']==(
+                    exit_strategy,offline_spread,offline_slip,
+                    offline_spread_choice))
+            if not matching:
+                st.warning('Zmieniono CSV, strategię lub koszty. '
+                           'Stary ranking ukryty — uruchom test ponownie.')
+            else:
+                st.caption('Czas odcięcia wcześniejszych danych: '+
+                    exit_cached['meta']['split_after_utc']+
+                    '. Dane zamknięć z treningu nigdy nie przekraczają '
+                    'granicy późniejszego okresu. M1 to nie M15 Dukascopy.')
+                st.markdown('**📊 Porównanie TP/SL/TIMEOUT po kosztach**')
+                st.dataframe(exit_cached['table'],hide_index=True,
+                             use_container_width=True)
+                holdout=exit_cached['table'][
+                    exit_cached['table'].okres=='POZNIEJSZE 30%']
+                if holdout.empty or holdout.proby.max()<30:
+                    st.warning('Niewystarczająca próba w późniejszych 30%. '
+                               'Nie wybieram zwycięskiego TP ani czasu.')
+                else:
+                    st.warning('To porównanie dziewięciu hipotez na tym samym '
+                               'późniejszym okresie. Wynik dodatni NIE jest '
+                               'dowodem przewagi — potrzebny kolejny, '
+                               'nieużywany do wyboru test forward SHADOW.')
+                counts=exit_cached['meta']['counts']
+                st.caption('Liczby kandydatów i pominiętych luk: '+str(counts))
+                st.download_button('⬇️ CSV: PORÓWNANIE 9 WYJŚĆ',
+                    data=exit_cached['table'].to_csv(index=False).encode('utf-8-sig'),
+                    mime='text/csv',file_name='FOKUS_EXIT_GRID_9_RANKING.csv',
+                    key='exit_grid_summary_download')
+                history=exit_cached['details']
+                if not history.empty:
+                    st.download_button('⬇️ CSV: WSZYSTKIE WEJŚCIA I WYJŚCIA',
+                        data=history.to_csv(index=False).encode('utf-8-sig'),
+                        mime='text/csv',file_name='FOKUS_EXIT_GRID_9_TRADES.csv',
+                        key='exit_grid_trades_download')
+                    with st.expander('Rozdziel LONG/SHORT, sesję i rok'):
+                        grouped=(history.groupby(
+                            ['okres','rr_tp','limit_m1','strona','sesja_et','rok'],
+                            dropna=False)
+                            .agg(liczba=('pnl_pts','size'),
+                                 suma_pkt=('pnl_pts','sum'),
+                                 srednio_pkt=('pnl_pts','mean'),
+                                 koszty_pkt=('koszty_pkt','sum'))
+                            .reset_index())
+                        st.dataframe(grouped,hide_index=True,
+                                     use_container_width=True)
+                st.caption('Kolumna Spread M1 jest obserwowana na zamknięciu '
+                           'świecy, NIE daje ticków BID/ASK ani realnych '
+                           'warunków wykonania. Warianty nie odtwarzają '
+                           'ograniczeń makro i MTF; brak zgody na handel LIVE.')
     st.markdown('### 📉 Podstawowy replay bieżącej serii')
     if snap is None or len(snap.frame)<125:
         st.warning('Do raportu potrzeba >=125 zamkniętych świec. Najlepiej kilkadziesiąt tysięcy świec z wiarygodnego archiwum, a nie tylko 350 z REST.')
