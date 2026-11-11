@@ -58,6 +58,7 @@ from trader.paper_display import annotate_open_paper,annotate_paper_history
 from trader.paper_sounds import new_paper_events,wav_notice,SOUND_EVENTS,alert_audio
 from trader.paper_reporting import daily_weekly,performance_by_policy
 from trader.paper_audit import paper_export_table, paper_strategy_audit
+from trader.paper_daily_risk import paper_daily_risk, DEFAULT_DAILY_STOP_PTS
 from trader.paper_learning import strategy_scorecard
 from trader.forecast_audit import forecast_metrics
 from trader.remote_checkpoint import RemoteCheckpoint,remote_view_db,RemoteError,dump_state
@@ -1280,6 +1281,51 @@ with market_tab:
                     paper_ids={x['trade_id'] for x in paper_rows}
                     paper_events=[e for e in recent_events(db_v3,limit=150)
                                   if e.get('trade_id') in paper_ids]
+                    if paper_rows and src=="Capital.com DEMO REST":
+                        # Only the Northflank worker knows its environment.
+                        # Compare using its last persisted (nonsecret) limit,
+                        # not an invented setting from the local browser.
+                        remote_meta=st.session_state.get('_paper_remote_meta') or {}
+                        if remote_paper_view_enabled():
+                            daily_limit=remote_meta.get('paper_daily_stop_pts')
+                        else:
+                            daily_limit=secret(
+                                'FOKUS_PAPER_DAILY_STOP_PTS',
+                                str(DEFAULT_DAILY_STOP_PTS))
+                        if daily_limit is not None:
+                            try:
+                                daily=paper_daily_risk(db_v3,epic=instrument,
+                                    source=src,asof=datetime.now(timezone.utc),
+                                    max_drawdown_pts=daily_limit)
+                                if daily.blocked:
+                                    st.warning(
+                                        '🛑 NOWE PAPER WSTRZYMANE PRZEZ HAMULEC STRAT '
+                                        f"({daily.day}, Warszawa). Maks. dzienne "
+                                        f"obsunięcie: {daily.max_drawdown_pts:.2f} pkt "
+                                        f"/ limit: {daily.limit_pts:.2f} pkt. "
+                                        'Wcześniej otwarte PAPER są nadal rozliczane. '
+                                        'Ostateczny status workera jest w RAPORTY.')
+                                elif daily.limit_pts>0:
+                                    st.caption(
+                                        '🛡️ Limit dziennego obsunięcia PAPER '
+                                        f"({daily.day}, Warszawa): "
+                                        f"{daily.max_drawdown_pts:.2f}/"
+                                        f"{daily.limit_pts:.2f} pkt; "
+                                        f"zamkniętych dzisiaj: {daily.closed_count}. "
+                                        'To podgląd danych, nie potwierdzenie '
+                                        'aktywnej wersji workera.')
+                                else:
+                                    st.caption(
+                                        '⚠️ Hamulec strat PAPER: próg 0 pkt '
+                                        '— wyłączony w aktualnej konfiguracji.')
+                            except (ValueError,TypeError,OverflowError):
+                                st.warning(
+                                    '🛑 Nieprawidłowa konfiguracja progu '
+                                    'PAPER w checkpointcie / aplikacji.')
+                        elif remote_paper_view_enabled():
+                            st.caption('Limit PAPER workera: BRAK DANYCH W '
+                                       'CHECKPOINCIE — nie potwierdzam jego '
+                                       'aktywacji na Northflank.')
                     if paper_rows:
                         with st.expander('📋 DZIENNIK WEJŚĆ I WYJŚĆ PAPER — GODZINA / PUNKTY'):
                             # The old compact table silently dropped strategy
