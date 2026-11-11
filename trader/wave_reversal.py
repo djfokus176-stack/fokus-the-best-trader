@@ -24,7 +24,7 @@ CASH_FIRST_CLOSE = time(9,45)
 CASH_LAST_CLOSE = time(16,0)
 COLUMNS = (
     "event_id","signal_utc","pivot_utc","direction","wave_count",
-    "extremum","pattern","confirmation","bos_level","signal_close",
+    "extremum","pattern","wave_structure","confirmation","bos_level","signal_close",
     "atr","ema21","rsi","vwap_available","volume_available",
     "ema_filter","rsi_filter","atr_filter","vwap_filter",
     "volume_filter","regime","session_ny","strategy_version",
@@ -86,9 +86,9 @@ def _features(frame):
 
 
 def _regime(row):
-    if pd.isna(row.ATR) or pd.isna(row._atr_med) or row._atr_med<=0:
+    if pd.isna(row.ATR) or pd.isna(row["_atr_med"]) or row["_atr_med"]<=0:
         return "BRAK DANYCH"
-    if row.ATR>=1.5*row._atr_med:
+    if row.ATR>=1.5*row["_atr_med"]:
         return "HIGH VOLATILITY"
     if row.EMA21>row.EMA50 and row.EMA9>row.EMA21:
         return "TREND UP"
@@ -115,24 +115,38 @@ def _make_event(df, day, side, wave_count, recent, idx, pivot_idx,
     else:
         kind="WAVE PEAK" if side=="SHORT" else "WAVE TROUGH"
     near=float(now.Close)
-    has_vwap=pd.notna(now._vwap)
+    recent_prices=[float(p[1]) for p in recent[-max(2,wave_count):]]
+    diffs=np.diff(recent_prices)
+    if len(diffs) and all(d>.10*atr for d in diffs):
+        wave_structure=("RISING PEAKS" if side=="SHORT"
+                        else "RISING TROUGHS")
+    elif len(diffs) and all(d<-.10*atr for d in diffs):
+        wave_structure=("FALLING PEAKS" if side=="SHORT"
+                        else "FALLING TROUGHS")
+    elif max(recent_prices)-min(recent_prices)<=.25*atr:
+        wave_structure=("FLAT PEAKS" if side=="SHORT"
+                        else "FLAT TROUGHS")
+    else:
+        wave_structure="MIXED WAVES"
+    has_vwap=pd.notna(now["_vwap"])
     ema=(bool(now.Close<now.EMA21 and now.EMA9<=now.EMA21)
          if side=="SHORT" else
          bool(now.Close>now.EMA21 and now.EMA9>=now.EMA21))
     rsi=bool(now.RSI<50 if side=="SHORT" else now.RSI>50)
-    atrpass=(bool(now.ATR>=now._atr_med)
-             if pd.notna(now._atr_med) and now._atr_med>0 else None)
-    vwap=(bool(near<float(now._vwap)) if side=="SHORT"
-          else bool(near>float(now._vwap))) if has_vwap else None
-    volfilter=(bool(now._vol_filter) if bool(now._vol_ok) and
-               pd.notna(now._vol_med) and now._vol_med>0 else None)
+    atrpass=(bool(now.ATR>=now["_atr_med"])
+             if pd.notna(now["_atr_med"]) and now["_atr_med"]>0 else None)
+    vwap=(bool(near<float(now["_vwap"])) if side=="SHORT"
+          else bool(near>float(now["_vwap"]))) if has_vwap else None
+    volfilter=(bool(now["_vol_filter"]) if bool(now["_vol_ok"]) and
+               pd.notna(now["_vol_med"]) and now["_vol_med"]>0 else None)
     stamp=df.index[idx]
     return {
       "event_id":f"{VERSION}|{stamp.isoformat()}|{side}|{wave_count}|{confirmation}",
       "signal_utc":stamp,"pivot_utc":df.index[pivot_idx],
       "direction":side,"wave_count":wave_count,
       "extremum":"PEAK" if side=="SHORT" else "TROUGH",
-      "pattern":kind,"confirmation":confirmation,"bos_level":round(level,5),
+      "pattern":kind,"wave_structure":wave_structure,
+      "confirmation":confirmation,"bos_level":round(level,5),
       "signal_close":round(near,5),"atr":round(atr,5),
       "ema21":round(float(now.EMA21),5),
       "rsi":round(float(now.RSI),3),
