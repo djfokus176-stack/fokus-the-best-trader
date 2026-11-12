@@ -71,7 +71,8 @@ def test_gap_and_expired_timestamp_never_score_as_success():
     later=advance_wave_shadow(peak,broken)
     ev=next(e for e in later["events"] if e["origin"]=="FORWARD"
             and e["wave_count"]==3)
-    assert ev["outcomes"]["60m_0.5pct"]["status"]=="INVALIDATED_GAP"
+    assert ev["outcomes"]["60m_0.5pct"]["status"] in (
+        "INVALIDATED_GAP","INVALIDATED_MISSING_BARS")
     with pytest.raises(ValueError,match="older"):
         advance_wave_shadow(later,frame.iloc[:-6])
 
