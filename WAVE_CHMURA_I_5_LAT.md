@@ -84,6 +84,28 @@ oryginalny BID+ASK OHLC nie zawiera tickowej kolejności SL/TP,
 prowizji brokera ani poślizgu rzeczywistego. Wynik 2021–2026 po
 obejrzeniu nie jest niezależnym, nienaruszonym testem forward.
 
+## Jednorazowy test pięciu lat w GitHub Actions bez laptopa
+
+- Workflow: `.github/workflows/wave-five-year.yml`. Po pierwszym
+  dodaniu do `main` próbuje uruchomić się raz; można go również
+  uruchomić świadomie przez `Actions → FOKU$ WAVE — five-year M15
+  BID/ASK research (one-off) → Run workflow`.
+- Uruchamia `scripts/download_wave_m15.sh`,
+  `scripts/prepare_wave_m15.py` i
+  `scripts/run_wave_5year.py`. Źródłowe M15 BID/ASK i wyniki
+  zapisywane są jako artefakt Actions na 30 dni; nie są kopiowane
+  do repozytorium ani używane przez aktywny worker.
+- Zbiorczy ranking A–E, poszczególne rozliczenia, cechy, lata,
+  godziny, horyzonty i warianty SL/TP są plikami CSV. Manifest
+  zapisuje hash źródłowego CSV, źródło, daty, koszty i ograniczenia.
+- Fail-closed: gdy pobieranie, zgodność BID/ASK albo kompletność
+  danych zawiedzie, zadanie nie generuje fikcyjnego zysku.
+- Konwencja danych Dukascopy jest zgodna z dokumentacją:
+  `timestamp` UNIX ms oznacza **otwarcie** świecy, a importer
+  wynikowy przesuwa czas o 15 min na M15 CLOSE UTC.
+- Zielony GitHub Actions job pracy badawczej oznacza **ukończone
+  obliczenia**, nie zweryfikowaną przewagę tradingową.
+
 ## Jak sprawdzić chmurę
 
 - Po wdrożeniu **tego commita** do aktywnego workera sprawdź, czy
