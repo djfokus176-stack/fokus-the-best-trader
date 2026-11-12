@@ -55,3 +55,14 @@ def test_grid_does_not_invent_m15_10min_or_20min_outcomes():
     for variant,g in events.groupby("variant"):
         assert g.groupby(["rr_tp","holding_min"]).anchor_id.apply(tuple).nunique()==1
     assert (rank[rank.holding_min.isin([10,20])].scored==0).all()
+
+
+def test_pattern_ranking_does_not_promote_any_to_trading():
+    from trader.wave_intelligence2_stats import wave_pattern_ranking
+    frame,anchors,base=setup()
+    summary,log,meta=run_wave_abcd(frame,anchors=anchors)
+    result=wave_pattern_ranking(summary)
+    assert len(result)==10
+    assert set(result.INTERWAL)=={'M15'}
+    assert all('WAIT' in s or 'BRAK DANYCH' in s for s in result.STATUS)
+    assert result.loc[result.FORMACJA=='E_WAIT','NETTO_OOS'].isna().all()
