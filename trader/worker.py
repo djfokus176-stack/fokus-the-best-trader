@@ -28,13 +28,14 @@ from .remote_checkpoint import (RemoteCheckpoint, configured, dump_state,
 from .strategy_progress import progress_for_votes
 from .shadow_learning import advance_shadow, shadow_scorecard
 from .paper_daily_risk import paper_daily_risk, DEFAULT_DAILY_STOP_PTS
+from .wave_shadow_archive import advance_wave_shadow, wave_shadow_scorecard
 
 
 def scan_once(client,epic,tf,strategy,max_spread,db, *,
               slippage=.25,enable_setups=True,strict_macro=True,
               calendar_fetch=fetch_bls_schedule,telegram_token="",
               telegram_chat_id="",telegram_enabled=False,remote=None,
-              reviewer=None,learning=None):
+              reviewer=None,learning=None,wave_audit=None):
     """One accountable v3 scan, using Capital DEMO + closed bars only.
 
     Existing PAPER can progress independently of new-signal permissions;
@@ -81,6 +82,19 @@ def scan_once(client,epic,tf,strategy,max_spread,db, *,
         # Persist OHLC before optional billable commentary. A failed cloud
         # write aborts the scan instead of charging for an unsaved analysis.
         archived=remote.upsert_candles(snapshots,epic)
+    wave_status="NOT_CONFIGURED"
+    if wave_audit is not None:
+        m15=snapshots.get("MINUTE_15")
+        if m15 is None or not m15.good:
+            wave_status="WAIT_NO_VALID_M15"
+        else:
+            try:
+                wave_status=str(wave_audit(m15))[:90]
+            except (ValueError,TypeError,KeyError,OverflowError,
+                    IndexError,RuntimeError) as exc:
+                # WAVE SHADOW failure is reported, never changes broker/PAPER
+                # entry permissions. No secrets or external exception text.
+                wave_status="ERROR_"+type(exc).__name__
     if strategy==AUTO_MODE:
         verdict,auto_votes=evaluate_auto(main.frame,main.spread,snapshots,
                                           asof=main.confirmed_utc,use_mtf=True,
@@ -98,7 +112,7 @@ def scan_once(client,epic,tf,strategy,max_spread,db, *,
     fresh,why,_=current_feed_status(main,main.source)
     reasons=[]
     # Report WHY a gate blocked the scan. Never log credentials or tokens.
-    diagnostics=[]
+    diagnostics=(["WAVE_SHADOW="+wave_status] if wave_audit is not None else [])
     if "POMINIĘTO_STARE_BŁĘDY=" in main.reason:
         diagnostics.append("DATA_WARN:"+main.reason.split("POMINIĘTO_STARE_BŁĘDY=",1)[1][:100])
     for resolution in TIMEFRAMES:
@@ -210,6 +224,8 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
     forecast_state=payload.get("forecast_research",{})
     vote_audit=payload.get("last_vote_audit") or {}
     shadow_state=payload.get("shadow_per_strategy") or {}
+    wave_state=payload.get("wave_shadow") or {}
+    wave_status="NOT_CONFIGURED"
     # Selection uses outcomes completed PRIOR to the current decision.
     previous_shadow_report=shadow_scorecard(shadow_state)
     news_feed=dict(payload.get("news_radar") or {})
@@ -309,6 +325,20 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
         auto_state=review_closed_candle(auto_state,snapshot,decision,votes,views,
                                       blockers,news_context=news_feed,
                                       macro_context=macro_watch)
+    def archive_wave_m15(snapshot):
+        nonlocal wave_state,wave_status
+        if os.getenv("FOKUS_WAVE_SHADOW_ENABLED","true").strip().lower() not in (
+                "true","1","yes","on"):
+            wave_status="DISABLED"
+            return wave_status
+        if not clock_confirmed_open:
+            wave_status="CLOCK_UNVERIFIED"
+            return wave_status
+        wave_state=advance_wave_shadow(
+            wave_state,snapshot.frame,epic=epic,source=snapshot.source)
+        wave_status=("OK_M15_"+str(wave_state["last_closed_utc"])[:19]+
+                     "_N="+str(wave_state["events_retained"]))
+        return wave_status
     db=sqlite3.connect(":memory:")
     try:
         restore_state(db,payload)
@@ -316,7 +346,8 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
                          enable_setups=enable_setups,strict_macro=strict_macro,
                          calendar_fetch=calendar_fetch,telegram_enabled=False,
                          remote=remote,reviewer=review_snapshot,
-                         learning=previous_shadow_report)
+                         learning=previous_shadow_report,
+                         wave_audit=archive_wave_m15)
         payload=dump_state(db)
         if isinstance(auto_state,dict):
             payload["auto_ai"]=auto_state
@@ -331,6 +362,10 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
         from .paper_learning import strategy_scorecard
         payload["learning_report"]=strategy_scorecard(db,epic=epic)
         payload["shadow_per_strategy"]=shadow_state
+        if wave_state:
+            payload["wave_shadow"]=wave_state
+            # Compact descriptive summary, never used to authorize trading.
+            payload["wave_shadow_report"]=wave_shadow_scorecard(wave_state)
         latest_shadow_report=shadow_scorecard(shadow_state)
         payload["shadow_learning_report"]=latest_shadow_report
         payload["meta"]={
@@ -339,6 +374,11 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             "source":"Capital.com DEMO REST",
             "timeframe":tf,"epic":epic,
             "strategy":strategy,
+            "wave_shadow_status":wave_status,
+            "wave_shadow_enabled":os.getenv("FOKUS_WAVE_SHADOW_ENABLED",
+                                            "true").strip().lower() in ("true","1","yes","on"),
+            "wave_shadow_last_m15":wave_state.get("last_closed_utc"),
+            "wave_shadow_forward_events":wave_state.get("events_forward",0),
             # Nonsecret PAPER simulation threshold for the owner's read-only
             # terminal; the worker alone decides whether entries are paused.
             "paper_daily_stop_pts":os.getenv(
