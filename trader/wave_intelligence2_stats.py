@@ -109,7 +109,8 @@ def feature_audit(logs):
     if raw.empty:return pd.DataFrame()
     fields=("wave_structure","pattern","ema200_relation",
             "vwap_relation","large_rejection_wick","false_break_at_pivot",
-            "atr_rising","regime","signal_et_hour")
+            "atr_rising","momentum_slowing","time_to_new_extremum_slower",
+            "successive_rebound_weaker","regime","signal_et_hour")
     records=[]
     for col in fields:
         for (period,side,value),g in raw.groupby(
