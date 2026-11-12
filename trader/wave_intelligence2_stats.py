@@ -195,3 +195,36 @@ def same_entries_exit_grid(frame, logs, *, split_cutoff, spread=2., slippage=.25
                       "ZA MAŁA PRÓBA (<30)" if len(v)<30 else
                       "BADANIE — WYMAGA NOWEGO FORWARD"})
     return pd.DataFrame(summary),detail
+
+
+def wave_pattern_ranking(summary):
+    """Compact A--E ranking; OOS is descriptive until a new forward period.
+
+    Number of years positive ignores missing years. 2021 and 2026 are not
+    counted as full years in a Dukascopy 2021-11 -> 2026-11 dataset.
+    """
+    cols=("FORMACJA","LONG_SHORT","INTERWAL","PROBY_TRAIN","WIN_RATE_TRAIN",
+          "PF_TRAIN","NETTO_TRAIN","MAX_DD_TRAIN","LATA_PLUS_2022_25",
+          "PROBY_OOS","PF_OOS","NETTO_OOS","EXPECTANCY_OOS","STATUS")
+    if summary is None or summary.empty:return pd.DataFrame(columns=cols)
+    rows=[]
+    base=summary[summary.year.isna()]
+    annual=summary[summary.year.notna()]
+    for side in ("SHORT","LONG"):
+        for variant in VARIANTS:
+            t=base[(base.anchor_side==side)&(base.variant==variant)&
+                   (base.period=="WCZESNIEJSZE")]
+            o=base[(base.anchor_side==side)&(base.variant==variant)&
+                   (base.period=="POZNIEJSZE")]
+            if t.empty or o.empty:continue
+            tr,os=t.iloc[0],o.iloc[0]
+            yearly=annual[(annual.anchor_side==side)&(annual.variant==variant)&
+                         (annual.year.isin([2022,2023,2024,2025]))]
+            nplus=int(((yearly.net_pts>0)&(yearly.closed>0)).groupby(yearly.year).any().sum())
+            rows.append(dict(zip(cols,(
+                variant,side,"M15",int(tr.closed),tr.win_pct,tr.profit_factor,
+                tr.net_pts,tr.max_drawdown_pts,nplus,int(os.closed),
+                os.profit_factor,os.net_pts,os.expectancy_pts,
+                "WAIT — BRAK NOWEGO FORWARD" if (tr.closed and os.closed)
+                else "BRAK DANYCH"))))
+    return pd.DataFrame(rows,columns=cols)
