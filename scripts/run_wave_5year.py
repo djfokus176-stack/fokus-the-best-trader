@@ -41,6 +41,9 @@ def run(csv_path:Path,output:Path,*,spread=2.,slippage=.25,
     summary,log,meta=run_wave_abcd(
         history,spread=spread,slippage=slippage,
         rr=rr,hold_minutes=hold,split=.70)
+    if "oos_cutoff" not in meta:
+        raise ValueError("BRAK DANYCH: brak potwierdzonych trzecich swingów; "
+                         "nie tworzę pustego raportu zyskowności.")
     patterns=wave_pattern_ranking(summary)
     excursion,exc_detail=wave_excursion_audit(history,log)
     features=feature_audit(log)
