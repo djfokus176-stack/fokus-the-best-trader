@@ -17,6 +17,9 @@ def setup():
     f.iloc[base+8,f.columns.get_loc('High')]=110.
     f.iloc[base+11,f.columns.get_loc('Close')]=97.
     f.iloc[base+11,f.columns.get_loc('Low')]=96.
+    # A real OHLC bar must contain its OPEN, CLOSE and wick extremes.
+    f.iloc[base+12,f.columns.get_loc('Open')]=97.5
+    f.iloc[base+12,f.columns.get_loc('Low')]=96.8
     f.iloc[base+12,f.columns.get_loc('High')]=98.1
     f.iloc[base+12,f.columns.get_loc('Close')]=97.2
     f.iloc[base+13,f.columns.get_loc('Close')]=112.
