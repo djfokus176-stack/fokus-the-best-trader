@@ -135,3 +135,63 @@ def timeframe_coverage():
         {"interwal":"M15","status":"BADANIE NA WGRANYCH M15"},
         {"interwal":"H1","status":"BRAK ODRĘBNEGO BADANIA H1"},
     ])
+
+
+def same_entries_exit_grid(frame, logs, *, split_cutoff, spread=2., slippage=.25):
+    """Frozen A/B/C/D entry signals with 4 R targets x 6 horizons.
+
+    M15 lacks 10/20-minute closes, so those combinations are explicit
+    BRAK DANYCH. Signals, candidates, and entries do NOT change as
+    stop/target/time configurations change. This is diagnostic only.
+    """
+    from .wave_intelligence2 import (_trade, RR_VALUES,
+                                      M15_EXITS_MIN,M15_UNSUPPORTED_MIN)
+    if logs is None or logs.empty:
+        return pd.DataFrame(),pd.DataFrame()
+    idx={t:i for i,t in enumerate(frame.index)}
+    cutoff=pd.Timestamp(split_cutoff)
+    if cutoff.tzinfo is None:
+        raise ValueError("Wymagany rzeczywisty graniczny timestamp OOS UTC")
+    cutoff=cutoff.tz_convert("UTC")
+    rows=[]
+    for t in logs.itertuples(index=False):
+        if t.variant=="E_WAIT" or not t.triggered or pd.isna(t.signal_utc):
+            continue
+        signal_idx=idx.get(pd.Timestamp(t.signal_utc))
+        if signal_idx is None:continue
+        for rr in RR_VALUES:
+            for hold in (*M15_UNSUPPORTED_MIN,*M15_EXITS_MIN):
+                if hold in M15_UNSUPPORTED_MIN:
+                    outcome={"status":"BRAK DANYCH M15","pnl_pts":None}
+                else:
+                    outcome=_trade(frame,signal_idx,t.direction,t.atr,
+                                   rr=rr,minutes=hold,spread=spread,
+                                   slippage=slippage,split_ts=cutoff)
+                rows.append({"anchor_id":t.anchor_id,"anchor_utc":t.anchor_utc,
+                    "period":t.period,"year":t.event_year,
+                    "side":t.direction,"variant":t.variant,
+                    "rr_tp":rr,"holding_min":hold,
+                    "status":outcome["status"],"pnl_pts":outcome.get("pnl_pts"),
+                    "mfe_pts":outcome.get("mfe_pts"),"mae_pts":outcome.get("mae_pts"),
+                    "exit_min":outcome.get("exit_min")})
+    detail=pd.DataFrame(rows)
+    summary=[]
+    if detail.empty:return pd.DataFrame(),detail
+    for (period,side,variant,rr,hold),g in detail.groupby(
+        ["period","side","variant","rr_tp","holding_min"],sort=True):
+        v=g.pnl_pts.dropna().astype(float)
+        gains=v[v>0].sum();loss=-v[v<0].sum()
+        eq=v.cumsum();dd=eq-eq.cummax().clip(lower=0)
+        summary.append({"period":period,"side":side,"variant":variant,
+            "rr_tp":rr,"holding_min":hold,"entries":len(g),
+            "scored":len(v),"profitable":int((v>0).sum()),
+            "win_pct":round(float(100*(v>0).mean()),2) if len(v) else None,
+            "net_pts":round(float(v.sum()),3) if len(v) else None,
+            "expectancy":round(float(v.mean()),3) if len(v) else None,
+            "profit_factor":round(float(gains/loss),3) if loss else None,
+            "max_dd_pts":round(float(-dd.min()),3) if len(v) else None,
+            "status": "BRAK DANYCH M15" if hold in M15_UNSUPPORTED_MIN else
+                      "BRAK DANYCH" if len(v)==0 else
+                      "ZA MAŁA PRÓBA (<30)" if len(v)<30 else
+                      "BADANIE — WYMAGA NOWEGO FORWARD"})
+    return pd.DataFrame(summary),detail
