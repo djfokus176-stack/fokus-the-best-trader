@@ -60,7 +60,8 @@ def test_reject_corrupted_quotes_or_duplicate_times(tmp_path):
     sample_files(tmp_path)
     ask=tmp_path/"usa500_m15_ask_2021-11-11_2022-11-11.csv"
     frame=pd.read_csv(ask)
-    frame.loc[0,"open"]=100.
+    for col,value in (("open",100.),("high",102.),("low",99.),("close",101.)):
+        frame.loc[0,col]=value
     frame.to_csv(ask,index=False)
     with pytest.raises(ValueError,match="ASK < BID"):
         merge_bid_ask(tmp_path)
