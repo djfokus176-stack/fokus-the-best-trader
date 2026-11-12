@@ -236,6 +236,8 @@ def paper_view_db():
         st.session_state['_paper_remote_forecasts']=payload.get('forecast_research') or {}
         st.session_state['_paper_remote_learning']=payload.get('learning_report') or {}
         st.session_state['_paper_remote_shadow_report']=payload.get('shadow_learning_report') or {}
+        st.session_state['_paper_remote_wave_state']=payload.get('wave_shadow') or {}
+        st.session_state['_paper_remote_wave_report']=payload.get('wave_shadow_report') or {}
         return db
     return connect()
 
@@ -2132,6 +2134,57 @@ with reports_tab:
                         st.warning("Nieznany format czasu ostatniego skanu workera.")
                 else:
                     st.warning("Brak potwierdzonego skanu workera w chmurze. Cloud jest skonfigurowany, ale skaner mógł jeszcze nigdy nie wystartować.")
+                with st.expander('🌊 WAVE SHADOW — ZAPIS PO KAŻDEJ M15 (BEZ HANDLU)',expanded=False):
+                    state=st.session_state.get('_paper_remote_wave_state') or {}
+                    report=st.session_state.get('_paper_remote_wave_report') or {}
+                    wstatus=meta.get('wave_shadow_status','BRAK WERSJI')
+                    st.caption('Status workera: '+str(wstatus)+
+                               ' | Ostatnia zamknięta M15 UTC: '+
+                               str(state.get('last_closed_utc','BRAK')))
+                    if not state:
+                        st.info('Brak WAVE SHADOW w checkpointcie. '
+                                'Scalony kod GitHub nie oznacza jeszcze '
+                                'wdrożenia nowego workera na Northflank.')
+                    else:
+                        st.info('Zdarzenia w ograniczonym archiwum: **'+
+                            str(len(state.get('events',[])))+
+                            '**; zebrane na nowych świecach FORWARD: **'+
+                            str(report.get('forward_events',0))+
+                            '**; rozliczone warunki ruchu: **'+
+                            str(report.get('resolved_conditions',0))+'**.')
+                        st.warning('To badanie, NIE niezależnie skalibrowane '
+                                   'prawdopodobieństwo ani nowe decyzje AUTO. '
+                                   'Początkowy BACKFILL pozostaje odróżniony '
+                                   'od przyszłych zdarzeń FORWARD.')
+                        observations=state.get('events') or []
+                        if observations:
+                            audit_rows=[{
+                                'Sygnał UTC':e.get('signal_utc'),
+                                'Origin':e.get('origin'),
+                                'Wersja':e.get('strategy_version'),
+                                'Side':e.get('side'),
+                                'Fale':e.get('wave_count'),
+                                'Formacja':e.get('pattern'),
+                                'Potwierdzenie':e.get('confirmation'),
+                                'Rozliczone horyzonty':sum(
+                                    v.get('status')=='CLOSED' for v in
+                                    (e.get('outcomes') or {}).values()),
+                                'Id':e.get('event_id'),
+                            } for e in observations]
+                            st.dataframe(pd.DataFrame(audit_rows[-80:]),
+                                         use_container_width=True,hide_index=True)
+                            st.download_button('⬇️ WAVE SHADOW — ARCHIWUM CSV',
+                                data=pd.DataFrame(audit_rows).to_csv(
+                                    index=False).encode('utf-8-sig'),
+                                mime='text/csv',
+                                file_name='FOKUS_WAVE_SHADOW_ARCHIWUM.csv',
+                                key='wave_shadow_archive_export')
+                        groups=report.get('groups') or {}
+                        if groups:
+                            group_rows=[{'Konfiguracja':key,**val}
+                                        for key,val in groups.items()]
+                            st.dataframe(pd.DataFrame(group_rows),
+                                         use_container_width=True,hide_index=True)
                 candidates=st.session_state.get('_paper_remote_candidates') or []
                 worker_news=st.session_state.get('_paper_remote_news') or {}
                 with st.expander('📰 NEWS RADAR WORKERA (BEZ PRZEGLĄDARKI)'):
