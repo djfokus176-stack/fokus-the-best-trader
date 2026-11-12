@@ -47,13 +47,14 @@ def _continuous(frame, start, last):
     return True
 
 
-def _context(frame, raw_idx, anchor):
+def _context(frame, raw_idx, anchor, *, ema200_asof=None):
     """Feature vector using only information available at the RAW close."""
     prefix=frame.iloc[:raw_idx+1]
     tail=prefix.iloc[max(0,len(prefix)-210):]
     bars=indicators(tail)
     cur=bars.iloc[-1]
-    ema200=float(prefix.Close.ewm(span=200,adjust=False).mean().iloc[-1])
+    ema200=(float(ema200_asof) if ema200_asof is not None else
+            float(prefix.Close.ewm(span=200,adjust=False).mean().iloc[-1]))
     atr=float(cur.ATR)
     pivot_idx=int(frame.index.get_loc(pd.Timestamp(anchor["pivot_utc"])))
     pivot=frame.iloc[pivot_idx]
@@ -72,6 +73,41 @@ def _context(frame, raw_idx, anchor):
                         (pivot.Low<level and pivot.Close>level))
     else:
         falsebreak=False
+    # Confirmed pivots are only counted once their two RIGHT bars have
+    # ALREADY CLOSED by the RAW anchor timestamp. Evaluate the current
+    # New York session only, never combine previous-day swings here.
+    day_idx=[j for j in range(max(0,raw_idx-30),raw_idx+1)
+             if _day(prefix.index[j])==_day(prefix.index[-1])
+             and _same_session(prefix.index[j],prefix.index[j])]
+    peaks=[];troughs=[]
+    for q in range(2,len(day_idx)-2):
+        ids=day_idx[q-2:q+3]
+        middle=ids[2]
+        hh=float(prefix.High.iloc[middle]);ll=float(prefix.Low.iloc[middle])
+        if all(hh>float(prefix.High.iloc[z]) for z in ids if z!=middle):
+            peaks.append((middle,hh))
+        if all(ll<float(prefix.Low.iloc[z]) for z in ids if z!=middle):
+            troughs.append((middle,ll))
+    relevant=peaks if anchor["direction"]=="SHORT" else troughs
+    last3=relevant[-3:]
+    spacing=None; slowing_time=None; weaker_rebound=None
+    if len(last3)==3:
+        first_gap=last3[1][0]-last3[0][0]
+        next_gap=last3[2][0]-last3[1][0]
+        spacing=(first_gap,next_gap)
+        slowing_time=bool(next_gap>first_gap)
+        a,b,c=last3[0][0],last3[1][0],last3[2][0]
+        if anchor["direction"]=="SHORT":
+            amp2=last3[1][1]-float(prefix.Low.iloc[a:b+1].min())
+            amp3=last3[2][1]-float(prefix.Low.iloc[b:c+1].min())
+        else:
+            amp2=float(prefix.High.iloc[a:b+1].max())-last3[1][1]
+            amp3=float(prefix.High.iloc[b:c+1].max())-last3[2][1]
+        weaker_rebound=bool(amp3<amp2)
+    momentum_slowing=None
+    if len(bars)>=9:
+        momentum_slowing=bool(abs(float(bars.Close.iloc[-1]-bars.Close.iloc[-5]))
+                              <abs(float(bars.Close.iloc[-5]-bars.Close.iloc[-9])))
     win=bars.iloc[-20:]
     atr_hist=win.ATR.dropna()
     atr_ratio=(float(cur.ATR)/float(atr_hist.iloc[0])
@@ -80,8 +116,9 @@ def _context(frame, raw_idx, anchor):
                    pd.to_numeric(prefix.Volume,errors="coerce").notna().all())
     vwap=None
     if vol_available:
-        today=prefix.index.map(lambda t:_day(t)==_day(prefix.index[-1]))
-        intra=prefix.loc[today]
+        today=prefix.iloc[max(0,len(prefix)-30):]
+        intra=today.loc[[(_day(t)==_day(prefix.index[-1]) and
+                          _same_session(t,t)) for t in today.index]]
         v=pd.to_numeric(intra.Volume,errors="coerce")
         if len(intra) and (v>=0).all() and v.sum()>0:
             vwap=float((((intra.High+intra.Low+intra.Close)/3)*v).sum()/v.sum())
@@ -100,6 +137,13 @@ def _context(frame, raw_idx, anchor):
         "atr_ratio_20":round(atr_ratio,4) if atr_ratio is not None else None,
         "atr_rising":bool(atr_ratio>1.1) if atr_ratio is not None else None,
         "momentum_4_bars":round(float(bars.Close.iloc[-1]-bars.Close.iloc[-5]),4),
+        "momentum_slowing":momentum_slowing,
+        "confirmed_peaks_today":len(peaks),
+        "confirmed_troughs_today":len(troughs),
+        "pivot_gap_bars_prev":spacing[0] if spacing else None,
+        "pivot_gap_bars_latest":spacing[1] if spacing else None,
+        "time_to_new_extremum_slower":slowing_time,
+        "successive_rebound_weaker":weaker_rebound,
         "signal_et_hour":prefix.index[-1].tz_convert(NY).strftime("%H:%M"),
         "signal_close":round(float(cur.Close),4),
         "atr":round(atr,4),
@@ -292,6 +336,9 @@ def run_wave_abcd(frame:pd.DataFrame, *, anchors=None, spread=2.,
             "anchors":0,"proven_edge":False,"source":"M15","reason":"BRAK TRZECICH PIVOTÓW"}
     sorted_anchors=anchors.sort_values("signal_utc")
     loc_map={t:i for i,t in enumerate(frame.index)}
+    # Exact EMA200 for the full historical stream, computed ONCE. Pandas
+    # EWM is causal and uses no candle after the corresponding index.
+    ema200_cache=frame.Close.ewm(span=200,adjust=False).mean().to_numpy()
     bound=frame.index[int(len(frame)*split)]
     records=[]; last_by_group={}
     for _,a in sorted_anchors.iterrows():
@@ -308,7 +355,7 @@ def run_wave_abcd(frame:pd.DataFrame, *, anchors=None, spread=2.,
         if dedup_key in last_by_group:
             continue
         last_by_group[dedup_key]=timestamp
-        feature=_context(frame,i,a)
+        feature=_context(frame,i,a,ema200_asof=ema200_cache[i])
         atr=feature["atr"]
         support=float(a.bos_level)
         # A peak's resistance, trough's support are immutable at RAW signal.
