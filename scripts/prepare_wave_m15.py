@@ -15,6 +15,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from .wave_quote_qc import (CrossedQuoteError, inspect_and_quarantine_crossed)
+
 EXPECTED_START=pd.Timestamp("2021-11-11",tz="UTC")
 EXPECTED_END=pd.Timestamp("2026-11-11",tz="UTC")
 FIELDS=("open","high","low","close")
@@ -65,7 +67,7 @@ def _load_side(folder,side):
     return joined,hashes
 
 
-def merge_bid_ask(folder:Path):
+def merge_bid_ask(folder:Path, *, crossed_max_fraction=0., crossed_max_points=0.):
     folder=Path(folder)
     bid,bhash=_load_side(folder,"bid")
     ask,ahash=_load_side(folder,"ask")
@@ -81,11 +83,12 @@ def merge_bid_ask(folder:Path):
                    validate="one_to_one").sort_values("timestamp")
     if rows.empty:
         raise ValueError("Nie znaleziono wspólnych świec BID i ASK")
-    for fld in FIELDS:
-        b=rows[f"{fld}Bid"]
-        a=rows[f"{fld}Ask"]
-        if (a<b).any():
-            raise ValueError(f"ASK < BID w {fld}, uszkodzone dane lub instrument")
+    # Forensic QC: by default ANY meaningful ASK<BID fails. A caller may
+    # explicitly quarantine a tiny bounded fraction of entire candles.
+    # Holes stay as real timestamp gaps, never filled by invented MID.
+    rows,quality=inspect_and_quarantine_crossed(
+        rows,max_fraction=crossed_max_fraction,
+        max_cross_points=crossed_max_points)
     out=pd.DataFrame({
         "Time":pd.to_datetime(rows.timestamp,unit="ms",utc=True)+
                pd.Timedelta(minutes=15),
@@ -121,6 +124,7 @@ def merge_bid_ask(folder:Path):
         "instrument_warning":"CFD, not ES future or S&P500 cash",
         "volume_warning":"Dukascopy volume is feed activity, not CME ES volume",
         "no_gap_filling":True,"holidays_verified":False,
+        "quote_quality":quality,
     }
     return out,coverage
 
@@ -129,13 +133,36 @@ def main():
     a=argparse.ArgumentParser(description="Strict five-year M15 BID+ASK audit merger")
     a.add_argument("--folder",type=Path,required=True)
     a.add_argument("--out",type=Path,default=Path("FOKUS_WAVE_M15_5_LAT_BID_ASK.csv"))
+    a.add_argument("--crossed-max-fraction",type=float,default=0.,
+                   help="Explicit maximum fraction of M15 bars to QUARANTINE, "
+                        "not correct; e.g. 0.001 = 0.1 percent.")
+    a.add_argument("--crossed-max-points",type=float,default=0.,
+                   help="Explicit maximum crossed BID/ASK magnitude in points.")
     args=a.parse_args()
-    data,report=merge_bid_ask(args.folder)
+    try:
+        data,report=merge_bid_ask(
+            args.folder,crossed_max_fraction=args.crossed_max_fraction,
+            crossed_max_points=args.crossed_max_points)
+    except CrossedQuoteError as exc:
+        # A failed five-year run still publishes actual-count diagnostics,
+        # avoiding another blind 25-minute re-download.
+        outpath=args.out.with_suffix(".quality.json")
+        outpath.parent.mkdir(parents=True,exist_ok=True)
+        outpath.write_text(
+            json.dumps(exc.report,ensure_ascii=False,indent=2),
+            encoding="utf-8")
+        print("WAVE DATA QUALITY FAILED: "+str(exc),flush=True)
+        print("QUOTE_QC_REPORT="+str(outpath),flush=True)
+        raise SystemExit(2) from None
     args.out.parent.mkdir(parents=True,exist_ok=True)
     data.to_csv(args.out,index=False,date_format="%Y-%m-%dT%H:%M:%S%z")
     report_path=args.out.with_suffix(".audit.json")
     report_path.write_text(json.dumps(report,ensure_ascii=False,indent=2),
                            encoding="utf-8")
+    # Keep a standalone QC manifest for clear year-by-year crossed bars.
+    args.out.with_suffix(".quality.json").write_text(
+        json.dumps(report["quote_quality"],ensure_ascii=False,indent=2),
+        encoding="utf-8")
     print(f"Zapisano {len(data)} rzeczywistych M15 BID+ASK -> {args.out}")
     print(f"Kontrola pochodzenia/czasów i kompletności -> {report_path}")
     if not report["full_requested_dates"]:
