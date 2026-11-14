@@ -60,7 +60,7 @@ Aby zebrać źródła w systemie Windows:
    rocznych okresów od 2021-11-11 do 2026-11-11 (koniec wyłączony).
 3. Jeżeli kompilator nie wystartował, uruchom:
    `python -m pip install pandas numpy`
-   `python scripts/prepare_wave_m15.py --folder DANE_SP500_WAVE_M15 --out FOKUS_WAVE_M15_5_LAT_BID_ASK.csv`
+   `python -m scripts.prepare_wave_m15 --folder DANE_SP500_WAVE_M15 --out FOKUS_WAVE_M15_5_LAT_BID_ASK.csv`
 4. Powstały `FOKUS_WAVE_M15_5_LAT_BID_ASK.csv` ma:
    `Time` = **UTC CLOSE** (+15 min względem Dukascopy);
    `Open/High/Low/Close` = środek BID/ASK;
