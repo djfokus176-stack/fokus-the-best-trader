@@ -36,10 +36,10 @@ def fixture_folder(folder, *, n_per_period=300, bad=False, big=False,
                 # internally valid and therefore caught by CROSS-QC,
                 # not by per-side OHLC quality checks.
                 rows.loc[55,["open","high","low","close"]]=(
-                    [base-2. if big else base-.8,
-                     base if big else base+1.2,
-                     base-3. if big else base-1.8,
-                     base-1. if big else base+.2])
+                    [base-5. if big else base-.8,
+                     base-3. if big else base+1.2,
+                     base-6. if big else base-1.8,
+                     base-4. if big else base+.2])
                 for k in range(extra_crosses):
                     z=56+k
                     rows.loc[z,["open","high","low","close"]]=(
