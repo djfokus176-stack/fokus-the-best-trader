@@ -1,8 +1,7 @@
 name: "FOKU$ WAVE — five-year M15 BID/ASK research (one-off)"
 on:
   workflow_dispatch:
-  # The first merge of this workflow to main launches one reproducible
-  # research attempt. Future code pushes do NOT re-download five years.
+  # Re-run once when the source/research pipeline workflow itself changes.
   push:
     branches: [main]
     paths:
@@ -16,14 +15,30 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  wave-five-year:
+  download-source:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
+      - name: Download real Dukascopy M15 BID and ASK (ten yearly parts)
+        run: bash scripts/download_wave_m15.sh DANE_SP500_WAVE_M15
+      - name: Preserve original data BEFORE validation (independent job)
+        uses: actions/upload-artifact@v4
+        with:
+          name: WAVE-M15-RAW-2021-2026-BID-ASK
+          path: DANE_SP500_WAVE_M15/usa500_m15_*.csv
+          retention-days: 14
+          if-no-files-found: error
+
+  research:
+    needs: download-source
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -31,19 +46,36 @@ jobs:
           cache-dependency-path: requirements-worker.txt
       - name: Install pinned research dependencies
         run: python -m pip install -r requirements-worker.txt
-      - name: Download five years original M15 BID + ASK from Dukascopy
-        run: bash scripts/download_wave_m15.sh DANE_SP500_WAVE_M15
-      - name: Audit and pair 10 original files (no gap filling)
+      - uses: actions/download-artifact@v4
+        with:
+          name: WAVE-M15-RAW-2021-2026-BID-ASK
+          path: DANE_SP500_WAVE_M15
+      - name: Audit source quality and pair M15 BID/ASK (never fix a bad price)
         run: |
           python -m scripts.prepare_wave_m15 \
             --folder DANE_SP500_WAVE_M15 \
-            --out FOKUS_WAVE_M15_5_LAT_BID_ASK.csv
+            --out FOKUS_WAVE_M15_5_LAT_BID_ASK.csv \
+            --crossed-max-fraction 0.001 \
+            --crossed-max-points 2
+        # Explicit policy: at most 0.1% anomalous M15 rows with
+        # crossed sides by at most 2 points; quarantine entire rows.
+        # More widespread/large anomalies fail. No interpolation.
+      - name: Publish quote integrity report EVEN WHEN analysis aborts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: WAVE-M15-QUOTE-QUALITY-REPORT
+          path: |
+            FOKUS_WAVE_M15_5_LAT_BID_ASK.quality.json
+            FOKUS_WAVE_M15_5_LAT_BID_ASK.audit.json
+          if-no-files-found: warn
+          retention-days: 30
       - name: Research A–E and build full year-by-year results
         run: |
           PYTHONPATH=. python -m scripts.run_wave_5year \
             --csv FOKUS_WAVE_M15_5_LAT_BID_ASK.csv \
             --out WAVE_5Y_RESULTS --rr 1.5 --hold 120 --slippage 0.25
-      - name: Upload exact source and original research tables
+      - name: Upload verified-source research tables and provenance
         uses: actions/upload-artifact@v4
         if: success()
         with:
@@ -51,6 +83,7 @@ jobs:
           path: |
             FOKUS_WAVE_M15_5_LAT_BID_ASK.csv
             FOKUS_WAVE_M15_5_LAT_BID_ASK.audit.json
+            FOKUS_WAVE_M15_5_LAT_BID_ASK.quality.json
             WAVE_5Y_RESULTS/
           retention-days: 30
           if-no-files-found: error
