@@ -32,7 +32,7 @@ echo Wszystkie 10 czesci M15 pobrano lub znaleziono lokalnie.
 echo Folder: %OUT%
 where py.exe >nul 2>&1
 if not errorlevel 1 (
-  py -3 "%~dp0scripts\prepare_wave_m15.py" --folder "%OUT%" --out "%~dp0FOKUS_WAVE_M15_5_LAT_BID_ASK.csv"
+  py -3 -m scripts.prepare_wave_m15 --folder "%OUT%" --out "%~dp0FOKUS_WAVE_M15_5_LAT_BID_ASK.csv"
   if errorlevel 1 echo Nie polaczono CSV: sprawdz komunikaty. Wymagane: Python 3 + pandas + numpy.
 ) else (
   echo Brak py.exe. Polacz pliki poleceniem:
