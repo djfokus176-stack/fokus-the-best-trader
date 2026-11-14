@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .wave_quote_qc import (CrossedQuoteError, inspect_and_quarantine_crossed)
+from scripts.wave_quote_qc import (CrossedQuoteError, inspect_and_quarantine_crossed)
 
 EXPECTED_START=pd.Timestamp("2021-11-11",tz="UTC")
 EXPECTED_END=pd.Timestamp("2026-11-11",tz="UTC")
