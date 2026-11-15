@@ -389,130 +389,144 @@ with st.sidebar:
         st.audio(audio,format=mime,autoplay=True)
     st.caption('AUTO-SKAN nie wykonuje zleceń. Płatne AI jest ręczne w CZAT AI; osobny worker może opcjonalnie uruchamiać limitowane komentarze GPT po włączeniu w GitHub.')
     st.markdown('---')
-    with st.expander('🔑 KLUCZE API — TESTY / ZMIANY', expanded=False):
-        st.caption('Puste pola korzystają z Secrets. Dane wpisane tymczasowo w sesji MAJĄ PIERWSZEŃSTWO przed Secrets. Samo istnienie kluczy NIE potwierdza poprawnego logowania.')
-        with st.form('fokus_credentials_login', clear_on_submit=True):
-            entered_key=st.text_input('Capital.com: API Key',type='password')
-            entered_login=st.text_input('Capital.com: Login / e-mail')
-            entered_password=st.text_input('Capital.com: Hasło API (nie hasło strony)',type='password')
-            entered_openai=st.text_input('OpenAI: API Key',type='password')
-            entered_telegram=st.text_input('Telegram: Bot Token',type='password')
-            entered_chat_id=st.text_input('Telegram: Chat ID (opcjonalny)')
-            save_session=st.form_submit_button('🔐 ZAPISZ W SESJI',use_container_width=True)
-            check_capital=st.form_submit_button('🧪 ZAPISZ I TESTUJ CAPITAL.COM',use_container_width=True)
-        if save_session or check_capital:
-            mapping={'CAPITAL_API_KEY':entered_key,'CAPITAL_IDENTIFIER':entered_login,
-                     'CAPITAL_PASSWORD':entered_password,'OPENAI_API_KEY':entered_openai,
-                     'TELEGRAM_BOT_TOKEN':entered_telegram,'TELEGRAM_CHAT_ID':entered_chat_id}
-            changes={k:v.strip() for k,v in mapping.items() if v and v.strip()}
-            overrides=dict(st.session_state.get('_api_session_overrides',{}))
-            overrides.update(changes)
-            st.session_state['_api_session_overrides']=overrides
-            for k in ('_capital_client','market_snap','ai_context','source_override',
-                      'initial_scan_attempted','last_feed_error','epic_matches'):
-                st.session_state.pop(k,None)
-            if save_session:
-                st.session_state.pop('_capital_test', None)
-                st.success('Zapisano tymczasowo w tej sesji — NIE na dysku ani w GitHubie.')
-        overrides=st.session_state.get('_api_session_overrides',{})
-        cap_api_key,cap_identifier,cap_password=capital_credentials(secret,overrides)
-        openai_api_key=active_credential('OPENAI_API_KEY',secret,overrides)
-        telegram_token=active_credential('TELEGRAM_BOT_TOKEN',secret,overrides)
-        has_cap=bool(cap_api_key and cap_identifier and cap_password)
-        st.caption('Capital.com: '+('pola wypełnione (NIE POTWIERDZA logowania)' if has_cap else 'brak wymaganych pól')
-            +' | OpenAI: '+('jest klucz' if openai_api_key else 'brak klucza')
-            +' | Telegram: '+('jest token' if telegram_token else 'brak tokenu'))
-        if check_capital:
+    # Northflank keeps broker credentials on the worker. The owner CLOUD
+    # dashboard never needs an extra browser-side Capital login.
+    if cloud_read_only_mode:
+        st.success('☁️ POŁĄCZENIE CLOUD — klucze Capital.com są zapisane '
+                   'oddzielnie na workerze Northflank. Nie wpisuj loginu, '
+                   'hasła ani API ponownie w Streamlit.')
+        st.caption('Dane i wyniki oglądasz przez Supabase w TERMINALU, '
+                   'RAPORTACH i archiwum CLOUD. Dodatkowe logowanie '
+                   'z przeglądarki byłoby drugą, zbędną sesją.')
+    else:
+        with st.expander('🔑 KLUCZE API — TESTY / ZMIANY', expanded=False):
+            st.caption('Puste pola korzystają z Secrets. Dane wpisane tymczasowo w sesji MAJĄ PIERWSZEŃSTWO przed Secrets. Samo istnienie kluczy NIE potwierdza poprawnego logowania.')
+            with st.form('fokus_credentials_login', clear_on_submit=True):
+                entered_key=st.text_input('Capital.com: API Key',type='password')
+                entered_login=st.text_input('Capital.com: Login / e-mail')
+                entered_password=st.text_input('Capital.com: Hasło API (nie hasło strony)',type='password')
+                entered_openai=st.text_input('OpenAI: API Key',type='password')
+                entered_telegram=st.text_input('Telegram: Bot Token',type='password')
+                entered_chat_id=st.text_input('Telegram: Chat ID (opcjonalny)')
+                save_session=st.form_submit_button('🔐 ZAPISZ W SESJI',use_container_width=True)
+                check_capital=st.form_submit_button('🧪 ZAPISZ I TESTUJ CAPITAL.COM',use_container_width=True)
+            if save_session or check_capital:
+                mapping={'CAPITAL_API_KEY':entered_key,'CAPITAL_IDENTIFIER':entered_login,
+                         'CAPITAL_PASSWORD':entered_password,'OPENAI_API_KEY':entered_openai,
+                         'TELEGRAM_BOT_TOKEN':entered_telegram,'TELEGRAM_CHAT_ID':entered_chat_id}
+                changes={k:v.strip() for k,v in mapping.items() if v and v.strip()}
+                overrides=dict(st.session_state.get('_api_session_overrides',{}))
+                overrides.update(changes)
+                st.session_state['_api_session_overrides']=overrides
+                for k in ('_capital_client','market_snap','ai_context','source_override',
+                          'initial_scan_attempted','last_feed_error','epic_matches'):
+                    st.session_state.pop(k,None)
+                if save_session:
+                    st.session_state.pop('_capital_test', None)
+                    st.success('Zapisano tymczasowo w tej sesji — NIE na dysku ani w GitHubie.')
+            overrides=st.session_state.get('_api_session_overrides',{})
+            cap_api_key,cap_identifier,cap_password=capital_credentials(secret,overrides)
+            openai_api_key=active_credential('OPENAI_API_KEY',secret,overrides)
+            telegram_token=active_credential('TELEGRAM_BOT_TOKEN',secret,overrides)
+            has_cap=bool(cap_api_key and cap_identifier and cap_password)
+            st.caption('Capital.com: '+('pola wypełnione (NIE POTWIERDZA logowania)' if has_cap else 'brak wymaganych pól')
+                +' | OpenAI: '+('jest klucz' if openai_api_key else 'brak klucza')
+                +' | Telegram: '+('jest token' if telegram_token else 'brak tokenu'))
+            if check_capital:
+                try:
+                    client=test_capital_login(cap_api_key,cap_identifier,cap_password,capital_env)
+                    st.session_state['_capital_client']=client
+                    st.session_state['_capital_test']={'env':capital_env,'ok':True,
+                        'message':f'✅ Capital.com {capital_env}: logowanie HTTP 200, otrzymano CST i X-SECURITY-TOKEN.'}
+                except (FeedError,RuntimeError) as ex:
+                    st.session_state['_capital_test']={'env':capital_env,'ok':False,
+                        'message':'❌ '+str(ex)}
+                except Exception as ex:
+                    st.session_state['_capital_test']={'env':capital_env,'ok':False,
+                        'message':'❌ Test Capital.com: '+type(ex).__name__}
+            if st.session_state.get('_capital_test',{}).get('env')==capital_env:
+                result=st.session_state['_capital_test']
+                if result['ok']:
+                    st.success(result['message'])
+                else:
+                    st.error(result['message'])
+            if st.button('🧪 TEST OPENAI — DOSTĘP DO MODELU (bez generowania)',use_container_width=True):
+                ok,msg=test_openai_model(openai_api_key,secret('OPENAI_MODEL','gpt-5.4'))
+                (st.success if ok else st.error)(msg)
+            if st.button('🧪 TEST TELEGRAM — TOKEN (bez wysyłania)',use_container_width=True):
+                ok,msg=test_telegram_token(telegram_token)
+                (st.success if ok else st.error)(msg)
+            if st.button('🗑️ USUŃ TYMCZASOWE DANE SESJI',use_container_width=True):
+                for key in ('_api_session_overrides','_capital_client','_capital_test',
+                            'market_snap','ai_context','source_override',
+                            'initial_scan_attempted','last_feed_error','epic_matches'):
+                    st.session_state.pop(key,None)
+                st.rerun()
+            st.info('Na stałe: Streamlit Cloud → My apps → Settings → Secrets. Ta aplikacja nie ma uprawnień do zmiany Secrets.')
+            st.caption('Formularz dostępny dopiero po autoryzacji właściciela. Zalecane ograniczenie dostępu również w ustawieniach Sharing Streamlit Cloud.')
+        # This bypasses stale temporary overrides and authenticates from Secrets
+        # without asking the owner to type or reveal any credentials.
+        if st.button('🧪 TESTUJ ZAPISANE SECRETS (BEZ WPISYWANIA)', use_container_width=True):
+            existing=st.session_state.get('_api_session_overrides',{})
+            st.session_state['_api_session_overrides']=drop_capital_session_overrides(existing)
+            for key in ('_capital_client','_capital_test','market_snap','ai_context',
+                        'source_override','initial_scan_attempted','last_feed_error','epic_matches'):
+                st.session_state.pop(key,None)
+            saved_api,saved_login,saved_password=capital_credentials(secret,{})
             try:
-                client=test_capital_login(cap_api_key,cap_identifier,cap_password,capital_env)
+                client=test_capital_login(saved_api,saved_login,saved_password,capital_env)
                 st.session_state['_capital_client']=client
                 st.session_state['_capital_test']={'env':capital_env,'ok':True,
-                    'message':f'✅ Capital.com {capital_env}: logowanie HTTP 200, otrzymano CST i X-SECURITY-TOKEN.'}
+                    'message':'✅ HTTP 200: Capital.com zaakceptował zapisane Secrets. Nie wpisuj danych ponownie.'}
             except (FeedError,RuntimeError) as ex:
                 st.session_state['_capital_test']={'env':capital_env,'ok':False,
-                    'message':'❌ '+str(ex)}
+                    'message':'❌ Sekrety obecne, ale uwierzytelnienie nieudane: '+str(ex)[:220]}
             except Exception as ex:
                 st.session_state['_capital_test']={'env':capital_env,'ok':False,
-                    'message':'❌ Test Capital.com: '+type(ex).__name__}
-        if st.session_state.get('_capital_test',{}).get('env')==capital_env:
-            result=st.session_state['_capital_test']
-            if result['ok']:
-                st.success(result['message'])
-            else:
-                st.error(result['message'])
-        if st.button('🧪 TEST OPENAI — DOSTĘP DO MODELU (bez generowania)',use_container_width=True):
-            ok,msg=test_openai_model(openai_api_key,secret('OPENAI_MODEL','gpt-5.4'))
-            (st.success if ok else st.error)(msg)
-        if st.button('🧪 TEST TELEGRAM — TOKEN (bez wysyłania)',use_container_width=True):
-            ok,msg=test_telegram_token(telegram_token)
-            (st.success if ok else st.error)(msg)
-        if st.button('🗑️ USUŃ TYMCZASOWE DANE SESJI',use_container_width=True):
-            for key in ('_api_session_overrides','_capital_client','_capital_test',
-                        'market_snap','ai_context','source_override',
-                        'initial_scan_attempted','last_feed_error','epic_matches'):
-                st.session_state.pop(key,None)
-            st.rerun()
-        st.info('Na stałe: Streamlit Cloud → My apps → Settings → Secrets. Ta aplikacja nie ma uprawnień do zmiany Secrets.')
-        st.caption('Formularz dostępny dopiero po autoryzacji właściciela. Zalecane ograniczenie dostępu również w ustawieniach Sharing Streamlit Cloud.')
-    # This bypasses stale temporary overrides and authenticates from Secrets
-    # without asking the owner to type or reveal any credentials.
-    if st.button('🧪 TESTUJ ZAPISANE SECRETS (BEZ WPISYWANIA)', use_container_width=True):
-        existing=st.session_state.get('_api_session_overrides',{})
-        st.session_state['_api_session_overrides']=drop_capital_session_overrides(existing)
-        for key in ('_capital_client','_capital_test','market_snap','ai_context',
-                    'source_override','initial_scan_attempted','last_feed_error','epic_matches'):
-            st.session_state.pop(key,None)
-        saved_api,saved_login,saved_password=capital_credentials(secret,{})
-        try:
-            client=test_capital_login(saved_api,saved_login,saved_password,capital_env)
-            st.session_state['_capital_client']=client
-            st.session_state['_capital_test']={'env':capital_env,'ok':True,
-                'message':'✅ HTTP 200: Capital.com zaakceptował zapisane Secrets. Nie wpisuj danych ponownie.'}
-        except (FeedError,RuntimeError) as ex:
-            st.session_state['_capital_test']={'env':capital_env,'ok':False,
-                'message':'❌ Sekrety obecne, ale uwierzytelnienie nieudane: '+str(ex)[:220]}
-        except Exception as ex:
-            st.session_state['_capital_test']={'env':capital_env,'ok':False,
-                'message':'❌ Test Secrets: '+type(ex).__name__}
+                    'message':'❌ Test Secrets: '+type(ex).__name__}
     overrides=st.session_state.get('_api_session_overrides',{})
     cap_api_key,cap_identifier,cap_password=capital_credentials(secret,overrides)
     openai_api_key=active_credential('OPENAI_API_KEY',secret,overrides)
     has_cap=bool(cap_api_key and cap_identifier and cap_password)
     sources=capital_credential_sources(secret,overrides)
-    st.caption('Źródło danych Capital.com (bez wartości): '+
-        ' | '.join(name.replace('CAPITAL_','')+'='+where for name,where in sources.items()))
-    if (st.session_state.get('_capital_client') is not None and
-            not capital_client_matches(st.session_state.get('_capital_client'),
-                                       cap_api_key,cap_identifier,cap_password,capital_env)):
-        # Reboot or changed Secrets/temporary overrides must not reuse a stale API session.
-        for key in ('_capital_client','market_snap','ai_context','source_override',
-                    'initial_scan_attempted','last_feed_error','epic_matches'):
-            st.session_state.pop(key,None)
-    if has_cap:
-        tested=st.session_state.get('_capital_test',{})
-        if tested.get('env')==capital_env and tested.get('ok'):
-            st.success('✅ Capital.com: logowanie POTWIERDZONE (HTTP 200).')
-        elif tested.get('env')==capital_env and tested.get('ok') is False:
-            st.error(tested.get('message','❌ Capital.com: błąd logowania.'))
+    if not cloud_read_only_mode:
+        st.caption('Źródło danych Capital.com (bez wartości): '+
+            ' | '.join(name.replace('CAPITAL_','')+'='+where for name,where in sources.items()))
+        if (st.session_state.get('_capital_client') is not None and
+                not capital_client_matches(st.session_state.get('_capital_client'),
+                                           cap_api_key,cap_identifier,cap_password,capital_env)):
+            # Reboot or changed Secrets/temporary overrides must not reuse a stale API session.
+            for key in ('_capital_client','market_snap','ai_context','source_override',
+                        'initial_scan_attempted','last_feed_error','epic_matches'):
+                st.session_state.pop(key,None)
+        if has_cap:
+            tested=st.session_state.get('_capital_test',{})
+            if tested.get('env')==capital_env and tested.get('ok'):
+                st.success('✅ Capital.com: logowanie POTWIERDZONE (HTTP 200).')
+            elif tested.get('env')==capital_env and tested.get('ok') is False:
+                st.error(tested.get('message','❌ Capital.com: błąd logowania.'))
+            else:
+                st.info('🔐 Dane Capital.com są dostępne, ale jeszcze NIEPOTWIERDZONE. '
+                        'Kliknij „TESTUJ ZAPISANE SECRETS”, bez wpisywania hasła.')
+            if st.button(f'🔎 SPRAWDŹ EPIC NA KONCIE {capital_env}',use_container_width=True):
+                try:
+                    if not capital_client_matches(st.session_state.get('_capital_client'),
+                            cap_api_key,cap_identifier,cap_password,capital_env):
+                        st.session_state['_capital_client']=CapitalReadOnly(
+                            cap_api_key,cap_identifier,cap_password,environment=capital_env)
+                    st.session_state['epic_matches']=st.session_state['_capital_client'].search_markets(instrument)
+                    if not st.session_state['epic_matches']:
+                        st.warning('Nie znaleziono tego symbolu. Spróbuj hasła S&P lub SP500.')
+                except FeedError as ex:
+                    st.error(str(ex))
+            if st.session_state.get('epic_matches'):
+                st.caption('Wyniki z Capital.com — wpisz poprawny EPIC w polu wyżej.')
+                st.dataframe(st.session_state['epic_matches'],hide_index=True,use_container_width=True)
         else:
-            st.info('🔐 Dane Capital.com są dostępne, ale jeszcze NIEPOTWIERDZONE. '
-                    'Kliknij „TESTUJ ZAPISANE SECRETS”, bez wpisywania hasła.')
-        if st.button(f'🔎 SPRAWDŹ EPIC NA KONCIE {capital_env}',use_container_width=True):
-            try:
-                if not capital_client_matches(st.session_state.get('_capital_client'),
-                        cap_api_key,cap_identifier,cap_password,capital_env):
-                    st.session_state['_capital_client']=CapitalReadOnly(
-                        cap_api_key,cap_identifier,cap_password,environment=capital_env)
-                st.session_state['epic_matches']=st.session_state['_capital_client'].search_markets(instrument)
-                if not st.session_state['epic_matches']:
-                    st.warning('Nie znaleziono tego symbolu. Spróbuj hasła S&P lub SP500.')
-            except FeedError as ex:
-                st.error(str(ex))
-        if st.session_state.get('epic_matches'):
-            st.caption('Wyniki z Capital.com — wpisz poprawny EPIC w polu wyżej.')
-            st.dataframe(st.session_state['epic_matches'],hide_index=True,use_container_width=True)
+            st.warning('⚠️ Brak API Capital.com. Możesz analizować własny CSV.')
     else:
-        st.warning('⚠️ Brak API Capital.com. Możesz analizować własny CSV.')
+        st.caption('🔒 Logowanie Capital.com w panelu wyłączone; '
+                   'worker Northflank ma oddzielne trwałe zmienne środowiskowe.')
     st.caption(f"🧠 AI: {st.session_state.get('_paid_ai_requests',0)} ręcznych zapytań w sesji. Opcjonalne automatyczne analizy workera są rozliczane i limitowane osobno.")
     st.info('Streamlit Cloud nie gwarantuje skanera działającego 24/7. Do tego potrzebny osobny worker na stale działającym hoście.')
 
