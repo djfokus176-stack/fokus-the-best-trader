@@ -76,6 +76,7 @@ from trader.exit_grid import compare_same_entries
 from trader.wave_ui import render_wave_reversal_research
 from trader.wave_intelligence2_ui import render_wave_intelligence2
 from trader.wave_fiveyear_ui import render_wave_fiveyear_report
+from trader.cloud_gap_ui import render_cloud_gap_audit
 from trader.feed_audit import inspect_labels,compare_clock_observations
 
 st.set_page_config(page_title='FOKU$ THE BEST TRADER',page_icon='📈',layout='wide')
@@ -2112,6 +2113,7 @@ with news_tab:
 
 
 with reports_tab:
+    render_cloud_gap_audit(remote_paper_view_enabled,secret)
     render_wave_fiveyear_report()
     render_wave_reversal_research()
     render_wave_intelligence2()
