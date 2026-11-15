@@ -411,11 +411,12 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
         payload["shadow_per_strategy"]=shadow_state
         if wave_state:
             payload["wave_shadow"]=wave_state
+            # WAVE SHADOW must persist even on market closure, before
+            # the new A-E module has been primed.
+            payload["wave_shadow_report"]=wave_shadow_scorecard(wave_state)
         if ae_state:
             payload["wave_ae_forward"]=ae_state
             payload["wave_ae_forward_report"]=wave_ae_forward_scorecard(ae_state)
-            # Compact descriptive summary, never used to authorize trading.
-            payload["wave_shadow_report"]=wave_shadow_scorecard(wave_state)
         latest_shadow_report=shadow_scorecard(shadow_state)
         payload["shadow_learning_report"]=latest_shadow_report
         payload["meta"]={
