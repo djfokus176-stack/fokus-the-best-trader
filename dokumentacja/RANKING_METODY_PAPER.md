@@ -35,8 +35,8 @@ testem OOS. Nie importować arkusza do egzekucji.
   checkpointu, również pozycje pochodzące z M1 (opis zawiera dokładny TF,
   ID, punkt otwarcia/wyjścia i modelowy P&L). Nie są to nowe sygnały ani
   wypełnienia zleceń przez brokera.
-- Dziennik CSV ma dodatkowe kolumny `tryb_sygnalu`, `wybrana_metoda`,
-  `opis_sygnalu`. Oryginalny `strategy` i ID transakcji pozostają.
+- Wariant dziennika CSV w panelu ma dodatkowe kolumny `tryb_sygnalu`, `wybrana_metoda`,
+  `opis_sygnalu`. Oryginalny `paper_export_table`, `strategy` i ID transakcji pozostają bez zmian.
 - Worker oznacza osobno `CANDIDATE_METHOD` i `ACTIVE_METHOD`:
   bieżący kandydat może różnić się od metody istniejącej pozycji.
 
