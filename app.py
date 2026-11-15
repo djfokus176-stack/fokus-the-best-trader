@@ -57,7 +57,7 @@ from trader.paper_lifecycle import (
 from trader.paper_display import annotate_open_paper,annotate_paper_history
 from trader.paper_sounds import new_paper_events,wav_notice,SOUND_EVENTS,alert_audio
 from trader.paper_reporting import daily_weekly,performance_by_policy
-from trader.paper_audit import paper_export_table, paper_strategy_audit
+from trader.paper_audit import paper_labeled_export_table, paper_strategy_audit
 from trader.paper_method_labels import (RESEARCH_DISPLAY_ORDER, display_choice,
     decision_attribution, method_attribution)
 from trader.paper_daily_risk import paper_daily_risk, DEFAULT_DAILY_STOP_PTS
@@ -1425,7 +1425,7 @@ with market_tab:
                         with st.expander('📋 DZIENNIK WEJŚĆ I WYJŚĆ PAPER — GODZINA / PUNKTY'):
                             # The old compact table silently dropped strategy
                             # and trade_id: both are essential for attribution.
-                            journal=paper_export_table(paper_rows)
+                            journal=paper_labeled_export_table(paper_rows)
                             focus=['trade_id','tryb_sygnalu','wybrana_metoda',
                            'opis_sygnalu','strategy','setup_utc',
                                    'entry_assumed_utc','opened_utc','closed_utc',
