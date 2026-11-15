@@ -154,24 +154,57 @@ def advance_wave_shadow(state, frame, *, epic="US500",
 
 
 def wave_shadow_scorecard(state):
-    """Descriptive counts only; never promote a configuration to AUTO."""
+    """Audit all condition statuses; never promote a WAVE method to AUTO.
+
+    One event is evaluated for 3 horizons x 3 thresholds. These conditions
+    are correlated and must NOT be presented as independent trades or wins.
+    An invalidated horizon is neither a loss nor a success.
+    """
     events=list((state or {}).get("events") or [])
     counts={}
+    by_origin_side={}
+    invalid_by_reason={}
+    invalidated=0
+    pending=0
     for e in events:
-        for key,result in (e.get("outcomes") or {}).items():
-            if result.get("status")!="CLOSED":
-                continue
-            group=f"{e['origin']}|{e['side']}|{e['wave_count']}|{e['confirmation']}|{key}"
-            r=counts.setdefault(group,{"n":0,"up":0,"down":0,"both":0,"flat":0})
-            r["n"]+=1
-            for k in ("up","down","both","flat"):
-                r[k]+=bool(result.get(k))
+        cohort=str(e.get("origin","UNKNOWN"))+"|"+str(e.get("side","UNKNOWN"))
+        bucket=by_origin_side.setdefault(cohort,{
+            "events":0,"resolved_conditions":0,
+            "invalidated_conditions":0,"pending_conditions":0})
+        bucket["events"]+=1
+        outcomes=e.get("outcomes") or {}
+        for bars in HORIZONS:
+            for pct in THRESHOLDS:
+                key=f"{bars*15}m_{pct:g}pct"
+                result=outcomes.get(key) or {}
+                status=str(result.get("status","PENDING"))
+                if status=="CLOSED":
+                    group=(f"{cohort}|{e.get('wave_count','?')}|"
+                           f"{e.get('confirmation','?')}|{key}")
+                    r=counts.setdefault(group,{"n":0,"up":0,"down":0,
+                                               "both":0,"flat":0})
+                    r["n"]+=1
+                    for k in ("up","down","both","flat"):
+                        r[k]+=bool(result.get(k))
+                    bucket["resolved_conditions"]+=1
+                elif status.startswith("INVALIDATED_"):
+                    invalidated+=1
+                    bucket["invalidated_conditions"]+=1
+                    invalid_by_reason[status]=invalid_by_reason.get(status,0)+1
+                else:
+                    pending+=1
+                    bucket["pending_conditions"]+=1
+    resolved=sum(v["n"] for v in counts.values())
     return {
         "status":"BADANIE — BRAK KALIBRACJI",
         "last_closed_utc":(state or {}).get("last_closed_utc"),
         "retained_events":len(events),
         "forward_events":sum(e.get("origin")=="FORWARD" for e in events),
-        "resolved_conditions":sum(v["n"] for v in counts.values()),
+        "resolved_conditions":resolved,
+        "invalidated_conditions":invalidated,
+        "pending_conditions":pending,
+        "by_origin_side":by_origin_side,
+        "invalidated_by_reason":invalid_by_reason,
         "groups":counts,
         "trade_permission":"WAIT",
     }
