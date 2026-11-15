@@ -355,6 +355,59 @@ class CapitalReadOnly:
         except ValueError as ex:
             raise FeedError(f'Niepoprawny JSON API: {ex}') from ex
 
+    def historical_closed_candles(self, epic, resolution, from_open_utc,
+                                  to_open_utc, *, max_count=1000):
+        """Read historical DEMO bars from explicit Capital OPEN-time window.
+
+        Raw vendor timestamps are mapped to CLOSE exactly once. No trailing
+        forming bar is eligible and no historical data is fabricated.
+        This method does not execute broker orders or modify live snapshots.
+        """
+        if self.environment != "DEMO":
+            raise FeedError("Backfill history is restricted to DEMO.")
+        if resolution not in PERIOD or not epic.replace("_", "").isalnum():
+            raise FeedError("Niepoprawny EPIC lub interwal historii.")
+        start = pd.Timestamp(from_open_utc)
+        end = pd.Timestamp(to_open_utc)
+        if start.tzinfo is None or end.tzinfo is None:
+            raise FeedError("Backfill wymaga UTC-aware dat.")
+        start, end = start.tz_convert("UTC"), end.tz_convert("UTC")
+        seconds = PERIOD[resolution]
+        if (start > end or int(start.value // 1_000_000_000) % seconds
+                or int(end.value // 1_000_000_000) % seconds):
+            raise FeedError("Niepoprawny lub niewyrownany zakres swiec.")
+        count = int(max_count)
+        if not 1 <= count <= 1000 or (end-start) > pd.Timedelta(seconds=1000*seconds):
+            raise FeedError("Przekroczony limit pojedynczego zakresu historii.")
+        try:
+            rsp = self.session.get(
+                f"{self.base_url}/api/v1/prices/{epic}",
+                params={"resolution": resolution, "max": count,
+                        "from": start.strftime("%Y-%m-%dT%H:%M:%S"),
+                        "to": end.strftime("%Y-%m-%dT%H:%M:%S")},
+                headers=self.headers(), timeout=12)
+            rsp.raise_for_status()
+            payload = rsp.json()
+        except requests.RequestException as exc:
+            raise FeedError(http_error_message(
+                exc, "Historia Capital DEMO", epic=epic)) from exc
+        except ValueError as exc:
+            raise FeedError("Niepoprawny JSON historii Capital.") from exc
+        if not isinstance(payload, dict) or not isinstance(payload.get("prices"), list):
+            raise FeedError("Brak listy historycznych swiec Capital.")
+        if not payload["prices"]:
+            return pd.DataFrame(columns=("Open","High","Low","Close","Spread"),
+                                index=pd.DatetimeIndex([],tz="UTC",name="time"))
+        raw = parse_prices(payload, quarantine_bad=False)
+        if (raw.index[0] < start or raw.index[-1] > end):
+            raise FeedError("Broker zwrocil swiece spoza wymaganego zakresu.")
+        shifted = capital_prices_as_close_times(raw, resolution)
+        # Historical read must never contain a live/forming bar.
+        now = pd.Timestamp.now(tz="UTC")
+        if shifted.index[-1] >= now:
+            raise FeedError("Niedomknieta swieca w odpowiedzi historycznej.")
+        return shifted
+
     def raw_candle_payload(self, epic='US500', resolution='MINUTE', count=8):
         """Read-only raw Capital JSON for clock diagnostics. NO validation.
 
