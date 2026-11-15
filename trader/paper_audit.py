@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+from .paper_method_labels import method_attribution
+
 FINISHED = ("CLOSED_SL","CLOSED_TP","CLOSED_TIMEOUT")
 EXPORT_COLUMNS = (
     "trade_id","strategy","epic","source","timeframe","setup_utc",
@@ -23,8 +25,19 @@ EXPORT_COLUMNS = (
 def paper_export_table(positions: list[dict]) -> pd.DataFrame:
     """Return only documented non-secret position fields; preserve attribution."""
     frame=pd.DataFrame(positions or [])
-    return pd.DataFrame({c:frame[c] if c in frame else pd.Series(dtype=object)
+    result=pd.DataFrame({c:frame[c] if c in frame else pd.Series(dtype=object)
                          for c in EXPORT_COLUMNS}).reindex(columns=EXPORT_COLUMNS)
+    # Additional DISPLAY columns, never persisted back to the PAPER ledger.
+    # For old records, unknown AUTO origin must remain unknown.
+    if len(frame):
+        attrs=[method_attribution(pos) for pos in positions]
+        result["tryb_sygnalu"]=[a["mode"] for a in attrs]
+        result["wybrana_metoda"]=[a["method"] for a in attrs]
+        result["opis_sygnalu"]=[a["label"] for a in attrs]
+    else:
+        for column in ("tryb_sygnalu","wybrana_metoda","opis_sygnalu"):
+            result[column]=pd.Series(dtype=object)
+    return result
 
 
 def paper_strategy_audit(positions: list[dict]) -> tuple[pd.DataFrame,dict]:
