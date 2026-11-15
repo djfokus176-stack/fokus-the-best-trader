@@ -320,6 +320,14 @@ with st.sidebar:
     # are NOT required to display Supabase data.
     cloud_read_only_mode=remote_paper_view_enabled()
     if cloud_read_only_mode:
+        # Clear pre-migration failed browser login only ONCE per session.
+        # Manual subsequent LOCAL scans retain their explicit diagnostics.
+        if not st.session_state.get('_cloud_read_only_initialized',False):
+            for key in ('last_feed_error','_scan_last_result',
+                        '_capital_test','market_snap','source_override',
+                        'initial_scan_attempted'):
+                st.session_state.pop(key,None)
+            st.session_state['_cloud_read_only_initialized']=True
         st.session_state['auto_scan_active']=False
     st.toggle('🔄 AUTO-SKAN — tylko gdy aplikacja otwarta',
         value=(False if cloud_read_only_mode else
