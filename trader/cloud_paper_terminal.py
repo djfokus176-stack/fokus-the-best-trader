@@ -12,6 +12,8 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from .remote_checkpoint import RemoteCheckpoint, RemoteError
+from .paper_method_labels import method_attribution
+from .paper_display import annotate_open_paper, annotate_paper_history
 
 
 def _parse_utc(value):
@@ -74,6 +76,41 @@ def cloud_terminal_summary(version, payload, frame, *, now=None):
         "no_direct_capital_login":True,
     }
 
+def cloud_paper_positions(payload, frame):
+    """Read-only rows from one checkpoint; never infer unrecorded signals.
+
+    The cloud M15 chart may show M1/M5/H1 actual PAPER markers on its time
+    axis. Exclude off-chart events to prevent Plotly from re-scaling across
+    months of old ledger history.
+    """
+    tables=payload.get("tables") if isinstance(payload,dict) else None
+    raw=tables.get("paper_positions_v3") if isinstance(tables,dict) else None
+    if not isinstance(raw,list):
+        return [], []
+    valid=[]
+    for pos in raw:
+        if (not isinstance(pos,dict) or
+                pos.get("source")!="Capital.com DEMO REST" or
+                pos.get("epic")!="US500" or
+                pos.get("side") not in ("LONG","SHORT") or
+                pos.get("status") not in
+                    ("PENDING","OPEN","CLOSED_SL","CLOSED_TP",
+                     "CLOSED_TIMEOUT","INVALIDATED")):
+            continue
+        valid.append(pos)
+    valid.sort(key=lambda p: str(p.get("created_utc") or ""),reverse=True)
+    if frame.empty:
+        return valid[:25], []
+    start,end=frame.index[0],frame.index[-1]+pd.Timedelta(minutes=15)
+    chart_rows=[]
+    for pos in valid[:80]:
+        opened=_parse_utc(pos.get("opened_utc"))
+        closed=_parse_utc(pos.get("closed_utc"))
+        if ((opened is not None and start<=opened<=end) or
+                (closed is not None and start<=closed<=end)):
+            chart_rows.append(pos)
+    return valid[:25],chart_rows
+
 
 @st.fragment(run_every="60s")
 def render_cloud_terminal(secret_fn):
@@ -116,18 +153,56 @@ def render_cloud_terminal(secret_fn):
                str(audit["last_m15_utc"] or "BRAK"))
     st.caption("Ostatnia informacja workera (nie tej przeglądarki): "+
                audit["worker_summary"])
+    recent_paper,chart_paper=cloud_paper_positions(payload,frame)
+    if recent_paper:
+        active=next((p for p in recent_paper
+                     if p.get("status") in ("OPEN","PENDING")),None)
+        if active:
+            origin=method_attribution(active)
+            st.info(
+                "🧪 POZYCJA PAPER "+str(active["status"])+" | "+
+                str(active["side"])+" | "+origin["label"]+
+                " | TF="+str(active.get("timeframe","BRAK"))+
+                " | ID="+str(active.get("trade_id","BRAK"))[:10]+
+                " — symulacja odtwarzana ze świec, bez zlecenia Capital.com.")
+        st.markdown("##### 📋 OSTATNIE POZYCJE PAPER — TRYB I METODA")
+        st.dataframe(pd.DataFrame([{
+            "Kierunek":p["side"],"Status":p["status"],
+            "Tryb":method_attribution(p)["mode"],
+            "Metoda":method_attribution(p)["method"],
+            "Interwał":str(p.get("timeframe","BRAK")),
+            "Czas OPEN UTC":str(p.get("opened_utc") or "BRAK"),
+            "Wynik pkt":p.get("pnl_pts"),
+            "ID":str(p.get("trade_id","BRAK"))[:12],
+        } for p in recent_paper[:12]]),
+        hide_index=True,use_container_width=True)
+        st.caption("AUTO oznaczam tylko wtedy, gdy pochodzi z powodu sygnału "
+                   "zapisanym przy tej pozycji. Starszy wpis bez dowodu "
+                   "pozostaje jako NIEUSTALONY / POJEDYNCZY.")
+    else:
+        st.caption("W checkpointcie brak zarejestrowanych pozycji PAPER US500; "
+                   "nie wyświetlam wymyślonych LONG/SHORT.")
     if frame.empty:
         st.info("W Supabase nie ma jeszcze świec M15 do wyświetlenia.")
         return
     candles=go.Figure(go.Candlestick(
         x=frame.index,open=frame.Open,high=frame.High,
         low=frame.Low,close=frame.Close,name="US500 M15 CLOUD"))
+    # Exact OPEN/CLOSE PAPER from the checkpoint, NEVER watch markers or
+    # signals inferred from OHLC. M1 PAPER may appear on the M15 time axis.
+    annotate_paper_history(candles,chart_paper,
+                           "US500","Capital.com DEMO REST",None)
+    open_row=next((p for p in recent_paper if p.get("status")=="OPEN"),None)
+    if open_row is not None:
+        annotate_open_paper(candles,open_row)
     candles.update_layout(
         height=410,xaxis_rangeslider_visible=False,template="plotly_dark",
         paper_bgcolor="#111a2d",plot_bgcolor="#111a2d",
         margin={"l":10,"r":10,"t":15,"b":10})
     st.plotly_chart(candles,use_container_width=True,
                     key="cloud_worker_m15_chart")
-    st.caption("Wyłącznie historia potwierdzonych M15 z tabeli cloud, "
-               "nie ceny wykonalne BID/ASK. Brak danych nie oznacza sygnału; "
-               "AUTO oraz WAVE nie otrzymują tu żadnych nowych decyzji.")
+    st.caption("Świece: historyczne M15. Trójkąty i kwadraty: WYŁĄCZNIE "
+               "rzeczywiście zapisane otwarcia/zamknięcia PAPER z checkpointu "
+               "(także z M1 na osi czasu M15), po najechaniu: AUTO → metoda, "
+               "TF, ID i wynik. To retrospektywny PAPER, nie rzeczywisty fill "
+               "Capital.com. Nie generujemy tutaj nowych transakcji.")
