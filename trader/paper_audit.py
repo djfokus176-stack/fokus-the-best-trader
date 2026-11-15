@@ -25,18 +25,21 @@ EXPORT_COLUMNS = (
 def paper_export_table(positions: list[dict]) -> pd.DataFrame:
     """Return only documented non-secret position fields; preserve attribution."""
     frame=pd.DataFrame(positions or [])
-    result=pd.DataFrame({c:frame[c] if c in frame else pd.Series(dtype=object)
+    return pd.DataFrame({c:frame[c] if c in frame else pd.Series(dtype=object)
                          for c in EXPORT_COLUMNS}).reindex(columns=EXPORT_COLUMNS)
-    # Additional DISPLAY columns, never persisted back to the PAPER ledger.
-    # For old records, unknown AUTO origin must remain unknown.
-    if len(frame):
-        attrs=[method_attribution(pos) for pos in positions]
-        result["tryb_sygnalu"]=[a["mode"] for a in attrs]
-        result["wybrana_metoda"]=[a["method"] for a in attrs]
-        result["opis_sygnalu"]=[a["label"] for a in attrs]
-    else:
-        for column in ("tryb_sygnalu","wybrana_metoda","opis_sygnalu"):
-            result[column]=pd.Series(dtype=object)
+
+
+def paper_labeled_export_table(positions: list[dict]) -> pd.DataFrame:
+    """Owner-facing journal with computed attribution, no ledger changes.
+
+    The original paper_export_table schema stays EXACTLY unchanged for
+    existing consumers; extra columns are opt-in for the dashboard.
+    """
+    result=paper_export_table(positions)
+    attrs=[method_attribution(pos) for pos in (positions or [])]
+    result["tryb_sygnalu"]=[a["mode"] for a in attrs]
+    result["wybrana_metoda"]=[a["method"] for a in attrs]
+    result["opis_sygnalu"]=[a["label"] for a in attrs]
     return result
 
 
