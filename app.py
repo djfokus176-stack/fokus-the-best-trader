@@ -82,6 +82,7 @@ from trader.research_readiness_ui import render_research_readiness
 from trader.cloud_wave_ae_ui import render_cloud_wave_ae_replay
 from trader.cloud_gap_ui import render_cloud_gap_audit
 from trader.cloud_paper_terminal import render_cloud_terminal
+from trader.cloud_scalp_5s_ui import render_cloud_scalp_5s
 from trader.feed_audit import inspect_labels,compare_clock_observations
 
 st.set_page_config(page_title='FOKU$ THE BEST TRADER',page_icon='📈',layout='wide')
@@ -681,6 +682,7 @@ with market_tab:
             st.info('⚪ TRYB RĘCZNY — nowe świece wymagają ponownego skanowania.')
     with col2:
         if remote_paper_view_enabled():
+            render_cloud_scalp_5s(secret)
             render_cloud_terminal(secret)
         st.markdown('#### 🎯 FOKU$ MARKET TERMINAL')
         st.caption('Świece MID • EMA9/21/50 • SL/TP PAPER • potwierdzenie 4 interwałów • analiza bez zleceń')

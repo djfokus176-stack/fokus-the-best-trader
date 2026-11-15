@@ -224,6 +224,51 @@ class RemoteCheckpoint:
                    prefer="resolution=ignore-duplicates,return=minimal")
         return len(records)
 
+    def upsert_live_quote(self, record):
+        """One-row quote cache, deliberately separate from PAPER CAS payload."""
+        import math
+        if not isinstance(record,dict):
+            raise RemoteError("Bad quote payload")
+        allowed=("epic","source","bid","ask","mid","spread",
+                 "broker_status","broker_update_utc","received_utc",
+                 "delay_seconds","fresh","samples")
+        if (set(record)!=set(allowed) or record["epic"]!="US500"
+                or record["source"]!="Capital.com DEMO REST"):
+            raise RemoteError("Only DEMO US500 quote cache is supported")
+        try:
+            bid,ask,mid,spread,delay=(float(record[x]) for x in
+                                      ("bid","ask","mid","spread","delay_seconds"))
+        except (ValueError,TypeError,OverflowError):
+            raise RemoteError("Invalid live quote values") from None
+        if (not all(math.isfinite(v) for v in (bid,ask,mid,spread,delay))
+                or bid<=0 or ask<bid or mid<=0 or spread<0
+                or abs((ask-bid)-spread)>0.001):
+            raise RemoteError("Untrusted live quote values")
+        if (not isinstance(record["samples"],list)
+                or len(record["samples"])>24
+                or type(record["fresh"]) is not bool):
+            raise RemoteError("Invalid quote state")
+        self._call("POST","fokus_live_quotes",
+                   params={"on_conflict":"epic"},json=[record],
+                   prefer="resolution=merge-duplicates,return=minimal")
+        return True
+
+    def fetch_live_quote(self,epic="US500"):
+        """Owner-only snapshot read; never invokes broker authentication."""
+        if epic!="US500":
+            raise RemoteError("Only US500 quote cache supported")
+        rsp=self._call("GET","fokus_live_quotes",
+                       params={"epic":"eq.US500","select":(
+                           "epic,source,bid,ask,mid,spread,broker_status,"
+                           "broker_update_utc,received_utc,delay_seconds,fresh,samples"),
+                           "limit":1})
+        try: rows=rsp.json()
+        except (TypeError,ValueError):
+            raise RemoteError("Bad quote cache JSON") from None
+        if not isinstance(rows,list) or len(rows)>1:
+            raise RemoteError("Invalid quote cache response")
+        return rows[0] if rows else None
+
     def upsert_candles(self,snapshots,epic,max_per_tf=350):
         # Backfill the most recent closed bars; primary key guarantees
         # deduplication when worker repeats the same candle.
