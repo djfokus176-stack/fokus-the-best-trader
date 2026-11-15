@@ -29,6 +29,15 @@
 
 ---
 
+## 🛡️ 15.11.2026 — jeden zapisujący PAPER i kalendarz BLS
+
+- **Aktywny wykonawca:** Northflank `fokus-paper-worker` (pojedyncza instancja, trwały checkpoint Supabase). Status należy potwierdzać w panelu hostingu i `meta.last_scan_utc`, nie tylko po zielonych testach GitHub.
+- **GitHub Actions co 5 minut** jest wyłącznie *awaryjnym zamiennikiem*, a nie drugim workerem. Do uruchomienia wymaga **obu** zmiennych repozytorium: `FOKUS_PAPER_WORKER_ENABLED=true` oraz `FOKUS_PAPER_EXECUTOR=github_actions`. Najpierw **zatrzymaj Northflank**, potem świadomie przełącz wykonawcę. Przełączanie trybu bez wyłączenia starego hosta nadal jest zabronione; nie ma jeszcze rozproszonego lease-locka w bazie.
+- Host `trader.worker_service` domyślnie wymaga `FOKUS_PAPER_EXECUTOR=northflank` (brak zmiennej zgodny ze starszymi wdrożeniami). Konfiguracja `github_actions` na Northflank blokuje start hosta.
+- **Kalendarz BLS:** awaryjny `bls_verified_snapshot.py` wygasł **10.11.2026 00:00 UTC**. Jeśli źródła BLS są niedostępne, domyślna bramka makro blokuje nowe PAPER; nie przedłużaj snapshotu automatycznie.
+- **Nie ma rzeczywistych zleceń brokera.** PAPER wejścia i punkty są rekonstrukcją z zamkniętych świec; 5-sekundowe REST quotes to obserwacje, nie transakcje, więc skuteczność scalpingu pozostaje NIEPOTWIERDZONA.
+- **Uwaga operacyjna:** praca Northflank 24/7 nie jest gwarantowana przez GitHub ani sam kod. Potrzebny niezależny watchdog świeżości checkpointu i potwierdzenie działania na kolejnych sesjach.
+
 ## ✅ AKTUALNY STAN — 9/10 LISTOPADA 2026 (PAPER DEMO, bez zleceń brokerskich)
 
 **Źródłem prawdy jest `main`, nie archiwalne opisy v0.1/v3 niżej.**
@@ -65,7 +74,7 @@
   Nie uruchamiaj drugiego zapisującego skanera z przeglądarki lub Actions.
 
 
-Ostatni audyt kodu: 392 testy na Pythonie 3.11 i 3.12 po #43.
+Liczba testów zmienia się wraz z rozwojem projektu; aktualny wynik pokazują GitHub Actions dla danego commita.
 
 - **AUTO — 6 STRATEGII:** eksperymentalnie wystarcza 1 pełny sygnał po MTF
   przy zerowym konflikcie LONG/SHORT i wszystkich obowiązkowych bramkach.

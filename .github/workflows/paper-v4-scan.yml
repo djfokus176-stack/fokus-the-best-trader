@@ -14,11 +14,15 @@ jobs:
   paper:
     # Skip before allocating a runner unless owner enables the bot.
     # Avoid consuming Actions minutes for unconfigured 5-min cron.
-    if: vars.FOKUS_PAPER_WORKER_ENABLED == 'true'
+    # Northflank is the production writer. GitHub is an explicit FALLBACK
+    # only after the Northflank writer has been stopped by the owner.
+    # One old shared opt-in variable is NOT sufficient for two writers.
+    if: vars.FOKUS_PAPER_WORKER_ENABLED == 'true' && vars.FOKUS_PAPER_EXECUTOR == 'github_actions'
     runs-on: ubuntu-latest
     timeout-minutes: 4
     env:
       FOKUS_PAPER_WORKER_ENABLED: ${{ vars.FOKUS_PAPER_WORKER_ENABLED }}
+      FOKUS_PAPER_EXECUTOR: ${{ vars.FOKUS_PAPER_EXECUTOR }}
       FOKUS_CANDLE_TIME_CONFIRMED: ${{ vars.FOKUS_CANDLE_TIME_CONFIRMED }}
       FOKUS_SUPABASE_URL: ${{ secrets.FOKUS_SUPABASE_URL }}
       FOKUS_SUPABASE_SECRET_KEY: ${{ secrets.FOKUS_SUPABASE_SECRET_KEY }}
@@ -46,6 +50,10 @@ jobs:
         run: |
           set -euo pipefail
           echo "ready=false" >> "$GITHUB_OUTPUT"
+          if [[ "$FOKUS_PAPER_EXECUTOR" != "github_actions" ]]; then
+            echo "FOKUS executor is not github_actions. Dedicated host owns the checkpoint; skipping scheduled scan."
+            exit 0
+          fi
           if [[ "$FOKUS_PAPER_WORKER_ENABLED" != "true" ]]; then
             echo "PAPER worker disabled. Repository variable FOKUS_PAPER_WORKER_ENABLED must be true."
             exit 0
