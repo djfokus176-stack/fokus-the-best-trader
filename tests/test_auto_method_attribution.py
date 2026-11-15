@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 from trader.auto_strategy import AUTO_MODE
 from trader.strategies_pro import ALL_STRATEGIES
 from trader.ema50_wave import STRATEGY_NAME as WAVE_NAME
+from trader.fokus_3f import NAME as THREEF_NAME
 from trader.paper_method_labels import (
     RESEARCH_DISPLAY_ORDER, display_choice, method_attribution,
     decision_attribution,
@@ -36,8 +37,10 @@ AUTO_REASON=("GŁOSY MTF 1/1 (LONG:1, SHORT:0, veto MTF:0). "
 
 def test_presentation_ranking_auto_is_first_and_original_six_preserved():
     assert RESEARCH_DISPLAY_ORDER[0]==AUTO_MODE
-    assert set(RESEARCH_DISPLAY_ORDER)=={AUTO_MODE,*ALL_STRATEGIES,WAVE_NAME}
-    assert len(RESEARCH_DISPLAY_ORDER)==8
+    assert set(RESEARCH_DISPLAY_ORDER)=={AUTO_MODE,*ALL_STRATEGIES,WAVE_NAME,THREEF_NAME}
+    assert len(RESEARCH_DISPLAY_ORDER)==9
+    assert RESEARCH_DISPLAY_ORDER[-1]==THREEF_NAME
+    assert display_choice(THREEF_NAME).startswith('9. ')
     assert display_choice(AUTO_MODE).startswith("1. ")
     assert all(display_choice(name).startswith(str(i)+". ")
                for i,name in enumerate(RESEARCH_DISPLAY_ORDER,1))
