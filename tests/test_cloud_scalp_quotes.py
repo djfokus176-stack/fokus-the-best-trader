@@ -149,6 +149,11 @@ def test_remote_post_is_to_dedicated_quote_table_not_checkpoint():
     assert calls[0][0]=="POST"
     assert calls[0][1]=="fokus_live_quotes"
     assert calls[0][2]["params"]=={"on_conflict":"epic"}
+    payload=calls[0][2]["json"][0]
+    assert payload["updated_at"].endswith("+00:00")
+    assert datetime.fromisoformat(payload["updated_at"]).tzinfo is not None
+    assert payload["received_utc"]==q["received_utc"]
+    assert "updated_at" not in q  # input must not be mutated
     assert "fokus_paper_checkpoint" not in str(calls)
     q["ask"]=0
     with pytest.raises(RemoteError):
