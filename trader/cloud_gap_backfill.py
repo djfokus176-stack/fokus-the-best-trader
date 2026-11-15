@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 import pandas as pd
 
 from .cloud_gap_audit import (
-    STEP_MINUTES, INTRADAY_REVIEW, audit_closed_candle_gaps,
+    STEP_MINUTES, REVIEW, audit_closed_candle_gaps,
 )
 
 TIMEFRAMES = tuple(STEP_MINUTES)
@@ -75,7 +75,7 @@ def backfill_pass(remote, broker, prior=None, *, now=None,
     frame = pd.DataFrame(index=stamps)
     gaps = audit_closed_candle_gaps(frame, tf)
     choices = gaps.loc[
-        (gaps["classification"] == INTRADAY_REVIEW)
+        (gaps["classification"] == REVIEW)
         & (gaps["unobserved_slots"] <= MAX_MISSING_SLOTS)
         & (gaps["unobserved_slots"] > 0)
     ]
