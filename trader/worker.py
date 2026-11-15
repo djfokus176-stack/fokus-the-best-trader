@@ -30,6 +30,7 @@ from .shadow_learning import advance_shadow, shadow_scorecard
 from .paper_daily_risk import paper_daily_risk, DEFAULT_DAILY_STOP_PTS
 from .wave_shadow_archive import advance_wave_shadow, wave_shadow_scorecard
 from .wave_ae_forward_auto import advance_wave_ae_forward, wave_ae_forward_scorecard
+from .cloud_scalp_quotes import Quote5sSampler, idle_quote_pulses
 
 
 def scan_once(client,epic,tf,strategy,max_spread,db, *,
@@ -542,6 +543,9 @@ def main(argv=None):
     use_remote=configured()
     remote=RemoteCheckpoint.from_env() if use_remote else None
     db=connect() if not use_remote else None
+    scalp_5s_enabled=(use_remote and os.getenv("FOKUS_SCALP_5S_ENABLED","true")
+                      .strip().lower() in ("true","1","yes","on"))
+    quote_sampler=Quote5sSampler() if scalp_5s_enabled else None
     client=CapitalReadOnly(os.getenv("CAPITAL_API_KEY",""),
         os.getenv("CAPITAL_IDENTIFIER",os.getenv("CAPITAL_LOGIN","")),
         os.getenv("CAPITAL_PASSWORD",""),environment="DEMO")
@@ -576,8 +580,18 @@ def main(argv=None):
                 raise SystemExit(1) from None
         if args.once:
             break
-        time.sleep(seconds_until_next_m1_scan() if args.align_minute
-                   else args.interval)
+        idle_seconds=(seconds_until_next_m1_scan() if args.align_minute
+                      else args.interval)
+        if quote_sampler is not None and not args.once:
+            # Quote-only observation during idle time; never parallel to
+            # scan_once and never changes PAPER/MTF/WAVE decisions.
+            idle_quote_pulses(client,remote,args.epic,idle_seconds,quote_sampler)
+            if quote_sampler.last_status.startswith("QUOTE_WAIT_"):
+                print(datetime.now(timezone.utc).isoformat(),
+                    "WAIT / SCALP_5S / "+quote_sampler.last_status+
+                    " / Check private fokus_live_quotes table",flush=True)
+        else:
+            time.sleep(idle_seconds)
 
 if __name__=="__main__":
     main()
