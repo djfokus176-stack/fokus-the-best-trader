@@ -248,8 +248,12 @@ class RemoteCheckpoint:
                 or len(record["samples"])>24
                 or type(record["fresh"]) is not bool):
             raise RemoteError("Invalid quote state")
+        # PostgREST upsert updates only submitted columns. The SQL
+        # DEFAULT now() is used only on INSERT, so every subsequent
+        # quote write must explicitly advance updated_at.
+        submission={**record,"updated_at":datetime.now(timezone.utc).isoformat()}
         self._call("POST","fokus_live_quotes",
-                   params={"on_conflict":"epic"},json=[record],
+                   params={"on_conflict":"epic"},json=[submission],
                    prefer="resolution=merge-duplicates,return=minimal")
         return True
 
