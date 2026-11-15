@@ -53,3 +53,33 @@ def test_empty_and_pending_events_preserve_backward_compatible_report():
     assert r["invalidated_conditions"]==0
     assert r["forward_events"]==1
     assert r["trade_permission"]=="WAIT"
+
+
+def test_market_closure_retains_wave_archive_without_false_not_configured(monkeypatch):
+    from datetime import datetime, timezone
+    from trader import worker
+
+    now=datetime.now(timezone.utc).isoformat()
+    old_wave={"schema":"wave_shadow_v1","last_closed_utc":"2026-11-13T21:45:00+00:00",
+              "events":[],"events_forward":0}
+    class Cloud:
+        def __init__(self):
+            self.version=3
+            self.payload={"schema":1,"tables":{},"wave_shadow":old_wave,
+                          "news_radar":{"last_fetch_utc":now},
+                          "macro_watch":{"asof_utc":now}}
+        def fetch(self):
+            return self.version,self.payload
+        def save(self,expected,payload):
+            assert expected==self.version
+            self.version+=1
+            self.payload=payload
+            return self.version
+    cloud=Cloud()
+    monkeypatch.delenv("FOKUS_WAVE_SHADOW_ENABLED",raising=False)
+    monkeypatch.setattr(worker,"scan_once",lambda *args,**kw:"WAIT / MARKET_CLOSED")
+    worker.remote_scan_once(cloud,object(),"US500","MINUTE",
+                            "EMA TREND",2.0,clock_confirmed_open=True)
+    assert cloud.payload["meta"]["wave_shadow_status"]=="NO_NEW_M15"
+    assert cloud.payload["wave_shadow"]["last_closed_utc"]==old_wave["last_closed_utc"]
+    assert cloud.payload["wave_shadow_report"]["trade_permission"]=="WAIT"
