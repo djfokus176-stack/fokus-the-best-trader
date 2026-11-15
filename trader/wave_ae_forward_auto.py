@@ -184,10 +184,10 @@ def wave_ae_forward_scorecard(state):
             rows.append({
                 "side": side, "variant": variant,
                 "anchors": len(cohort), "closed": n,
-                "pending_or_untriggered": sum(
+                "pending_or_untriggered": (0 if variant=="E_WAIT" else sum(
                     v.get("status") not in RESOLVED and
                     not str(v.get("status","")).startswith("INVALIDATED_")
-                    for v in summaries),
+                    for v in summaries)),
                 "invalidated": sum(str(v.get("status","")).startswith(
                     "INVALIDATED_") for v in summaries),
                 "net_pts": round(sum(pnl), 2) if n else None,
@@ -197,7 +197,8 @@ def wave_ae_forward_scorecard(state):
                 "profit_factor_descriptive": (
                     round(gross_win/gross_loss, 3)
                     if n>=20 and gross_loss>0 else None),
-                "status": "BADANIE FORWARD — WAIT; BRAK WALIDACJI PO KOSZTACH",
+                "status": ("BENCHMARK WAIT — BRAK TRANSAKCJI" if variant=="E_WAIT"
+                            else "BADANIE FORWARD — WAIT; BRAK WALIDACJI PO KOSZTACH"),
             })
     return {
         "schema": SCHEMA,
