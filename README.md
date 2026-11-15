@@ -29,6 +29,16 @@
 
 ---
 
+## 🔎 Osobny WATCHDOG checkpointu — opcjonalny, tylko ODCZYT
+
+Kod: `trader/worker_watchdog.py`; workflow: `.github/workflows/fokus-checkpoint-watchdog.yml`.
+
+- Scheduler GitHub co ~5 minut **nie jest gwarantowany czasowo**. Gdy wartość `vars.FOKUS_WATCHDOG_ENABLED` nie jest dokładnie `true`, job jest pomijany.
+- Aktywacja: po podłączeniu do GitHub Secrets *prywatnych*, istniejących `FOKUS_SUPABASE_URL` i `FOKUS_SUPABASE_SECRET_KEY`, właściciel może ustawić `FOKUS_WATCHDOG_ENABLED=true` w **Repository Settings → Secrets and variables → Actions → Variables**. Nie kopiuj sekretów do Variables.
+- Job **tylko czyta** `fokus_paper_checkpoint.main.meta.last_scan_utc` i zgłasza błąd jeśli zapis jest starszy niż 8 minut, przyszły względem zegara serwera o ponad 2 minuty albo niedostępny. Nie skanuje Capital, nie otwiera PAPER i nie zastępuje Northflank.
+- Błąd w Actions nie oznacza automatycznego powiadomienia SMS/Telegram. Monitorowanie uruchomień i opcjonalne powiadomienia GitHub trzeba skonfigurować niezależnie.
+- Zielony watchdog nie dowodzi poprawności OHLC, braku luk, ani skuteczności strategii. Do niezależnej walidacji konieczne są kolejne sesje.
+
 ## ✅ AKTUALNY STAN — 9/10 LISTOPADA 2026 (PAPER DEMO, bez zleceń brokerskich)
 
 **Źródłem prawdy jest `main`, nie archiwalne opisy v0.1/v3 niżej.**
