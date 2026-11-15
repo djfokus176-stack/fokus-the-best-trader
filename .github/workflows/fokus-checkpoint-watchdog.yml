@@ -1,0 +1,41 @@
+name: FOKU$ WATCHDOG - remote PAPER checkpoint health (read-only)
+on:
+  # Best effort. Schedules are delayed or skipped on busy GitHub runners.
+  schedule:
+    - cron: '2-57/5 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: fokus-paper-remote-watchdog
+  cancel-in-progress: false
+jobs:
+  watchdog:
+    # Separate opt-in from the WRITER workflow. This job NEVER writes PAPER.
+    if: vars.FOKUS_WATCHDOG_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      FOKUS_SUPABASE_URL: ${{ secrets.FOKUS_SUPABASE_URL }}
+      FOKUS_SUPABASE_SECRET_KEY: ${{ secrets.FOKUS_SUPABASE_SECRET_KEY }}
+    steps:
+      - name: Check server-side read-only Secrets exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${FOKUS_SUPABASE_URL:-}" || -z "${FOKUS_SUPABASE_SECRET_KEY:-}" ]]; then
+            echo "FOKUS_WATCHDOG=ERROR: missing server-side remote secrets (values not logged)"
+            exit 1
+          fi
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-worker.txt
+      - name: Install lean worker dependencies
+        run: python -m pip install -r requirements-worker.txt
+      - name: Check age of last persisted Northflank checkpoint
+        run: python -m trader.worker_watchdog --max-age-minutes 8
+        # A red run can be monitored using GitHub workflow notifications.
+        # Green is ONLY recent remote checkpoint, not market data or trading.
