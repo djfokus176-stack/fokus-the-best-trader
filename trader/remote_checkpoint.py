@@ -150,6 +150,80 @@ class RemoteCheckpoint:
             raise RemoteError("Niespójne lub zduplikowane świece w cloud")
         return frame
 
+    def fetch_candle_times(self,epic,timeframe,*,before=None,limit=1000,
+                           source="Capital.com DEMO REST"):
+        """Keyset-page timestamp labels, overlapping one page boundary."""
+        import pandas as pd
+        if source!="Capital.com DEMO REST" or timeframe not in (
+                "MINUTE","MINUTE_5","MINUTE_15","HOUR"):
+            raise RemoteError("Only DEMO US500 archive is supported.")
+        limit=int(limit)
+        if not 3<=limit<=1000:
+            raise RemoteError("Niepoprawny limit archiwum.")
+        params={"source":"eq."+source,"epic":"eq."+epic,
+                "timeframe":"eq."+timeframe,"select":"candle_utc",
+                "order":"candle_utc.desc","limit":str(limit)}
+        if before is not None:
+            stamp=pd.Timestamp(before)
+            if stamp.tzinfo is None:
+                raise RemoteError("Niejawna strefa czasu kursora.")
+            params["candle_utc"]="lte."+stamp.tz_convert("UTC").isoformat()
+        response=self._call("GET","fokus_closed_candles",params=params)
+        try:
+            rows=response.json()
+            if not isinstance(rows,list):
+                raise ValueError("rows")
+            times=pd.to_datetime([r["candle_utc"] for r in rows],
+                                  utc=True,errors="raise")
+        except (KeyError,ValueError,TypeError):
+            raise RemoteError("Bledne znaczniki swiec z Supabase.") from None
+        index=pd.DatetimeIndex(times).sort_values()
+        if index.has_duplicates:
+            raise RemoteError("Duplikaty czasu archiwum Supabase.")
+        return index
+
+    def insert_missing_candles(self,epic,timeframe,frame,*,
+                               source="Capital.com DEMO REST"):
+        """Insert exclusively broker-returned missing bars; no replacement.
+
+        PostgREST ignore-duplicates (DO NOTHING on compound key) protects
+        existing OHLC if a concurrent reader/writer observed an overlap.
+        Return count submitted, not actual INSERT count.
+        """
+        import math
+        import pandas as pd
+        from .market import PERIOD
+        if source!="Capital.com DEMO REST" or timeframe not in PERIOD or epic!="US500":
+            raise RemoteError("Niedozwolone zrodlo/rynek historii.")
+        if not isinstance(frame,pd.DataFrame) or frame.empty:
+            return 0
+        if len(frame)>180:
+            raise RemoteError("Backfill limit 180 swiec na probe.")
+        idx=frame.index
+        if (not isinstance(idx,pd.DatetimeIndex) or idx.tz is None
+                or idx.has_duplicates or not idx.is_monotonic_increasing):
+            raise RemoteError("Bledne czasy swiec do archiwum.")
+        if any(int(t.value//1_000_000_000)%PERIOD[timeframe] for t in idx):
+            raise RemoteError("Znaczniki nie pasuja do interwalu.")
+        need=("Open","High","Low","Close","Spread")
+        if not set(need).issubset(frame.columns):
+            raise RemoteError("Brak pol OHLC/Spread z brokera.")
+        records=[]
+        for at,row in frame.iterrows():
+            values=[float(row[k]) for k in need]
+            o,h,l,c,s=values
+            if (not all(math.isfinite(x) for x in values) or
+                    l<=0 or h<max(o,c,l) or l>min(o,c,h) or s<0):
+                raise RemoteError("Niepoprawne historyczne swiece OHLC.")
+            records.append({"source":source,"epic":epic,"timeframe":timeframe,
+                            "candle_utc":at.isoformat(),"open":o,"high":h,
+                            "low":l,"close":c,"spread":s})
+        self._call("POST","fokus_closed_candles",
+                   params={"on_conflict":"source,epic,timeframe,candle_utc"},
+                   json=records,
+                   prefer="resolution=ignore-duplicates,return=minimal")
+        return len(records)
+
     def upsert_candles(self,snapshots,epic,max_per_tf=350):
         # Backfill the most recent closed bars; primary key guarantees
         # deduplication when worker repeats the same candle.
