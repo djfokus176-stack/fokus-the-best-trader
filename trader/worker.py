@@ -225,6 +225,10 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
     vote_audit=payload.get("last_vote_audit") or {}
     shadow_state=payload.get("shadow_per_strategy") or {}
     wave_state=payload.get("wave_shadow") or {}
+    backfill_state=payload.get("candle_backfill") or {}
+    backfill_enabled=(os.getenv("FOKUS_CANDLE_BACKFILL_ENABLED","false")
+                      .strip().lower() in ("true","1","yes","on"))
+
     wave_enabled=os.getenv("FOKUS_WAVE_SHADOW_ENABLED","true").strip().lower() in ("true","1","yes","on")
     # A closed market skips the M15 audit but does not disable an already
     # saved WAVE archive. Never call this situation NOT_CONFIGURED.
@@ -352,7 +356,29 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
                          remote=remote,reviewer=review_snapshot,
                          learning=previous_shadow_report,
                          wave_audit=archive_wave_m15)
+        # Optional research archive repair. Run after the normal PAPER scan,
+        # never before votes, gates or position transitions. One bounded
+        # broker query per hour; disabled unless explicitly opted in.
+        if backfill_enabled:
+            if not clock_confirmed_open:
+                backfill_state={**backfill_state,
+                                "status":"CLOCK_UNVERIFIED"}
+            else:
+                try:
+                    from .cloud_gap_backfill import backfill_pass
+                    backfill_state=backfill_pass(remote,client,backfill_state,
+                                                 epic=epic)
+                except (RemoteError, FeedError, ValueError, TypeError,
+                        OverflowError, OSError) as exc:
+                    # Repair failure must not revise PAPER decisions or erase
+                    # the old durable cursor. Never expose provider error
+                    # text, URLs, tokens or response payloads.
+                    backfill_state={**backfill_state,
+                                    "last_attempt_utc":datetime.now(timezone.utc).isoformat(),
+                                    "status":"ERROR_"+type(exc).__name__}
         payload=dump_state(db)
+        if backfill_state:
+            payload["candle_backfill"]=backfill_state
         if isinstance(auto_state,dict):
             payload["auto_ai"]=auto_state
         if isinstance(candidates,list):
@@ -398,6 +424,9 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             "auto_gpt_configured":bool(os.getenv("OPENAI_API_KEY","")),
             "auto_gpt_last_status":auto_state.get("status","NOT_YET_EXECUTED") if isinstance(auto_state,dict) else "NOT_YET_EXECUTED",
             "worker":"GitHub Actions or foreground process",
+            "candle_backfill_enabled":bool(backfill_enabled),
+            "candle_backfill_status":backfill_state.get("status","DISABLED")
+                if backfill_enabled else "DISABLED",
             "telegram_remote":"DISABLED"}
         new_version=remote.save(version,payload)
         audit_line=""
