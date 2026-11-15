@@ -29,7 +29,7 @@ def test_northflank_remains_default_after_executor_guard():
 ])
 def test_dedicated_host_rejects_other_executor(executor):
     env={**BASE,"FOKUS_PAPER_EXECUTOR":executor}
-    with pytest.raises(ValueError,match="executor=northflank"):
+    with pytest.raises(ValueError,match="FOKUS_PAPER_EXECUTOR=northflank"):
         validated_worker_args(env)
 
 
