@@ -77,6 +77,7 @@ from trader.wave_ui import render_wave_reversal_research
 from trader.wave_intelligence2_ui import render_wave_intelligence2
 from trader.wave_fiveyear_ui import render_wave_fiveyear_report
 from trader.wave_forward_ui import render_wave_forward_comparison
+from trader.cloud_wave_ae_ui import render_cloud_wave_ae_replay
 from trader.cloud_gap_ui import render_cloud_gap_audit
 from trader.feed_audit import inspect_labels,compare_clock_observations
 
@@ -2132,6 +2133,7 @@ with news_tab:
 with reports_tab:
     render_cloud_gap_audit(remote_paper_view_enabled,secret)
     render_wave_fiveyear_report()
+    render_cloud_wave_ae_replay(remote_paper_view_enabled,secret)
     render_wave_reversal_research()
     render_wave_intelligence2()
     st.subheader('📈 FOKU$ LAB — PORÓWNAJ 6 STRATEGII PO KOSZTACH')
