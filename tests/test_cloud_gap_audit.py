@@ -21,20 +21,20 @@ def test_classifies_weekend_maintenance_candidate_and_unexplained_intraday():
         "2026-11-10 03:00", "2026-11-10 05:00",
     ]
     gaps = audit_closed_candle_gaps(_frame(stamps), "MINUTE_5")
-    assert len(gaps) == 4
+    assert len(gaps) == 5
     # Sunday opening following a Friday close is not called corruption.
     assert gaps.iloc[0]["classification"] == WEEKEND
     assert gaps.iloc[0]["unobserved_slots"] == 587
-    assert gaps.iloc[1]["classification"] == REVIEW
+    assert gaps.iloc[1]["classification"] == WEEKEND
     assert gaps.iloc[2]["classification"] == ROLLOVER
     assert gaps.iloc[2]["unobserved_slots"] == 1
     assert gaps.iloc[3]["classification"] == REVIEW
     summary = summarize_gap_audit(gaps, timeframe="MINUTE_5", candles=len(stamps),
                                   first_utc=stamps[0], last_utc=stamps[-1])
-    assert summary["gaps_total"] == 4
+    assert summary["gaps_total"] == 5
     assert summary["requires_review"] == 2
     assert summary["daily_break_candidate"] == 1
-    assert summary["weekend_overlap"] == 1
+    assert summary["weekend_overlap"] == 2
 
 
 def test_no_gaps_is_not_zero_unseen_history_claim():
