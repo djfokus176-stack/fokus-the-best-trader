@@ -1,3 +1,34 @@
+## 15.11.2026 — OGRANICZONY BACKFILL KAPITAL DEMO (domyślnie wyłączony)
+
+- Po audycie rzeczywistych świec US500 w Supabase (M1/M5/M15/H1) dodano
+  **opcjonalne** odzyskiwanie brakujących zamkniętych świec. 
+- W Northflank workerze można po walidacji i za zgodą właściciela ustawić
+  `FOKUS_CANDLE_BACKFILL_ENABLED=true`. **Domyślnie false**; brak nowej
+  zmiennej niczego nie uruchamia. Nigdy nie dodawaj kluczy do repozytorium.
+- Worker po regularnym cyklu może wykonać **najwyżej jedną historyczną
+  próbę na godzinę**. Stronicuje chronologiczne etykiety w Supabase, przez
+  kursor zapisany w tym samym wersjonowanym checkpointcie. Bada wyłącznie
+  krótkie podejrzane przerwy do 180 brakujących slotów; weekendy i
+  kandydaci przerw technicznych **nie** są automatycznie wypełniane.
+- Pobiera `GET /api/v1/prices/{epic}` **tylko DEMO**, z datami `from/to`,
+  sprawdza surowy BID/ASK i OHLC, przesuwa znaczniki OPEN → CLOSE dokładnie
+  raz, wpisuje tylko historyczne etykiety znajdujące się **wewnątrz** luki.
+  Nie wstawia sztucznych świec ani nie interpoluje ceny.
+- Supabase `resolution=ignore-duplicates`: istniejące historyczne OHLC
+  pozostają nienaruszone, nawet jeśli pomiędzy odczytem a insertem pojawił
+  się nowy rekord. Liczba `submitted_rows` to rekordy wysłane, **nie**
+  potwierdzona liczba nowo utworzonych rekordów.
+- Moduł nie rusza żadnej reguły AUTO, PAPER, kolejki, SL/TP ani historycznych
+  rozliczeń WAVE. Dawne unieważnione warunki nie są zmieniane na wyniki.
+  Przed produkcyjnym włączeniem sprawdź testy, konwencję etykiet czasu
+  brokera, logi Capital i projekt Supabase. Błędy tylko raportowane,
+  nigdy nie odblokowują zleceń.
+- Nie dowodzi, że wszystkie luki zostały naprawione: niektóre ceny nie
+  istnieją po stronie brokera, duże albo weekendowe przerwy wymagają
+  osobnego rozliczenia.
+
+---
+
 ## ✅ AKTUALNY STAN — 9/10 LISTOPADA 2026 (PAPER DEMO, bez zleceń brokerskich)
 
 **Źródłem prawdy jest `main`, nie archiwalne opisy v0.1/v3 niżej.**
