@@ -12,7 +12,7 @@ from trader.paper_method_labels import (
     decision_attribution,
 )
 from trader.paper_display import annotate_paper_history
-from trader.paper_audit import paper_export_table
+from trader.paper_audit import paper_export_table, paper_labeled_export_table
 from trader.cloud_paper_terminal import cloud_paper_positions
 from trader.strategy import Decision
 
@@ -64,12 +64,13 @@ def test_decision_label_is_not_position_fill():
     assert decision_attribution(AUTO_MODE,d)=="AUTO → BREAKOUT RETEST"
     assert decision_attribution("BREAKOUT RETEST",d)=="METODA: BREAKOUT RETEST"
     assert "WAIT" in decision_attribution(AUTO_MODE,Decision("WAIT","EMA TREND","brak"))
-    assert "BRAK" in decision_attribution(AUTO_MODE,Decision("LONG","MISSING","brak"))
+    assert "BEZ POTWIERDZONEJ" in decision_attribution(AUTO_MODE,Decision("LONG","MISSING","brak"))
 
 
 def test_csv_journal_preserves_method_and_auto_origin():
     rows=[pos(reason=AUTO_REASON),pos(strategy="EMA TREND",reason="manual",trade_id="def")]
-    report=paper_export_table(rows)
+    assert list(paper_export_table(rows).columns).count('opis_sygnalu')==0
+    report=paper_labeled_export_table(rows)
     assert list(report["tryb_sygnalu"])==[AUTO_MODE,"NIEUSTALONY / POJEDYNCZY"]
     assert list(report["wybrana_metoda"])==["EMA PULLBACK","EMA TREND"]
     assert list(report["opis_sygnalu"])==["AUTO → EMA PULLBACK","METODA: EMA TREND"]
