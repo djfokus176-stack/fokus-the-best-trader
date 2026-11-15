@@ -12,6 +12,7 @@ from __future__ import annotations
 from .auto_strategy import AUTO_MODE
 from .strategies_pro import ALL_STRATEGIES
 from .ema50_wave import STRATEGY_NAME as WAVE_NAME
+from .fokus_3f import NAME as THREEF_NAME
 
 RESEARCH_DISPLAY_ORDER = (
     AUTO_MODE,
@@ -22,8 +23,9 @@ RESEARCH_DISPLAY_ORDER = (
     "DRUGA FALA",
     "EMA TREND",
     WAVE_NAME,
+    THREEF_NAME,
 )
-assert set(RESEARCH_DISPLAY_ORDER) == {AUTO_MODE, *ALL_STRATEGIES, WAVE_NAME}
+assert set(RESEARCH_DISPLAY_ORDER) == {AUTO_MODE, *ALL_STRATEGIES, WAVE_NAME, THREEF_NAME}
 assert len(set(RESEARCH_DISPLAY_ORDER)) == len(RESEARCH_DISPLAY_ORDER)
 
 
