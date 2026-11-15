@@ -31,6 +31,7 @@ from .paper_daily_risk import paper_daily_risk, DEFAULT_DAILY_STOP_PTS
 from .wave_shadow_archive import advance_wave_shadow, wave_shadow_scorecard
 from .wave_ae_forward_auto import advance_wave_ae_forward, wave_ae_forward_scorecard
 from .cloud_scalp_quotes import Quote5sSampler, idle_quote_pulses
+from .paper_method_labels import decision_attribution, method_attribution
 
 
 def scan_once(client,epic,tf,strategy,max_spread,db, *,
@@ -194,8 +195,15 @@ def scan_once(client,epic,tf,strategy,max_spread,db, *,
         dispatch_alerts(db,telegram_token,telegram_chat_id,enabled=True)
     active=active_position(db,epic,main.source,tf)
     state=active["status"] if active else "NONE"
+    # The current candidate may DIFFER from a position opened earlier.
+    # Keep these two labels distinct to avoid false AUTO attribution.
+    candidate_method=decision_attribution(strategy,verdict)
+    active_method=(method_attribution(dict(active))["label"]
+                   if active else "BRAK")
     return (f"{main.confirmed_utc.isoformat()} / {verdict.action} / "
+            f"CANDIDATE_METHOD={candidate_method} / "
             f"QUEUE={'YES' if queued else 'NO'} / ACTIVE={state} / "
+            f"ACTIVE_METHOD={active_method} / "
             f"EVENTS={','.join(transitions) or '-'} / CANDLES={archived} / "
             f"GATES={','.join(reasons) or 'OK'} / "
             f"DIAGNOSTICS={' | '.join(diagnostics)[:700] or '-'} / "

@@ -1,6 +1,8 @@
 """Clearly distinguish a real OPEN paper position from historical setups."""
 from __future__ import annotations
 
+from .paper_method_labels import method_attribution
+
 def annotate_open_paper(fig, position):
     """OPEN only: draw separate MID reference and modeled executable fill."""
     if not position or position.get("status")!="OPEN":
@@ -47,14 +49,19 @@ def annotate_paper_history(fig, positions, epic, source, timeframe, max_rows=80)
     }
     events={key:{"x":[],"y":[],"text":[]} for key in groups}
     for pos in list(positions or [])[:max_rows]:
-        if any(pos.get(k)!=v for k,v in
-               (("epic",epic),("source",source),("timeframe",timeframe))):
+        # timeframe=None is used ONLY by the read-only CLOUD M15 overview:
+        # it marks actual M1/M5/M15/H1 PAPER positions on a M15 time axis.
+        # All existing per-TF charts still restrict their markers exactly.
+        if (pos.get("epic")!=epic or pos.get("source")!=source or
+                (timeframe is not None and pos.get("timeframe")!=timeframe)):
             continue
         side=pos.get("side")
         if side not in ("LONG","SHORT"):
             continue
         trade_id=escape(str(pos.get("trade_id","BRAK ID")))
-        strategy=escape(str(pos.get("strategy","NIEZNANA")))
+        attribution=method_attribution(pos)
+        strategy=escape(attribution["label"])
+        pos_tf=escape(str(pos.get("timeframe","BRAK")))
         if pos.get("opened_utc") and pos.get("entry_mid") is not None:
             try:
                 when=pd.Timestamp(pos["opened_utc"])
@@ -66,7 +73,8 @@ def annotate_paper_history(fig, positions, epic, source, timeframe, max_rows=80)
                 group["x"].append(when)
                 group["y"].append(price)
                 group["text"].append(
-                    f"OTWARCIE PAPER {side}<br>Strategia: {strategy}"
+                    f"OTWARCIE PAPER {side}<br>Wybrana strategia: {strategy}"
+                    f"<br>Interwał pozycji: {pos_tf}"
                     f"<br>ID: {trade_id}<br>Świeca UTC: {when}"
                     f"<br>Wejście MID: {price:.2f}<br>"
                     "Odtworzone z zamkniętej świecy, nie zlecenie brokera")
@@ -90,7 +98,8 @@ def annotate_paper_history(fig, positions, epic, source, timeframe, max_rows=80)
         group["y"].append(price)
         result=(f"{pnl:+.2f} pkt" if pnl is not None else "BRAK P&L")
         group["text"].append(
-            f"ZAMKNIĘCIE PAPER {side}<br>Strategia: {strategy}"
+            f"ZAMKNIĘCIE PAPER {side}<br>Wybrana strategia: {strategy}"
+            f"<br>Interwał pozycji: {pos_tf}"
             f"<br>ID: {trade_id}<br>Status: {escape(status)}"
             f"<br>Wynik po kosztach: {result}<br>"
             f"Świeca UTC: {when}<br>Wyjście MID: {price:.2f}")

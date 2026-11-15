@@ -57,7 +57,9 @@ from trader.paper_lifecycle import (
 from trader.paper_display import annotate_open_paper,annotate_paper_history
 from trader.paper_sounds import new_paper_events,wav_notice,SOUND_EVENTS,alert_audio
 from trader.paper_reporting import daily_weekly,performance_by_policy
-from trader.paper_audit import paper_export_table, paper_strategy_audit
+from trader.paper_audit import paper_labeled_export_table, paper_strategy_audit
+from trader.paper_method_labels import (RESEARCH_DISPLAY_ORDER, display_choice,
+    decision_attribution, method_attribution)
 from trader.paper_daily_risk import paper_daily_risk, DEFAULT_DAILY_STOP_PTS
 from trader.paper_learning import strategy_scorecard
 from trader.forecast_audit import forecast_metrics
@@ -300,8 +302,12 @@ with st.sidebar:
             st.session_state.pop(k, None)
     st.session_state['_prev_capital_env'] = capital_env
     tf=st.selectbox('Interwał',['MINUTE','MINUTE_5','MINUTE_15','HOUR'],format_func=lambda x:{'MINUTE':'M1','MINUTE_5':'M5','MINUTE_15':'M15','HOUR':'H1'}[x])
-    strategy=st.selectbox('Tryb analizy / strategia', (AUTO_MODE,)+ALL_STRATEGIES+(WAVE_NAME,), index=0,
+    strategy=st.selectbox('Tryb analizy / strategia', RESEARCH_DISPLAY_ORDER,
+        format_func=display_choice, index=0,
         help='AUTO PAPER: już jedna zaakceptowana strategia może wystarczyć po MTF. Konflikt LONG/SHORT = WAIT, podobnie jak brak świec, kalendarza, zbyt duży spread czy inne blokady. Wyłącznie symulacja.')
+    st.caption('Kolejność 1–8 jest priorytetem BADAWCZYM w menu, nie dowodem '
+               'skuteczności ani zmianą sposobu wyboru AUTO. Nowe metody z '
+               'historii pięcioletniej są badane osobno.')
     if strategy==AUTO_MODE:
         st.caption('🧪 AUTO PAPER: 6 strategii, już 1 po MTF może wystarczyć. Konflikt LONG/SHORT = WAIT. Wszystkie blokady danych, ryzyka, zegara i kalendarza pozostają. Brak realnych zleceń.')
     elif strategy==WAVE_NAME:
@@ -1285,14 +1291,18 @@ with market_tab:
                             decision=dataclass_replace(decision,action='WAIT',entry=None,
                                 stop=None,target=None,rr=None,reason=note)
                 if not ready: decision.action='WAIT';decision.reason='Brak zweryfikowanego, świeżego feedu LIVE/DEMO — tylko analiza historyczna'
-                banner=f"{decision.action} | {strategy} | {decision.reason}"
+                selected_label=decision_attribution(strategy,decision)
+                banner=f"{decision.action} | {selected_label} | {decision.reason}"
                 if decision.action=='LONG':
                     signal_banner.success('🟢 BIEŻĄCA OCENA PAPER: '+banner)
                 elif decision.action=='SHORT':
                     signal_banner.error('🔴 BIEŻĄCA OCENA PAPER: '+banner)
                 else:
                     signal_banner.warning('🟡 BIEŻĄCA OCENA: '+banner)
-                st.markdown(f'### {"🟢" if decision.action=="LONG" else "🔴" if decision.action=="SHORT" else "🟡"} {decision.action} — {strategy}')
+                st.markdown(f'### {"🟢" if decision.action=="LONG" else "🔴" if decision.action=="SHORT" else "🟡"} {decision.action} — {selected_label}')
+                if decision.action in ('LONG','SHORT'):
+                    st.caption('To KANDYDAT z analizy świec, a nie potwierdzony PAPER OPEN. '
+                               'Nazwa metody pochodzi z bieżącej zatwierdzonej decyzji.')
                 st.write(f'**Powód:** {decision.reason} | **Trend:** {decision.bias} | **ATR:** {decision.atr:.2f}' if decision.atr is not None else f'**Powód:** {decision.reason} | **Trend:** {decision.bias} | **ATR:** BRAK')
                 if dna is not None:
                     st.info(f'🧬 MARKET DNA (kontekst badawczy): {dna.structure} / {dna.regime} / {dna.event}. To NIE zmienia aktualnej decyzji strategii.')
@@ -1415,8 +1425,9 @@ with market_tab:
                         with st.expander('📋 DZIENNIK WEJŚĆ I WYJŚĆ PAPER — GODZINA / PUNKTY'):
                             # The old compact table silently dropped strategy
                             # and trade_id: both are essential for attribution.
-                            journal=paper_export_table(paper_rows)
-                            focus=['trade_id','strategy','setup_utc',
+                            journal=paper_labeled_export_table(paper_rows)
+                            focus=['trade_id','tryb_sygnalu','wybrana_metoda',
+                           'opis_sygnalu','strategy','setup_utc',
                                    'entry_assumed_utc','opened_utc','closed_utc',
                                    'side','status','entry_mid','stop_mid',
                                    'target_mid','exit_mid','pnl_pts',
@@ -1492,7 +1503,8 @@ with market_tab:
                         '. Zmiany stopa obowiązują od następnej świecy, nie wstecz.')
                     st.info(
                         f"Status: **{current_paper['status']}** | {current_paper['side']} "
-                        f"| {current_paper['strategy']} | ID: {current_paper['trade_id'][:10]} "
+                        f"| {method_attribution(current_paper)['label']} "
+                        f"| ID: {current_paper['trade_id'][:10]} "
                         f"| SL MID {current_paper['stop_mid']:.2f} | TP MID {current_paper['target_mid']:.2f}. "
                         +('Wejście dopiero po następnej ZAMKNIĘTEJ świecy — nie było jeszcze wykonania.'
                           if current_paper['status']=='PENDING'

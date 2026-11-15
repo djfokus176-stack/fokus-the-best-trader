@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+from .paper_method_labels import method_attribution
+
 FINISHED = ("CLOSED_SL","CLOSED_TP","CLOSED_TIMEOUT")
 EXPORT_COLUMNS = (
     "trade_id","strategy","epic","source","timeframe","setup_utc",
@@ -25,6 +27,20 @@ def paper_export_table(positions: list[dict]) -> pd.DataFrame:
     frame=pd.DataFrame(positions or [])
     return pd.DataFrame({c:frame[c] if c in frame else pd.Series(dtype=object)
                          for c in EXPORT_COLUMNS}).reindex(columns=EXPORT_COLUMNS)
+
+
+def paper_labeled_export_table(positions: list[dict]) -> pd.DataFrame:
+    """Owner-facing journal with computed attribution, no ledger changes.
+
+    The original paper_export_table schema stays EXACTLY unchanged for
+    existing consumers; extra columns are opt-in for the dashboard.
+    """
+    result=paper_export_table(positions)
+    attrs=[method_attribution(pos) for pos in (positions or [])]
+    result["tryb_sygnalu"]=[a["mode"] for a in attrs]
+    result["wybrana_metoda"]=[a["method"] for a in attrs]
+    result["opis_sygnalu"]=[a["label"] for a in attrs]
+    return result
 
 
 def paper_strategy_audit(positions: list[dict]) -> tuple[pd.DataFrame,dict]:
