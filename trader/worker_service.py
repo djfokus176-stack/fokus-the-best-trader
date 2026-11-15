@@ -15,6 +15,14 @@ def validated_worker_args(environ=None):
     env=os.environ if environ is None else environ
     if str(env.get("FOKUS_PAPER_WORKER_ENABLED","")).lower()!="true":
         raise ValueError("FOKUS_PAPER_WORKER_ENABLED must be true (opt-in).")
+    # A cloud host must NEVER run when the owner has explicitly assigned
+    # the sole checkpoint-writing role to GitHub Actions. Old deployments
+    # lacking this setting retain the host as authoritative by default.
+    executor=str(env.get("FOKUS_PAPER_EXECUTOR","northflank")).strip().lower()
+    if executor!="northflank":
+        raise ValueError(
+            "Dedicated host requires FOKUS_PAPER_EXECUTOR=northflank; "
+            "stop the other writer before changing executor.")
     if str(env.get("FOKUS_CANDLE_TIME_CONFIRMED","")).lower()!="open":
         raise ValueError("FOKUS_CANDLE_TIME_CONFIRMED must be open (verified).")
     # Durable state is a requirement for a background container.
