@@ -81,6 +81,7 @@ from trader.wave_ae_forward_ui import render_wave_ae_forward_status
 from trader.research_readiness_ui import render_research_readiness
 from trader.cloud_wave_ae_ui import render_cloud_wave_ae_replay
 from trader.cloud_gap_ui import render_cloud_gap_audit
+from trader.cloud_paper_terminal import render_cloud_terminal
 from trader.feed_audit import inspect_labels,compare_clock_observations
 
 st.set_page_config(page_title='FOKU$ THE BEST TRADER',page_icon='📈',layout='wide')
@@ -314,8 +315,23 @@ with st.sidebar:
               help='Wskazania na zamkniętych M1. Puste kółka, nie strzałki PAPER. Nie otwierają transakcji ani nie omijają filtra MTF, BLS i workera.')
     st.caption('Każda strategia jest HIPOTEZĄ PAPER, nie potwierdzonym systemem zarobkowym.')
     max_spread=st.slider('Maksymalny spread (pkt)',.2,5.0,2.0,.1)
-    st.toggle('🔄 AUTO-SKAN — tylko gdy aplikacja otwarta',value=_early_secret('AUTO_SCAN_DEFAULT','true').lower() in ('true','1','yes'),key='auto_scan_active',
-        help='Ocenia zamknięte świece co najmniej co 60 sekund. Nie jest usługą działającą 24/7.')
+    # With the dedicated Northflank worker, Streamlit is a READ-ONLY
+    # monitor by default. Its own Capital credentials are separate and
+    # are NOT required to display Supabase data.
+    cloud_read_only_mode=remote_paper_view_enabled()
+    if cloud_read_only_mode:
+        st.session_state['auto_scan_active']=False
+    st.toggle('🔄 AUTO-SKAN — tylko gdy aplikacja otwarta',
+        value=(False if cloud_read_only_mode else
+               _early_secret('AUTO_SCAN_DEFAULT','true').lower() in ('true','1','yes')),
+        disabled=cloud_read_only_mode,key='auto_scan_active',
+        help='Automatyczne lokalne skanowanie jest wyłączone gdy Supabase '
+             'i Northflank obsługują PAPER w chmurze. Nie wymaga wpisywania '
+             'Capital.com w przeglądarce.')
+    if cloud_read_only_mode:
+        st.caption('☁️ TRYB CLOUD: Northflank skanuje osobno. '
+                   'AUTO-SKAN w przeglądarce jest wyłączony, by nie '
+                   'tworzyć zbędnego HTTP 401 i dodatkowych sesji brokera.')
     st.selectbox('⚡ Odświeżanie bieżącej ceny na wykresie',
         options=(5,15,30,60,120,300),index=0,
         format_func=lambda secs: f'co {secs} sekund' if secs < 60 else f'co {secs // 60} min',
@@ -553,8 +569,22 @@ with market_tab:
                 st.session_state.pop('_paper_remote_read_cache',None)
                 st.session_state['_last_browser_worker_result']=outcome
                 return outcome
+            # A competing browser writer can collide with the one
+            # authoritative 24/7 Northflank worker. Explicit opt-in
+            # is required for owners who intentionally switch workers.
+            allow_browser_paper=secret('FOKUS_ALLOW_BROWSER_PAPER_SCAN','false').lower() in (
+                'true','1','yes','on')
+            if not allow_browser_paper:
+                st.session_state['_owner_browser_paper_auto']=False
+                st.info('☁️ Działa osobny worker Northflank. '
+                        'Skan PAPER w przeglądarce jest domyślnie '
+                        'WYŁĄCZONY, aby uniknąć dwóch procesów '
+                        'zapisujących ten sam checkpoint Supabase. '
+                        'Nie wpisuj tutaj ponownie loginu Capital.com.')
             manual=st.button('▶ URUCHOM SKAN PAPER TERAZ (DEMO)',key='owner_one_cloud_scan',
-                             use_container_width=True,disabled=not has_cap or capital_env!='DEMO')
+                             use_container_width=True,disabled=(
+                                 not allow_browser_paper or not has_cap
+                                 or capital_env!='DEMO'))
             if manual:
                 try:
                     with st.spinner('Pobieram M1/M5/M15/H1, sprawdzam BLS i zapisuję Supabase...'):
@@ -563,7 +593,7 @@ with market_tab:
                     st.session_state['_last_browser_worker_error']=type(exc).__name__+': '+str(exc)[:150]
             st.toggle('🔄 AUTO PAPER CO OK. MINUTĘ — tylko przy otwartej karcie',
                       key='_owner_browser_paper_auto',value=False,
-                      disabled=not has_cap or capital_env!='DEMO',
+                      disabled=(not allow_browser_paper or not has_cap or capital_env!='DEMO'),
                       help='Nie działa po zamknięciu karty, uśpieniu PC ani wstrzymaniu Streamlit Cloud. '
                            'Przed włączeniem wyłącz inny worker zapisujący to samo Supabase.')
             @st.fragment(run_every="65s")
@@ -628,10 +658,12 @@ with market_tab:
         else:
             st.info('⚪ TRYB RĘCZNY — nowe świece wymagają ponownego skanowania.')
     with col2:
+        if remote_paper_view_enabled():
+            render_cloud_terminal(secret)
         st.markdown('#### 🎯 FOKU$ MARKET TERMINAL')
         st.caption('Świece MID • EMA9/21/50 • SL/TP PAPER • potwierdzenie 4 interwałów • analiza bez zleceń')
         st.info('Dane wykresu i silnika są wspólne. GPT czyta dane liczbowe, a nie obraz wykresu.')
-    auto_scan = bool(has_cap and csv is None and not st.session_state.get('initial_scan_attempted') and st.session_state.get('market_snap') is None)
+    auto_scan = bool(not remote_paper_view_enabled() and has_cap and csv is None and not st.session_state.get('initial_scan_attempted') and st.session_state.get('market_snap') is None)
     if auto_scan:
         st.session_state['initial_scan_attempted'] = True
         st.info(f'🔄 Pierwsza próba pobrania świec z Capital.com {capital_env}...')
