@@ -240,6 +240,7 @@ def paper_view_db():
         st.session_state['_paper_remote_shadow_report']=payload.get('shadow_learning_report') or {}
         st.session_state['_paper_remote_wave_state']=payload.get('wave_shadow') or {}
         st.session_state['_paper_remote_wave_report']=payload.get('wave_shadow_report') or {}
+        st.session_state['_paper_remote_candle_backfill']=payload.get('candle_backfill') or {}
         return db
     return connect()
 
@@ -870,6 +871,21 @@ with market_tab:
                 st.caption('Potwierdzenie zegara świec workera jest osobne '
                            'od udanej sesji Capital.com.')
                 meta=st.session_state.get('_paper_remote_meta') or {}
+                repair=st.session_state.get('_paper_remote_candle_backfill') or {}
+                if meta.get('candle_backfill_enabled'):
+                    st.caption(
+                        '🧩 BACKFILL ARCHIWUM (tryb ograniczony): '
+                        +str(repair.get('status','BRAK WYNIKU'))
+                        +' | TF: '+str(repair.get('timeframe','BRAK'))
+                        +' | wysłane rekordy (nie potwierdza INSERT): '
+                        +str(repair.get('submitted_rows',0))
+                        +' | ostatnia próba UTC: '
+                        +str(repair.get('last_attempt_utc','BRAK')))
+                else:
+                    st.caption('🧩 BACKFILL ARCHIWUM: WYŁĄCZONY — '
+                               'wymaga świadomej aktywacji na workerze, '
+                               'nie wpływa na AUTO/PAPER.')
+
                 if remote_paper_view_enabled():
                     if meta:
                         st.write('Ostatni skan zdalnego workera:',
