@@ -38,7 +38,25 @@ def _whitelist(row):
           "entry_mid","entry_executable","execution","exit_utc",
           "exit_mid","exit_executable","bars_held","status","pnl_pts",
           "r_net")
-    return {key:row.get(key) for key in keys if row.get(key) is not None}
+    safe={}
+    for key in keys:
+        val=row.get(key)
+        if val is None:
+            continue
+        # DataFrame conversion may create NaN/NaT for absent fields on
+        # pending records. Supabase checkpoint save uses allow_nan=False:
+        # never let one research row break mandatory PAPER accounting.
+        try:
+            if bool(pd.isna(val)):
+                continue
+        except (TypeError,ValueError):
+            continue
+        if hasattr(val,"item"):
+            val=val.item()
+        if isinstance(val,pd.Timestamp):
+            val=val.isoformat()
+        safe[key]=val
+    return safe
 
 
 def advance_3f_forward(state,frame,*,epic="US500",source=SOURCE):
