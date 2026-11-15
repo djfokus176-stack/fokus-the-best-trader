@@ -29,6 +29,7 @@ from .strategy_progress import progress_for_votes
 from .shadow_learning import advance_shadow, shadow_scorecard
 from .paper_daily_risk import paper_daily_risk, DEFAULT_DAILY_STOP_PTS
 from .wave_shadow_archive import advance_wave_shadow, wave_shadow_scorecard
+from .wave_ae_forward_auto import advance_wave_ae_forward, wave_ae_forward_scorecard
 
 
 def scan_once(client,epic,tf,strategy,max_spread,db, *,
@@ -225,11 +226,16 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
     vote_audit=payload.get("last_vote_audit") or {}
     shadow_state=payload.get("shadow_per_strategy") or {}
     wave_state=payload.get("wave_shadow") or {}
+    ae_state=payload.get("wave_ae_forward") or {}
+    ae_status=(str(ae_state.get("status","NO_NEW_M15")) if ae_state
+               else "NOT_YET_PRIMED")
     backfill_state=payload.get("candle_backfill") or {}
     backfill_enabled=(os.getenv("FOKUS_CANDLE_BACKFILL_ENABLED","false")
                       .strip().lower() in ("true","1","yes","on"))
 
     wave_enabled=os.getenv("FOKUS_WAVE_SHADOW_ENABLED","true").strip().lower() in ("true","1","yes","on")
+    # Research-only; does not touch AUTO, PAPER or execute broker orders.
+    ae_enabled=os.getenv("FOKUS_WAVE_AE_AUTO_ENABLED","true").strip().lower() in ("true","1","yes","on")
     # A closed market skips the M15 audit but does not disable an already
     # saved WAVE archive. Never call this situation NOT_CONFIGURED.
     wave_status=("DISABLED" if not wave_enabled else
@@ -334,7 +340,7 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
                                       blockers,news_context=news_feed,
                                       macro_context=macro_watch)
     def archive_wave_m15(snapshot):
-        nonlocal wave_state,wave_status
+        nonlocal wave_state,wave_status,ae_state,ae_status
         if os.getenv("FOKUS_WAVE_SHADOW_ENABLED","true").strip().lower() not in (
                 "true","1","yes","on"):
             wave_status="DISABLED"
@@ -344,6 +350,17 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             return wave_status
         wave_state=advance_wave_shadow(
             wave_state,snapshot.frame,epic=epic,source=snapshot.source)
+        if ae_enabled:
+            try:
+                ae_state=advance_wave_ae_forward(
+                    ae_state,snapshot.frame,epic=epic,source=snapshot.source)
+                ae_status=str(ae_state.get("status","UNKNOWN"))
+            except (ValueError,TypeError,KeyError,OverflowError,
+                    IndexError,RuntimeError) as exc:
+                # Fail closed for research without blocking PAPER accounting.
+                ae_status="ERROR_"+type(exc).__name__
+        else:
+            ae_status="DISABLED"
         wave_status=("OK_M15_"+str(wave_state["last_closed_utc"])[:19]+
                      "_N="+str(wave_state["events_retained"]))
         return wave_status
@@ -394,8 +411,12 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
         payload["shadow_per_strategy"]=shadow_state
         if wave_state:
             payload["wave_shadow"]=wave_state
-            # Compact descriptive summary, never used to authorize trading.
+            # WAVE SHADOW must persist even on market closure, before
+            # the new A-E module has been primed.
             payload["wave_shadow_report"]=wave_shadow_scorecard(wave_state)
+        if ae_state:
+            payload["wave_ae_forward"]=ae_state
+            payload["wave_ae_forward_report"]=wave_ae_forward_scorecard(ae_state)
         latest_shadow_report=shadow_scorecard(shadow_state)
         payload["shadow_learning_report"]=latest_shadow_report
         payload["meta"]={
@@ -409,6 +430,10 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
                                             "true").strip().lower() in ("true","1","yes","on"),
             "wave_shadow_last_m15":wave_state.get("last_closed_utc"),
             "wave_shadow_forward_events":wave_state.get("events_forward",0),
+            "wave_ae_auto_enabled":bool(ae_enabled),
+            "wave_ae_status":ae_status,
+            "wave_ae_forward_events":len(ae_state.get("events") or []),
+            "wave_ae_last_m15":ae_state.get("last_closed_utc"),
             # Nonsecret PAPER simulation threshold for the owner's read-only
             # terminal; the worker alone decides whether entries are paused.
             "paper_daily_stop_pts":os.getenv(

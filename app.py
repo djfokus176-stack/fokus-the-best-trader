@@ -77,6 +77,7 @@ from trader.wave_ui import render_wave_reversal_research
 from trader.wave_intelligence2_ui import render_wave_intelligence2
 from trader.wave_fiveyear_ui import render_wave_fiveyear_report
 from trader.wave_forward_ui import render_wave_forward_comparison
+from trader.wave_ae_forward_ui import render_wave_ae_forward_status
 from trader.research_readiness_ui import render_research_readiness
 from trader.cloud_wave_ae_ui import render_cloud_wave_ae_replay
 from trader.cloud_gap_ui import render_cloud_gap_audit
@@ -242,6 +243,8 @@ def paper_view_db():
         st.session_state['_paper_remote_learning']=payload.get('learning_report') or {}
         st.session_state['_paper_remote_shadow_report']=payload.get('shadow_learning_report') or {}
         st.session_state['_paper_remote_wave_state']=payload.get('wave_shadow') or {}
+        st.session_state['_paper_remote_wave_ae_state']=payload.get('wave_ae_forward') or {}
+        st.session_state['_paper_remote_wave_ae_report']=payload.get('wave_ae_forward_report') or {}
         st.session_state['_paper_remote_wave_report']=payload.get('wave_shadow_report') or {}
         st.session_state['_paper_remote_candle_backfill']=payload.get('candle_backfill') or {}
         return db
@@ -2162,6 +2165,10 @@ with reports_tab:
                     meta,
                     st.session_state.get('_paper_remote_wave_state') or {},
                     st.session_state.get('_paper_remote_candle_backfill') or {})
+                render_wave_ae_forward_status(
+                    st.session_state.get('_paper_remote_wave_ae_state') or {},
+                    st.session_state.get('_paper_remote_wave_ae_report') or {},
+                    meta)
                 with st.expander('🌊 WAVE SHADOW — ZAPIS PO KAŻDEJ M15 (BEZ HANDLU)',expanded=False):
                     state=st.session_state.get('_paper_remote_wave_state') or {}
                     report=st.session_state.get('_paper_remote_wave_report') or {}
