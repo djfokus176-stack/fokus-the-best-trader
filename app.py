@@ -76,6 +76,7 @@ from trader.exit_grid import compare_same_entries
 from trader.wave_ui import render_wave_reversal_research
 from trader.wave_intelligence2_ui import render_wave_intelligence2
 from trader.wave_fiveyear_ui import render_wave_fiveyear_report
+from trader.wave_forward_ui import render_wave_forward_comparison
 from trader.cloud_gap_ui import render_cloud_gap_audit
 from trader.feed_audit import inspect_labels,compare_clock_observations
 
@@ -2198,6 +2199,7 @@ with reports_tab:
                                    'prawdopodobieństwo ani nowe decyzje AUTO. '
                                    'Początkowy BACKFILL pozostaje odróżniony '
                                    'od przyszłych zdarzeń FORWARD.')
+                        render_wave_forward_comparison(state)
                         observations=state.get('events') or []
                         if observations:
                             audit_rows=[{
