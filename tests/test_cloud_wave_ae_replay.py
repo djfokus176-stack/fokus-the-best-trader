@@ -22,7 +22,7 @@ def test_capital_replay_uses_existing_engine_without_trading():
     assert set(result["summary"].variant)=={
         "A_RAW","B_BOS","C_BOS_RETEST","D_BREAKOUT_HOLD","E_WAIT"}
     assert len(result["summary"])==20  # 2 periods x 2 directions x A–E
-    assert result["summary"]["year"].isna().all() is True
+    assert result["summary"]["year"].isna().all()
     assert result["summary"].loc[
         result["summary"].variant=="E_WAIT","net_pts"].isna().all()
     assert frame.equals(before)
