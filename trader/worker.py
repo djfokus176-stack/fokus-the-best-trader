@@ -225,7 +225,11 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
     vote_audit=payload.get("last_vote_audit") or {}
     shadow_state=payload.get("shadow_per_strategy") or {}
     wave_state=payload.get("wave_shadow") or {}
-    wave_status="NOT_CONFIGURED"
+    wave_enabled=os.getenv("FOKUS_WAVE_SHADOW_ENABLED","true").strip().lower() in ("true","1","yes","on")
+    # A closed market skips the M15 audit but does not disable an already
+    # saved WAVE archive. Never call this situation NOT_CONFIGURED.
+    wave_status=("DISABLED" if not wave_enabled else
+                 "NO_NEW_M15" if wave_state else "NOT_YET_OBSERVED")
     # Selection uses outcomes completed PRIOR to the current decision.
     previous_shadow_report=shadow_scorecard(shadow_state)
     news_feed=dict(payload.get("news_radar") or {})

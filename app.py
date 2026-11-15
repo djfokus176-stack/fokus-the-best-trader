@@ -2154,6 +2154,28 @@ with reports_tab:
                             str(report.get('forward_events',0))+
                             '**; rozliczone warunki ruchu: **'+
                             str(report.get('resolved_conditions',0))+'**.')
+                        if 'invalidated_conditions' in report:
+                            st.caption(
+                                'Audyt warunków (nie są to niezależne transakcje): '
+                                f"ROZLICZONE {report.get('resolved_conditions',0)} | "
+                                f"UNIEWAŻNIONE {report.get('invalidated_conditions',0)} | "
+                                f"OCZEKUJĄCE {report.get('pending_conditions',0)}."
+                            )
+                            invalid_reasons=report.get('invalidated_by_reason') or {}
+                            if invalid_reasons:
+                                st.caption('Przyczyny unieważnienia: '+
+                                           ', '.join(f'{k}: {v}' for k,v in
+                                                     sorted(invalid_reasons.items())))
+                            cohorts=report.get('by_origin_side') or {}
+                            if cohorts:
+                                cohort_rows=[{'Grupa':key,
+                                              'Formacje':val.get('events',0),
+                                              'Rozliczone':val.get('resolved_conditions',0),
+                                              'Unieważnione':val.get('invalidated_conditions',0),
+                                              'Oczekujące':val.get('pending_conditions',0)}
+                                             for key,val in sorted(cohorts.items())]
+                                st.dataframe(pd.DataFrame(cohort_rows),
+                                             use_container_width=True,hide_index=True)
                         st.warning('To badanie, NIE niezależnie skalibrowane '
                                    'prawdopodobieństwo ani nowe decyzje AUTO. '
                                    'Początkowy BACKFILL pozostaje odróżniony '
@@ -2168,9 +2190,16 @@ with reports_tab:
                                 'Fale':e.get('wave_count'),
                                 'Formacja':e.get('pattern'),
                                 'Potwierdzenie':e.get('confirmation'),
-                                'Rozliczone horyzonty':sum(
+                                'Rozliczone warunki':sum(
                                     v.get('status')=='CLOSED' for v in
                                     (e.get('outcomes') or {}).values()),
+                                'Unieważnione warunki':sum(
+                                    str(v.get('status','')).startswith('INVALIDATED_')
+                                    for v in (e.get('outcomes') or {}).values()),
+                                'Oczekujące warunki':9-sum(
+                                    v.get('status')=='CLOSED' or
+                                    str(v.get('status','')).startswith('INVALIDATED_')
+                                    for v in (e.get('outcomes') or {}).values()),
                                 'Id':e.get('event_id'),
                             } for e in observations]
                             st.dataframe(pd.DataFrame(audit_rows[-80:]),
