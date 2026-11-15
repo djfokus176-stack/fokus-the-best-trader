@@ -77,6 +77,7 @@ from trader.wave_ui import render_wave_reversal_research
 from trader.wave_intelligence2_ui import render_wave_intelligence2
 from trader.wave_fiveyear_ui import render_wave_fiveyear_report
 from trader.wave_forward_ui import render_wave_forward_comparison
+from trader.research_readiness_ui import render_research_readiness
 from trader.cloud_wave_ae_ui import render_cloud_wave_ae_replay
 from trader.cloud_gap_ui import render_cloud_gap_audit
 from trader.feed_audit import inspect_labels,compare_clock_observations
@@ -2157,6 +2158,10 @@ with reports_tab:
                         st.warning("Nieznany format czasu ostatniego skanu workera.")
                 else:
                     st.warning("Brak potwierdzonego skanu workera w chmurze. Cloud jest skonfigurowany, ale skaner mógł jeszcze nigdy nie wystartować.")
+                render_research_readiness(
+                    meta,
+                    st.session_state.get('_paper_remote_wave_state') or {},
+                    st.session_state.get('_paper_remote_candle_backfill') or {})
                 with st.expander('🌊 WAVE SHADOW — ZAPIS PO KAŻDEJ M15 (BEZ HANDLU)',expanded=False):
                     state=st.session_state.get('_paper_remote_wave_state') or {}
                     report=st.session_state.get('_paper_remote_wave_report') or {}
