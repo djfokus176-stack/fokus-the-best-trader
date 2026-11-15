@@ -32,6 +32,7 @@ from .wave_shadow_archive import advance_wave_shadow, wave_shadow_scorecard
 from .wave_ae_forward_auto import advance_wave_ae_forward, wave_ae_forward_scorecard
 from .cloud_scalp_quotes import Quote5sSampler, idle_quote_pulses
 from .paper_method_labels import decision_attribution, method_attribution
+from .fokus_3f_forward import advance_3f_forward, forward_3f_scorecard
 
 
 def scan_once(client,epic,tf,strategy,max_spread,db, *,
@@ -236,6 +237,11 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
     shadow_state=payload.get("shadow_per_strategy") or {}
     wave_state=payload.get("wave_shadow") or {}
     ae_state=payload.get("wave_ae_forward") or {}
+    threef_state=payload.get("fokus_3f_forward") or {}
+    threef_enabled=os.getenv("FOKUS_3F_SHADOW_ENABLED","true").strip().lower() in ("true","1","yes","on")
+    threef_status=("NOT_YET_PRIMED" if threef_enabled and not threef_state else
+                   "DISABLED" if not threef_enabled else
+                   str(threef_state.get("status","UNKNOWN")))
     ae_status=(str(ae_state.get("status","NO_NEW_M15")) if ae_state
                else "NOT_YET_PRIMED")
     backfill_state=payload.get("candle_backfill") or {}
@@ -350,6 +356,21 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
                                       macro_context=macro_watch)
     def archive_wave_m15(snapshot):
         nonlocal wave_state,wave_status,ae_state,ae_status
+        nonlocal threef_state,threef_status
+        # Independent RESEARCH only. No PAPER queue and no AUTO votes.
+        if not threef_enabled:
+            threef_status="DISABLED"
+        elif not clock_confirmed_open:
+            threef_status="CLOCK_UNVERIFIED"
+        else:
+            try:
+                threef_state=advance_3f_forward(
+                    threef_state,snapshot.frame,epic=epic,source=snapshot.source)
+                threef_status=str(threef_state.get("status","UNKNOWN"))
+            except (ValueError,TypeError,KeyError,OverflowError,
+                    IndexError,RuntimeError) as exc:
+                # Shadow cannot block account/PAPER updates or leak secrets.
+                threef_status="ERROR_"+type(exc).__name__
         if os.getenv("FOKUS_WAVE_SHADOW_ENABLED","true").strip().lower() not in (
                 "true","1","yes","on"):
             wave_status="DISABLED"
@@ -426,6 +447,9 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
         if ae_state:
             payload["wave_ae_forward"]=ae_state
             payload["wave_ae_forward_report"]=wave_ae_forward_scorecard(ae_state)
+        if threef_state:
+            payload["fokus_3f_forward"]=threef_state
+            payload["fokus_3f_forward_report"]=forward_3f_scorecard(threef_state)
         latest_shadow_report=shadow_scorecard(shadow_state)
         payload["shadow_learning_report"]=latest_shadow_report
         payload["meta"]={
@@ -443,6 +467,11 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             "wave_ae_status":ae_status,
             "wave_ae_forward_events":len(ae_state.get("events") or []),
             "wave_ae_last_m15":ae_state.get("last_closed_utc"),
+            "fokus_3f_enabled":bool(threef_enabled),
+            "fokus_3f_status":threef_status,
+            "fokus_3f_last_m15":threef_state.get("last_closed_utc"),
+            "fokus_3f_forward_events":len(threef_state.get("events") or []),
+            "fokus_3f_trade_permission":"WAIT",
             # Nonsecret PAPER simulation threshold for the owner's read-only
             # terminal; the worker alone decides whether entries are paused.
             "paper_daily_stop_pts":os.getenv(

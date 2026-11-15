@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from trader.market import CapitalReadOnly, FeedError, evaluate_snapshot, PERIOD
-from trader.strategy import indicators, backtest
+from trader.strategy import indicators, backtest, Decision
 from trader.strategies_pro import decide_any, ALL_STRATEGIES
 from trader.strategies_pro import research_decide_any as research_guard_decide_any
 from trader.ema50_wave import STRATEGY_NAME as WAVE_NAME
@@ -60,6 +60,8 @@ from trader.paper_reporting import daily_weekly,performance_by_policy
 from trader.paper_audit import paper_labeled_export_table, paper_strategy_audit
 from trader.paper_method_labels import (RESEARCH_DISPLAY_ORDER, display_choice,
     decision_attribution, method_attribution)
+from trader.fokus_3f import NAME as THREEF_NAME
+from trader.fokus_3f_ui import render_fokus_3f_research
 from trader.paper_daily_risk import paper_daily_risk, DEFAULT_DAILY_STOP_PTS
 from trader.paper_learning import strategy_scorecard
 from trader.forecast_audit import forecast_metrics
@@ -305,11 +307,15 @@ with st.sidebar:
     strategy=st.selectbox('Tryb analizy / strategia', RESEARCH_DISPLAY_ORDER,
         format_func=display_choice, index=0,
         help='AUTO PAPER: już jedna zaakceptowana strategia może wystarczyć po MTF. Konflikt LONG/SHORT = WAIT, podobnie jak brak świec, kalendarza, zbyt duży spread czy inne blokady. Wyłącznie symulacja.')
-    st.caption('Kolejność 1–8 jest priorytetem BADAWCZYM w menu, nie dowodem '
+    st.caption('Kolejność 1–9 jest priorytetem BADAWCZYM w menu, nie dowodem '
                'skuteczności ani zmianą sposobu wyboru AUTO. Nowe metody z '
                'historii pięcioletniej są badane osobno.')
     if strategy==AUTO_MODE:
         st.caption('🧪 AUTO PAPER: 6 strategii, już 1 po MTF może wystarczyć. Konflikt LONG/SHORT = WAIT. Wszystkie blokady danych, ryzyka, zegara i kalendarza pozostają. Brak realnych zleceń.')
+    elif strategy==THREEF_NAME:
+        st.caption('🌊 3F = FALA / FILTR / FINAŁ. WYŁĄCZNIE BADANIE M15. '
+                   'Nie należy do AUTO, nie tworzy PAPER i nie otwiera '
+                   'zleceń. Raport historyczny i SHADOW w zakładce RAPORTY.')
     elif strategy==WAVE_NAME:
         st.caption('🔬 EMA50 WAVE: wariant porównawczy zasad starego bota, '
                    'bez kopiowania jego archiwum ani fałszywych wejść. '
@@ -1275,7 +1281,16 @@ with market_tab:
                         ' | '+range_study.reason+
                         ' Żadne z tych wskazań nie tworzy pozycji PAPER.')
                 else:
-                    decision=decide_any(snap.frame,strategy,spread=snap.spread)
+                    if strategy==THREEF_NAME:
+                        # Research-only selector. Never pass a candidate
+                        # LONG/SHORT from 3F into PAPER queue_paper.
+                        decision=Decision(
+                            'WAIT',THREEF_NAME,
+                            'FOKU$ 3F jest tylko w RESEARCH / SHADOW M15. '
+                            'Odczytaj jego niezależne LONG/SHORT i wyniki '
+                            'w RAPORTY. ZERO nowych pozycji PAPER.')
+                    else:
+                        decision=decide_any(snap.frame,strategy,spread=snap.spread)
                     if ready and st.session_state.get('mtf_enabled',False):
                         decision,_mtf_rows=filter_mtf_decision(
                             decision,st.session_state.get('mtf_snapshots',{}),
@@ -2206,6 +2221,7 @@ with reports_tab:
     render_cloud_gap_audit(remote_paper_view_enabled,secret)
     render_wave_fiveyear_report()
     render_cloud_wave_ae_replay(remote_paper_view_enabled,secret)
+    render_fokus_3f_research(remote_paper_view_enabled,secret)
     render_wave_reversal_research()
     render_wave_intelligence2()
     st.subheader('📈 FOKU$ LAB — PORÓWNAJ 6 STRATEGII PO KOSZTACH')
