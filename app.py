@@ -353,21 +353,34 @@ with st.sidebar:
         st.caption('☁️ TRYB CLOUD: Northflank skanuje osobno. '
                    'AUTO-SKAN w przeglądarce jest wyłączony, by nie '
                    'tworzyć zbędnego HTTP 401 i dodatkowych sesji brokera.')
-    st.selectbox('⚡ Odświeżanie bieżącej ceny na wykresie',
+    st.selectbox(
+        ('⚡ Odświeżanie LOKALNE (nie dotyczy CLOUD)'
+         if cloud_read_only_mode else
+         '⚡ Odświeżanie bieżącej ceny na wykresie'),
         options=(5,15,30,60,120,300),index=0,
-        format_func=lambda secs: f'co {secs} sekund' if secs < 60 else f'co {secs // 60} min',
-        key='auto_scan_period',
-        help='Niezależny fragment wykresu czyta niepełną świecę z Capital.com '
-             '/prices co 5-300 sekund. Strategie M1 i PAPER używają tylko '
-             'zamkniętych świec, co najmniej co 60 sekund.')
+        format_func=lambda secs: f'co {secs} sekund' if secs < 60
+            else f'co {secs // 60} min',
+        key='auto_scan_period',disabled=cloud_read_only_mode,
+        help='Tylko lokalny, przeglądarkowy odczyt Capital /prices. '
+             'W trybie CLOUD to Northflank pobiera notowania '
+             'niezależnie od tego pola, a Streamlit odświeża '
+             'odczyt z Supabase automatycznie co około 5 sekund.')
     st.toggle('📰 AUTO RADAR NEWS/MACRO (RSS co 15 min, BLS co 60 min)',
        value=_early_secret('FOKUS_AUTO_NEWS_ENABLED','true').lower() in ('true','1','yes','on'),
        key='auto_news_active',
        help='Oficjalne źródła FED/BLS/BEA. Nie wywołuje płatnego GPT. '
             'W aktywnej sesji Streamlit, niezależnie od osobnego workera.')
-    st.caption('⚡ Bieżąca cena co '+str(st.session_state['auto_scan_period'])+
-               ' s • pełny odczyt świec najczęściej co 60 s (M1). '
-               'Osobny worker PAPER GitHub pozostaje na swoim harmonogramie.')
+    if cloud_read_only_mode:
+        st.caption('☁️ CLOUD: aktualny BID/ASK pochodzi WYŁĄCZNIE z '
+                   'osobnego workera Northflank; Streamlit odpytuje '
+                   'Supabase co około 5 s. Świece M15 aktualizują się '
+                   'dopiero po zamknięciu interwału. Przełącznik lokalny '
+                   'powyżej jest celowo wyłączony.')
+    else:
+        st.caption('⚡ Lokalna cena co '+
+                   str(st.session_state['auto_scan_period'])+
+                   ' s • skan świec M1 nie częściej niż co 60 s. '
+                   'Nie jest to działanie serwera 24/7.')
     if st.session_state['auto_scan_period'] < 60:
         st.caption('⚠️ REST nie gwarantuje zmiany ceny co 5 s. Wykres pokazuje '
                    'bieżącą świecę /prices, ale nie wykorzystuje jej do sygnałów. '
@@ -679,9 +692,14 @@ with market_tab:
     with col1:
         csv=st.file_uploader('Opcjonalnie własne dane OHLC CSV (wyłącznie do nauki / replay)',type=['csv'])
         load=st.button('🔄 SKANUJ ŚWIECE',type='primary',use_container_width=True)
-        st.caption('LIVE: odczyt BID/OFFER co 5–300 s według wyboru; '
-                   'M1: 350 świec i 6 strategii najczęściej co 60 s. '
-                   'GitHub Actions PAPER: niezależnie, około co 5 min.')
+        if remote_paper_view_enabled():
+            st.caption('CLOUD: Northflank skanuje osobno, Streamlit '
+                       'odczytuje prywatny cache BID/ASK i M15 w Supabase. '
+                       'Ten przycisk uruchamia tylko odrębny skan RĘCZNY.')
+        else:
+            st.caption('LOKALNIE: odczyt BID/OFFER w wybranym interwale '
+                       'i skan M1 nie częściej niż co 60 s. '
+                       'To nie jest worker działający 24/7.')
         if st.session_state.get('auto_scan_active'):
             st.success(f"🟢 LIVE CENA: co {st.session_state.get('auto_scan_period',5)} s • "
                        "świece/strategie: co najmniej 60 s • tylko otwarta strona")
