@@ -19,6 +19,7 @@ import time
 from .market import FeedError
 from .remote_checkpoint import RemoteError
 from .cloud_forming_m1 import serialize_forming_m1
+from .cloud_moving_m15 import update_sampled_m15, broker_forming_m15
 
 SOURCE="Capital.com DEMO REST"
 MAX_SAMPLES=24
@@ -27,6 +28,8 @@ CLOSED_INTERVAL=60.0
 ERROR_INTERVAL=300.0
 FORMING_INTERVAL=15.0  # broker /prices less often than MID quote
 FORMING_ERROR_INTERVAL=60.0
+M15_FORMING_INTERVAL=30.0  # extra broker M15 at most every 30s
+M15_FORMING_ERROR_INTERVAL=120.0
 
 
 class Quote5sSampler:
@@ -37,6 +40,10 @@ class Quote5sSampler:
         self.forming_m1_next_due=0.
         self.forming_m1=None
         self.forming_m1_status="NOT_STARTED"
+        self.sampled_m15=None
+        self.forming_m15=None
+        self.forming_m15_next_due=0.
+        self.forming_m15_status="NOT_STARTED"
 
     def pulse(self, client, remote, epic="US500", *, monotonic=None):
         """Return concise safe status, without surfacing exception details."""
@@ -54,6 +61,37 @@ class Quote5sSampler:
             bid,ask=float(quote.bid),float(quote.ask)
             if not isfinite(bid) or not isfinite(ask) or bid<=0 or ask<bid:
                 raise ValueError("Untrusted BID/ASK")
+            # Provisional M15 wick samples use ONLY genuine, fresh vendor
+            # quotes from this SAME Northflank client session. They do NOT
+            # enter any trading lifecycle or confirmed-candle archive.
+            self.sampled_m15=update_sampled_m15(
+                self.sampled_m15,quote) if quote.fresh else None
+            # Optional actual provider M15 partial OHLC for chart-only
+            # comparison. The MID-sampled candle keeps moving with fresh
+            # quotes between broker /prices calls (~30 seconds).
+            if (quote.fresh and quote.status=="TRADEABLE" and
+                    moment>=self.forming_m15_next_due and
+                    os.getenv("FOKUS_CLOUD_FORMING_M15_ENABLED","true")
+                    .strip().lower() in ("true","1","yes","on")):
+                self.forming_m15_next_due=moment+M15_FORMING_INTERVAL
+                try:
+                    method=getattr(client,"forming_candle",None)
+                    if not callable(method):
+                        self.forming_m15_status="UNSUPPORTED_CLIENT"
+                        self.forming_m15=None
+                    else:
+                        raw_m15=method(epic,"MINUTE_15")
+                        self.forming_m15=broker_forming_m15(
+                            raw_m15,now=datetime.now(timezone.utc))
+                        self.forming_m15_status="M15_BROKER_PREVIEW_SAVED"
+                except (FeedError,RemoteError,ValueError,TypeError,KeyError,
+                        AttributeError,OverflowError,OSError):
+                    self.forming_m15=None
+                    self.forming_m15_status="M15_WAIT_INVALID_OR_API"
+                    self.forming_m15_next_due=moment+M15_FORMING_ERROR_INTERVAL
+            elif not quote.fresh or quote.status!="TRADEABLE":
+                self.forming_m15=None
+                self.forming_m15_status="MARKET_NOT_TRADEABLE"
             # Only this same authenticated worker may request incomplete M1.
             # /prices is throttled to ~15s independently of 5s MID polls.
             # An error has no effect on the quote write or PAPER lifecycle.
@@ -104,6 +142,30 @@ class Quote5sSampler:
                                      "forming_m1":self.forming_m1}
                 except (KeyError,TypeError,ValueError,OverflowError):
                     pass
+            # Separate optional, non-trading M15 observations are attached
+            # to the EXISTING latest quote sample JSONB. No new table,
+            # column, writer or API credentials in the frontend.
+            # Never forward stale in-progress M15 data.
+            if samples and quote.fresh:
+                now_m15=datetime.now(timezone.utc)
+                sampled=self.sampled_m15
+                if isinstance(sampled,dict):
+                    try:
+                        at=datetime.fromisoformat(sampled["collected_utc"])
+                        end=datetime.fromisoformat(sampled["bar_close_utc"])
+                        if 0<=(now_m15-at).total_seconds()<=12 and now_m15<end:
+                            samples[-1]={**samples[-1],"sampled_m15":sampled}
+                    except (KeyError,ValueError,TypeError,OverflowError):
+                        pass
+                broker_m15=self.forming_m15
+                if isinstance(broker_m15,dict):
+                    try:
+                        at=datetime.fromisoformat(broker_m15["collected_utc"])
+                        end=datetime.fromisoformat(broker_m15["bar_close_utc"])
+                        if 0<=(now_m15-at).total_seconds()<=35 and now_m15<end:
+                            samples[-1]={**samples[-1],"forming_m15":broker_m15}
+                    except (KeyError,ValueError,TypeError,OverflowError):
+                        pass
             record={
                 "epic":"US500","source":SOURCE,
                 "bid":bid,"ask":ask,"mid":float(quote.mid),
