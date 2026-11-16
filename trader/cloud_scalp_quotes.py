@@ -69,7 +69,7 @@ class Quote5sSampler:
             # Optional actual provider M15 partial OHLC for chart-only
             # comparison. The MID-sampled candle keeps moving with fresh
             # quotes between broker /prices calls (~30 seconds).
-            if (quote.fresh and quote.status=="TRADEABLE" and
+            if (quote.status=="TRADEABLE" and
                     moment>=self.forming_m15_next_due and
                     os.getenv("FOKUS_CLOUD_FORMING_M15_ENABLED","true")
                     .strip().lower() in ("true","1","yes","on")):
@@ -89,7 +89,7 @@ class Quote5sSampler:
                     self.forming_m15=None
                     self.forming_m15_status="M15_WAIT_INVALID_OR_API"
                     self.forming_m15_next_due=moment+M15_FORMING_ERROR_INTERVAL
-            elif not quote.fresh or quote.status!="TRADEABLE":
+            elif quote.status!="TRADEABLE":
                 self.forming_m15=None
                 self.forming_m15_status="MARKET_NOT_TRADEABLE"
             # Only this same authenticated worker may request incomplete M1.
@@ -166,6 +166,29 @@ class Quote5sSampler:
                             samples[-1]={**samples[-1],"forming_m15":broker_m15}
                     except (KeyError,ValueError,TypeError,OverflowError):
                         pass
+            # When the /markets UTC timestamp is missing, a separate
+            # CURRENT /prices M15 may still be available from THIS same
+            # account/session. Preserve it as an explicitly UNVERIFIED
+            # quote-status visual preview (fresh=False). Never add that
+            # fallback as a genuine 5-second BID/ASK sample or a PAPER bar.
+            if not quote.fresh and quote.status=="TRADEABLE":
+                m15=self.forming_m15
+                if isinstance(m15,dict):
+                    try:
+                        captured=datetime.fromisoformat(m15["collected_utc"])
+                        end=datetime.fromisoformat(m15["bar_close_utc"])
+                        now_fallback=datetime.now(timezone.utc)
+                        if (0<=(now_fallback-captured).total_seconds()<=35
+                                and now_fallback<end
+                                and float(quote.delay_seconds)==0.0):
+                            samples=(list(self.samples)[-23:]+[{
+                                "utc":now_fallback.isoformat(),
+                                "bid":float(m15["bid"]),
+                                "ask":float(m15["ask"]),
+                                "forming_m15":m15,
+                                "fallback_only":True}])
+                    except (KeyError,ValueError,TypeError,OverflowError):
+                        pass
             record={
                 "epic":"US500","source":SOURCE,
                 "bid":bid,"ask":ask,"mid":float(quote.mid),
@@ -180,8 +203,12 @@ class Quote5sSampler:
                 "samples":samples,
             }
             remote.upsert_live_quote(record)
-            self.last_status=("LIVE_QUOTE_SAVED" if quote.fresh
-                              else "BROKER_NOT_FRESH")
+            self.last_status=(
+                "LIVE_QUOTE_SAVED" if quote.fresh else
+                "BROKER_M15_ONLY_UNVERIFIED_QUOTE"
+                if (samples and isinstance(samples[-1],dict)
+                    and samples[-1].get("fallback_only") is True)
+                else "BROKER_NOT_FRESH")
             self.next_due=moment+(LIVE_INTERVAL if quote.status=="TRADEABLE"
                                   else CLOSED_INTERVAL)
             return self.last_status

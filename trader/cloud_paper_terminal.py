@@ -220,13 +220,20 @@ def render_cloud_terminal(secret_fn):
                    'dane wymagają odświeżonego workera Northflank.')
     if moving_m15["visible"]:
         live=moving_m15["bar"]
-        st.success(
-            "🕯️ M15 LIVE — RUCHOME KNOTY (PODGLĄD, NIE SYGNAŁ) | "
+        live_message=(
+            "🕯️ M15 W TRAKCIE — RUCHOME KNOTY (PODGLĄD, NIE SYGNAŁ) | "
             + ("MID z próbek REST" if moving_m15["missing_extremes_possible"]
                else "nieukończona OHLC brokera /prices")
             + f' | O={live["open"]:.2f}, H={live["high"]:.2f}, '
               f'L={live["low"]:.2f}, C={live["close"]:.2f}'
             + f' | aktualizacja {live["capture_age_seconds"]} s temu.')
+        if moving_m15.get("quote_verified") is False:
+            st.warning(live_message+
+                       " | UWAGA: /markets nie potwierdził czasu BID/ASK; "
+                       "to wyłącznie aktualny odczyt /prices, "
+                       "NIE potwierdzenie możliwości handlu.")
+        else:
+            st.success(live_message)
         if moving_m15["missing_extremes_possible"]:
             st.caption(
                 "Uwaga: knoty HIGH/LOW obejmują wyłącznie ZAOBSERWOWANE "
@@ -299,6 +306,8 @@ def render_cloud_terminal(secret_fn):
             low=[live["low"]],close=[live["close"]],
             name=("🕯️ M15 LIVE • MID Z PRÓBEK (KNOTY W RUCHU)"
                   if moving_m15["missing_extremes_possible"]
+                  else "🕯️ M15 /prices • NIEPEŁNA / QUOTE NIEZWERYFIKOWANY"
+                  if moving_m15.get("quote_verified") is False
                   else "🕯️ M15 LIVE /prices • NIEPEŁNA"),
             increasing={"line":{"color":"#34e8f2","width":3},
                         "fillcolor":"rgba(52,232,242,0.48)"},
