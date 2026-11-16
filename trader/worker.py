@@ -453,6 +453,10 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             payload["fokus_3f_forward_report"]=forward_3f_scorecard(threef_state)
         latest_shadow_report=shadow_scorecard(shadow_state)
         payload["shadow_learning_report"]=latest_shadow_report
+        # Sample thread diagnostics immediately before commit, not before
+        # potentially long MTF/GPT/Supabase scan. The callback is pure.
+        if callable(quote_health):
+            quote_health=quote_health()
         payload["meta"]={
             "last_scan_utc":datetime.now(timezone.utc).isoformat(),
             "last_scan_summary":status[:350],
@@ -616,7 +620,7 @@ def main(argv=None):
                 message=remote_scan_once(remote,client,args.epic,args.tf,
                     args.strategy,2.0,enable_setups=(not args.disable_new_setups and candle_time_ok),
                     strict_macro=not args.skip_macro_calendar,
-                    quote_health=quote_pump.snapshot() if quote_pump else None)
+                    quote_health=quote_pump.snapshot if quote_pump else None)
             else:
                 message=scan_once(client,args.epic,args.tf,args.strategy,2.0,db,
                     enable_setups=(not args.disable_new_setups and candle_time_ok),
