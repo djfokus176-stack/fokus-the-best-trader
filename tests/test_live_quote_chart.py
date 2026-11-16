@@ -48,17 +48,23 @@ def test_live_rest_method_is_read_only_and_uses_one_market_get(monkeypatch):
     seen=[]
     class Response:
         def raise_for_status(self): pass
-        def json(self): return payload()
+        def json(self):
+            # Capital's /markets?epics API: FLAT market rows with UTC.
+            # Old singular /markets/US500 response has ambiguous time.
+            snap=payload()["snapshot"]
+            return {"markets":[{**snap,"epic":"US500"}]}
     monkeypatch.setattr(client,"headers",lambda:{"CST":"fake"})
     def get(url,**kwargs):
         seen.append((url,kwargs))
         return Response()
     monkeypatch.setattr(client.session,"get",get)
-    # use monkeypatch clock in the parse step: historic test quote is stale
+    # historic test quote is stale, but raw price remains inspectable.
     quote=client.market_quote("US500")
     assert quote.mid==pytest.approx(7331.7)
+    assert quote.fresh is False
     assert len(seen)==1
-    assert seen[0][0].endswith("/api/v1/markets/US500")
+    assert seen[0][0].endswith("/api/v1/markets")
+    assert seen[0][1]["params"]=={"epics":"US500"}
     assert "/prices/" not in seen[0][0]
 
 
