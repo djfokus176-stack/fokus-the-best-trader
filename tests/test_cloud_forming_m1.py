@@ -100,6 +100,21 @@ def test_absent_preview_is_not_a_bad_m15_or_new_paper():
     assert not assess_cloud_forming_m1(data,now=NOW)["visible"]
 
 
+
+def test_minute_rollover_never_labels_prior_bar_as_forming():
+    end=NOW.floor("min")+pd.Timedelta(minutes=1)
+    captured=end-pd.Timedelta(seconds=2)
+    data=cloud_quote(now=end+pd.Timedelta(seconds=1))
+    data["samples"][-1]["forming_m1"]=serialize_forming_m1(
+        broker_m1(now=NOW),collected_utc=captured)
+    status=assess_cloud_forming_m1(data,now=end+pd.Timedelta(seconds=1))
+    assert status["visible"] is False
+    assert status["trade_permission"]=="WAIT"
+    with pytest.raises(ValueError,match="wrong market minute"):
+        serialize_forming_m1(
+            broker_m1(now=NOW),collected_utc=end+pd.Timedelta(seconds=2))
+
+
 class _MockBroker:
     environment="DEMO"
 
