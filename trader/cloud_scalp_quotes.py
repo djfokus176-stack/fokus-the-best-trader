@@ -11,18 +11,22 @@ separate private Supabase table, never in the versioned PAPER checkpoint.
 from __future__ import annotations
 
 from collections import deque
-from datetime import timezone
+from datetime import datetime,timezone
+import os
 from math import isfinite
 import time
 
 from .market import FeedError
 from .remote_checkpoint import RemoteError
+from .cloud_forming_m1 import serialize_forming_m1
 
 SOURCE="Capital.com DEMO REST"
 MAX_SAMPLES=24
 LIVE_INTERVAL=5.0
 CLOSED_INTERVAL=60.0
 ERROR_INTERVAL=300.0
+FORMING_INTERVAL=15.0  # broker /prices less often than MID quote
+FORMING_ERROR_INTERVAL=60.0
 
 
 class Quote5sSampler:
@@ -30,6 +34,9 @@ class Quote5sSampler:
         self.next_due=0.
         self.samples=deque(maxlen=MAX_SAMPLES)
         self.last_status="NOT_STARTED"
+        self.forming_m1_next_due=0.
+        self.forming_m1=None
+        self.forming_m1_status="NOT_STARTED"
 
     def pulse(self, client, remote, epic="US500", *, monotonic=None):
         """Return concise safe status, without surfacing exception details."""
@@ -47,11 +54,56 @@ class Quote5sSampler:
             bid,ask=float(quote.bid),float(quote.ask)
             if not isfinite(bid) or not isfinite(ask) or bid<=0 or ask<bid:
                 raise ValueError("Untrusted BID/ASK")
+            # Only this same authenticated worker may request incomplete M1.
+            # /prices is throttled to ~15s independently of 5s MID polls.
+            # An error has no effect on the quote write or PAPER lifecycle.
+            if (quote.fresh and quote.status=="TRADEABLE" and
+                    moment>=self.forming_m1_next_due and
+                    os.getenv("FOKUS_CLOUD_FORMING_M1_ENABLED","true")
+                      .strip().lower() in ("true","1","yes","on")):
+                self.forming_m1_next_due=moment+FORMING_INTERVAL
+                try:
+                    method=getattr(client,"forming_candle",None)
+                    if not callable(method):
+                        self.forming_m1_status="UNSUPPORTED_CLIENT"
+                        self.forming_m1=None
+                    else:
+                        raw=method(epic,"MINUTE")
+                        self.forming_m1=serialize_forming_m1(
+                            raw,collected_utc=datetime.now(timezone.utc))
+                        self.forming_m1_status="M1_PREVIEW_SAVED"
+                except (FeedError,RemoteError,ValueError,TypeError,KeyError,
+                        AttributeError,OverflowError,OSError) as exc:
+                    self.forming_m1=None
+                    self.forming_m1_status="M1_WAIT_"+type(exc).__name__
+                    self.forming_m1_next_due=moment+FORMING_ERROR_INTERVAL
+            elif not quote.fresh or quote.status!="TRADEABLE":
+                # Invalidate the in-progress preview on broker close.
+                self.forming_m1=None
+                self.forming_m1_status="MARKET_NOT_TRADEABLE"
             # Samples are observations, NOT guaranteed individual market ticks.
             if quote.fresh:
                 self.samples.append({
                     "utc":quote.received_utc.astimezone(timezone.utc).isoformat(),
                     "bid":round(bid,5),"ask":round(ask,5)})
+            # Attach broker M1 only to the LATEST REST sample. Existing
+            # fokus_live_quotes.samples JSONB permits additional optional
+            # keys; all legacy readers still consume just utc/bid/ask.
+            # The queue remains pure; no new DB table/column or writer.
+            samples=list(self.samples)
+            if samples and quote.fresh and self.forming_m1 is not None:
+                try:
+                    captured=datetime.fromisoformat(
+                        self.forming_m1["collected_utc"])
+                    close=datetime.fromisoformat(
+                        self.forming_m1["close_utc"])
+                    now_utc=datetime.now(timezone.utc)
+                    if (0 <= (now_utc-captured).total_seconds() <= 28
+                            and now_utc < close):
+                        samples[-1]={**samples[-1],
+                                     "forming_m1":self.forming_m1}
+                except (KeyError,TypeError,ValueError,OverflowError):
+                    pass
             record={
                 "epic":"US500","source":SOURCE,
                 "bid":bid,"ask":ask,"mid":float(quote.mid),
@@ -63,7 +115,7 @@ class Quote5sSampler:
                 "received_utc":quote.received_utc.astimezone(timezone.utc).isoformat(),
                 "delay_seconds":float(quote.delay_seconds),
                 "fresh":bool(quote.fresh),
-                "samples":list(self.samples),
+                "samples":samples,
             }
             remote.upsert_live_quote(record)
             self.last_status=("LIVE_QUOTE_SAVED" if quote.fresh
