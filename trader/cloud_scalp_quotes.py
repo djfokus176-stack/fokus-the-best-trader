@@ -26,6 +26,9 @@ MAX_SAMPLES=24
 LIVE_INTERVAL=5.0
 CLOSED_INTERVAL=60.0
 ERROR_INTERVAL=300.0
+FEED_RETRY_INTERVAL=30.0
+RATE_LIMIT_RETRY_INTERVAL=120.0
+PRICES_FALLBACK_INTERVAL=30.0
 FORMING_INTERVAL=15.0  # broker /prices less often than MID quote
 FORMING_ERROR_INTERVAL=60.0
 M15_FORMING_INTERVAL=30.0  # extra broker M15 at most every 30s
@@ -45,6 +48,49 @@ class Quote5sSampler:
         self.forming_m15_next_due=0.
         self.forming_m15_status="NOT_STARTED"
 
+    def _prices_only_fallback(self,client,remote,epic,moment):
+        """Read-only M15 display backup if /markets quote endpoint fails.
+
+        Requires a SEPARATE broker marketStatus=TRADEABLE and an ACTUAL
+        current /prices M15, both read using the SAME Capital login.
+        Crucially fresh=False, delay UNKNOWN: never a certified LIVE price,
+        tick, strategy candle or PAPER quote.
+        """
+        if (os.getenv("FOKUS_CLOUD_PRICES_ONLY_FALLBACK_ENABLED","true")
+                .strip().lower() not in ("true","1","yes","on")):
+            return None
+        status_fn=getattr(client,"market_state",None)
+        candle_fn=getattr(client,"forming_candle",None)
+        if not callable(status_fn) or not callable(candle_fn):
+            return None
+        if str(status_fn(epic)).upper()!="TRADEABLE":
+            return None
+        raw=candle_fn(epic,"MINUTE_15")
+        now=datetime.now(timezone.utc)
+        m15=broker_forming_m15(raw,now=now)
+        if now>=datetime.fromisoformat(m15["bar_close_utc"]):
+            return None
+        bid=float(m15["bid"]);ask=float(m15["ask"])
+        # 9999 denotes UNKNOWN quote delay, never zero/confirmed.
+        # Only the chart parser may use this explicitly flagged /prices
+        # M15; all real quote/strategy guards continue to reject it.
+        row={
+            "epic":"US500","source":SOURCE,"bid":bid,"ask":ask,
+            "mid":(bid+ask)/2,"spread":ask-bid,
+            "broker_status":"TRADEABLE",
+            "broker_update_utc":None,
+            "received_utc":now.isoformat(),
+            "delay_seconds":9999.0,"fresh":False,
+            "samples":[{
+                "utc":now.isoformat(),"bid":bid,"ask":ask,
+                "forming_m15":m15,"fallback_only":True,
+                "source_delay_unknown":True}],
+        }
+        remote.upsert_live_quote(row)
+        self.last_status="BROKER_M15_ONLY_UNVERIFIED_QUOTE"
+        self.next_due=moment+PRICES_FALLBACK_INTERVAL
+        return self.last_status
+
     def pulse(self, client, remote, epic="US500", *, monotonic=None):
         """Return concise safe status, without surfacing exception details."""
         moment=float(time.monotonic() if monotonic is None else monotonic)
@@ -55,7 +101,17 @@ class Quote5sSampler:
                 self.last_status="CONFIG_ERROR"
                 self.next_due=moment+ERROR_INTERVAL
                 return self.last_status
-            quote=client.market_quote(epic)
+            try:
+                quote=client.market_quote(epic)
+            except FeedError:
+                # Some Capital DEMO plans/responses do not provide usable
+                # UTC quote data on /markets while /prices M15 works.
+                # This does NOT certify a live BID/ASK or enable PAPER.
+                fallback=self._prices_only_fallback(
+                    client,remote,epic,moment)
+                if fallback is not None:
+                    return fallback
+                raise
             if quote.environment!="DEMO" or quote.epic!="US500":
                 raise ValueError("Quote source mismatch")
             bid,ask=float(quote.bid),float(quote.ask)
@@ -217,7 +273,16 @@ class Quote5sSampler:
             # A missing migration, expired session, REST outage or 429 never
             # crashes the accounting worker and never reveals credentials.
             self.last_status="QUOTE_WAIT_"+type(exc).__name__
-            self.next_due=moment+ERROR_INTERVAL
+            # Normal transient REST read failures should be retried after
+            # 30s, not leave the chart abandoned for 5 minutes. HTTP 429
+            # uses longer backoff to respect broker limits; DB writes keep
+            # the historical 5-minute recovery to avoid hammering RLS.
+            if isinstance(exc,FeedError):
+                wait=(RATE_LIMIT_RETRY_INTERVAL if "HTTP 429" in str(exc)
+                      else FEED_RETRY_INTERVAL)
+            else:
+                wait=ERROR_INTERVAL
+            self.next_due=moment+wait
             return self.last_status
 
 
