@@ -228,7 +228,7 @@ def test_ui_draws_actual_provisional_candlestick_not_only_a_diamond():
     assert "x=[live[\"at\"]]" in code
     assert "high=[live[\"high\"]]" in code
     assert "low=[live[\"low\"]]" in code
-    assert "name=(\"🕯️ M15 LIVE" in code
+    assert 'name=("🕯️ "+choice+" • MID Z PRÓBEK (KNOTY W RUCHU)"' in code
     assert 'WICK-M15-v1' in code
     assert '@st.fragment(run_every="5s")' in code
     assert "queue_paper(" not in code

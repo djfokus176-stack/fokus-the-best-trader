@@ -94,13 +94,15 @@ def test_owner_chart_has_independent_quote_poll_and_close_only_candles():
     code=Path("trader/cloud_paper_terminal.py").read_text(encoding="utf-8")
     assert '@st.fragment(run_every="5s")' in code
     assert 'remote.fetch_live_quote("US500")' in code
-    assert 'remote.fetch_candles("US500","MINUTE_15",limit=180)' in code
+    assert 'remote.fetch_candles("US500",resolution,limit=180)' in code
+    assert 'frame=closed_chart_frame(original,choice)' in code
+    assert 'cache.get("choice")!=choice' in code
     # Quote fetched ONCE then shared by both the 5s MID overlay and the
     # separate broker M1 preview; a second request is not necessary.
     assert 'quote_record=remote.fetch_live_quote("US500")' in code
     assert 'cloud_quote_overlay(quote_record,now=quote_now)' in code
     assert 'assess_cloud_forming_m1(quote_record,now=quote_now)' in code
-    assert '"_fokus_cloud_m15_cache_v2"' in code
+    assert '"_fokus_cloud_chart_cache_v3"' in code
     assert "if overlay[\"visible\"]:" in code
     assert "annotate_paper_history(candles,chart_paper" in code
     assert "queue_paper(" not in code
