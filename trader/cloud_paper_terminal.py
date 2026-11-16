@@ -16,6 +16,7 @@ from .paper_method_labels import method_attribution
 from .paper_display import annotate_open_paper, annotate_paper_history
 from .cloud_m15_live_overlay import (cloud_quote_overlay,m15_cache_due,
                                      closed_m15_lag)
+from .cloud_forming_m1 import assess_cloud_forming_m1
 
 
 def _parse_utc(value):
@@ -122,11 +123,13 @@ def render_cloud_terminal(secret_fn):
     browser is open. Closed M15 and checkpoint load about every 60 seconds.
     Worker clocks, AUTO and PAPER remain completely independent.
     """
-    st.markdown("#### ☁️ US500 — CLOUD M15 + CENA BID/ASK ~5S")
+    st.markdown("#### ☁️ US500 — M15 + CENA BID/ASK ~5S + M1 W TRAKCIE")
     st.caption(
         "Świece: tylko ZAMKNIĘTE M15, aktualizowane z Supabase co ok. 60 s. "
         "Żółty ślad: osobne odczyty BID/ASK z REST, odświeżane ok. 5 s "
         "gdy strona jest otwarta. NIE są to ticki ani świece 5S. "
+        "Nieukończona M1 (gdy dostępna) pochodzi wyłącznie od Northflank "
+        "z /prices co ~15s, nie jest świecą M15 ani sygnałem. "
         "Streamlit NIE loguje się do brokera, tylko czyta chmurę.")
     url=secret_fn("FOKUS_SUPABASE_URL")
     key=secret_fn("FOKUS_SUPABASE_SECRET_KEY")
@@ -159,11 +162,16 @@ def render_cloud_terminal(secret_fn):
     # A broken/stale quote must NEVER erase the historical chart or be
     # drawn as if the price were tradable.
     try:
-        overlay=cloud_quote_overlay(remote.fetch_live_quote("US500"))
+        quote_record=remote.fetch_live_quote("US500")
+        quote_now=pd.Timestamp.now(tz="UTC")
+        overlay=cloud_quote_overlay(quote_record,now=quote_now)
+        forming=assess_cloud_forming_m1(quote_record,now=quote_now)
     except (RemoteError,ValueError,TypeError,KeyError,OverflowError,OSError):
         overlay={"visible":False,"broker_status":"UNKNOWN","age_seconds":None,
                  "reason":"Nie udało się odczytać aktualnego BID/ASK.",
                  "points":[]}
+        forming={"visible":False,
+                 "reason":"BRAK_ODCZYTU_NIEPELNEJ_M1","preview":None}
     x,y,z=st.columns(3)
     x.metric("Checkpoint",str(audit["version"]))
     y.metric("Zapisane M15",str(audit["bars"]))
@@ -188,6 +196,19 @@ def render_cloud_terminal(secret_fn):
                    " | Broker: "+str(overlay["broker_status"])+
                    " | Wiek: "+str(overlay["age_seconds"])+
                    " s. Ostatnie M15 to wyłącznie historia.")
+    if forming["visible"]:
+        m=forming["preview"]
+        st.caption(
+            f'🕯️ CLOUD /prices M1 W TRAKCIE — MID: {m["close"]:.2f} | '
+            f'OHLC: {m["open"]:.2f} / {m["high"]:.2f} / '
+            f'{m["low"]:.2f} / {m["close"]:.2f} | '
+            f'Wiek pobrania: {m["age_seconds"]} s | '
+            f'Otwarta: {m["open_utc"]}, koniec minuty: {m["close_utc"]}. '
+            'To nieukończony bar, bez wpływu na PAPER.')
+    else:
+        st.caption('🕯️ Podgląd M1 /prices: '+forming["reason"]+
+                   '. Nie ma drugiego logowania Capital w Streamlit; '
+                   'dane wymagają odświeżonego workera Northflank.')
     st.caption("Ostatni zapis skanera UTC: "+
                str(audit["last_scan_utc"] or "BRAK")+
                " | Ostatnia M15 w archiwum UTC: "+
@@ -246,6 +267,20 @@ def render_cloud_terminal(secret_fn):
             line_dash="dot",opacity=.65,
             annotation_text=f'BID/ASK MID {overlay["mid"]:.2f}',
             annotation_position="top left")
+    # Separate broker /prices M1 PREVIEW marker; not a closed M15 candle.
+    if forming["visible"]:
+        m=forming["preview"]
+        candles.add_trace(go.Scatter(
+            x=[m["captured_time"]],y=[m["close"]],
+            mode="markers",name="🕯️ Nieukończona M1 /prices (CLOUD)",
+            marker={"symbol":"diamond-open","size":13,
+                    "color":"#51bcff","line":{"width":2}},
+            hovertemplate=(
+                f'M1 W TRAKCIE /prices UTC {m["open_utc"]}'
+                f'<br>O: {m["open"]:.2f} H: {m["high"]:.2f}'
+                f'<br>L: {m["low"]:.2f} C: {m["close"]:.2f}'
+                f'<br>Odczyt: {m["age_seconds"]} s'
+                '<extra></extra>')))
     # Exact OPEN/CLOSE PAPER from the checkpoint, NEVER watch markers or
     # signals inferred from OHLC. M1 PAPER may appear on the M15 time axis.
     annotate_paper_history(candles,chart_paper,
@@ -267,7 +302,9 @@ def render_cloud_terminal(secret_fn):
                 f'⚠️ Bieżące ceny są dostępne, ale ostatnia archiwalna '
                 f'M15 ma {lag:.1f} min. Sprawdź zapis zamkniętych świec '
                 'w Northflank/Supabase; checkpoint nie gwarantuje OHLC.')
-    st.caption("Zielone/czerwone świece: HISTORYCZNE M15. Żółta linia i "
+    st.caption("Zielone/czerwone świece: HISTORYCZNE M15. "
+               "Niebieski pusty romb: M1 /prices W TRAKCIE, tylko do "
+               "podglądu (jeśli świeży). Żółta linia i "
                "punkty: jedynie ŚWIEŻE obserwacje BID/ASK REST (~5 s, "
                "do 24 punktów), a nie ticki/świece. Trójkąty i kwadraty: "
                "WYŁĄCZNIE zapisane PAPER OPEN/CLOSED z checkpointu "
