@@ -713,7 +713,7 @@ with market_tab:
     with col2:
         if remote_paper_view_enabled():
             render_cloud_scalp_5s(secret)
-            render_cloud_terminal(secret)
+            render_cloud_terminal(secret,tf)
         st.markdown('#### 🎯 FOKU$ MARKET TERMINAL')
         st.caption('Świece MID • EMA9/21/50 • SL/TP PAPER • potwierdzenie 4 interwałów • analiza bez zleceń')
         st.info('Dane wykresu i silnika są wspólne. GPT czyta dane liczbowe, a nie obraz wykresu.')
