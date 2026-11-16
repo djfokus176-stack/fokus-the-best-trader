@@ -141,6 +141,87 @@ def test_broker_m15_fallback_when_no_sampled_bar():
     assert out["missing_extremes_possible"] is False
 
 
+
+def test_missing_markets_utc_still_allows_explicit_unverified_prices_preview():
+    from trader.cloud_scalp_quotes import Quote5sSampler
+    from trader.market import MarketQuote
+
+    class NoUTCMarket:
+        environment="DEMO"
+        def market_quote(self,epic):
+            at=pd.Timestamp.now(tz="UTC")
+            return MarketQuote(
+                epic="US500",environment="DEMO",
+                bid=7534.7,ask=7535.3,mid=7535.,spread=.6,
+                status="TRADEABLE",fresh=False,
+                update_utc=None,received_utc=at.to_pydatetime(),
+                delay_seconds=0.)
+        def forming_candle(self,epic,timeframe):
+            assert epic=="US500" and timeframe=="MINUTE_15"
+            return broker_preview(pd.Timestamp.now(tz="UTC"))
+
+    class DB:
+        records=[]
+        def upsert_live_quote(self,record):
+            self.records.append(record)
+
+    worker=Quote5sSampler()
+    remote=DB()
+    status=worker.pulse(NoUTCMarket(),remote,monotonic=100.)
+    assert status=="BROKER_M15_ONLY_UNVERIFIED_QUOTE"
+    row=remote.records[-1]
+    assert row["fresh"] is False
+    assert row["samples"][-1]["fallback_only"] is True
+    assert row["samples"][-1]["forming_m15"]["kind"]==BROKER_KIND
+    assert worker.sampled_m15 is None  # Do NOT invent 5-second MID data
+    result=assess_moving_m15(row,now=pd.Timestamp.now(tz="UTC"))
+    assert result["visible"] is True
+    assert result["kind"]==BROKER_KIND
+    assert result["quote_verified"] is False
+    assert result["trade_permission"]=="WAIT"
+
+
+def test_broker_fallback_requires_explicit_marker_tradeable_and_no_delay():
+    bar=broker_forming_m15(broker_preview(),now=NOW)
+    record=cloud_quote(fresh=False,broker=bar)
+    record["samples"][-1]["fallback_only"]=True
+    active=assess_moving_m15(record,now=NOW)
+    assert active["visible"] is True
+    assert active["quote_verified"] is False
+    record["samples"][-1]["fallback_only"]=False
+    assert not assess_moving_m15(record,now=NOW)["visible"]
+    record["samples"][-1]["fallback_only"]=True
+    record["delay_seconds"]=60.
+    assert not assess_moving_m15(record,now=NOW)["visible"]
+    record["delay_seconds"]=0.
+    record["broker_status"]="CLOSED"
+    assert not assess_moving_m15(record,now=NOW)["visible"]
+    record["broker_status"]="TRADEABLE"
+    record["samples"][-1]["forming_m15"]["collected_utc"]=(
+        NOW-pd.Timedelta(seconds=36)).isoformat()
+    assert not assess_moving_m15(record,now=NOW)["visible"]
+
+
+def test_no_fallback_after_market_status_closed():
+    from trader.cloud_scalp_quotes import Quote5sSampler
+    class Closed:
+        environment="DEMO"
+        forming_calls=0
+        def market_quote(self,epic):
+            return quote(pd.Timestamp.now(tz="UTC"),fresh=False,status="CLOSED")
+        def forming_candle(self,*args):
+            self.forming_calls+=1
+            raise RuntimeError("must not call /prices if market is closed")
+    class DB:
+        rows=[]
+        def upsert_live_quote(self,row):
+            self.rows.append(row)
+    c=Closed();db=DB();sampler=Quote5sSampler()
+    assert sampler.pulse(c,db,monotonic=0)=="BROKER_NOT_FRESH"
+    assert c.forming_calls==0
+    assert "fallback_only" not in str(db.rows[-1])
+
+
 def test_ui_draws_actual_provisional_candlestick_not_only_a_diamond():
     code=Path("trader/cloud_paper_terminal.py").read_text()
     assert "assess_moving_m15(" in code
