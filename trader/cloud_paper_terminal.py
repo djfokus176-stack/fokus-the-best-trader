@@ -130,6 +130,12 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
     labels={"MINUTE":"M1","MINUTE_5":"M5",
             "MINUTE_15":"M15","HOUR":"H1"}
     choices=("M1","M2","M5","M15","H1")
+    # Match sidebar on its CHANGE; keep standalone M2 possible in the
+    # chart-only selector between sidebar changes. Never mutate AUTO TF.
+    if st.session_state.get("_cloud_chart_sidebar_tf")!=default_tf:
+        st.session_state["_cloud_chart_sidebar_tf"]=default_tf
+        st.session_state["cloud_price_chart_interval"]=labels.get(
+            default_tf,"M1")
     choice=st.selectbox(
         "Interwał WYKRESU CLOUD (nie zmienia strategii AUTO/PAPER)",
         options=choices,index=choices.index(labels.get(default_tf,"M1")),
