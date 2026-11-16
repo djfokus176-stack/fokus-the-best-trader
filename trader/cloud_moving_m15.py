@@ -186,14 +186,28 @@ def assess_moving_m15(record,*,now=None,last_closed_utc=None):
         q=assess_quote_snapshot(record,now=at)
     except (ValueError,TypeError,OverflowError,KeyError):
         return {**missing,"reason":"NIEWIARYGODNY_QUOTE"}
-    if not q["fresh"]:
-        return {**missing,"reason":"QUOTE_NIEAKTUALNY_LUB_RYNEK_ZAMKNIETY"}
+    verified_quote=bool(q["fresh"])
     samples=record.get("samples")
     if not isinstance(samples,list) or not samples or not isinstance(samples[-1],dict):
         return missing
     last=samples[-1]
-    sampled=_parse_candidate(last.get("sampled_m15"),at,kind=SAMPLED_KIND,
-                             source=QUOTE_SOURCE,max_age=MAX_SAMPLE_AGE)
+    if not verified_quote:
+        # Never promote an old quote to LIVE. The ONLY permitted backup
+        # is a separately fetched, current /prices bar explicitly tagged
+        # fallback_only by the SAME dedicated DEMO Northflank worker.
+        # It remains a visual broker snapshot with unverified BID/ASK.
+        try:
+            admissible=(record.get("source")==QUOTE_SOURCE
+                        and record.get("broker_status")=="TRADEABLE"
+                        and float(record.get("delay_seconds",1))==0
+                        and last.get("fallback_only") is True)
+        except (ValueError,TypeError,OverflowError):
+            admissible=False
+        if not admissible:
+            return {**missing,"reason":"QUOTE_NIEAKTUALNY_LUB_RYNEK_ZAMKNIETY"}
+    sampled=(_parse_candidate(last.get("sampled_m15"),at,kind=SAMPLED_KIND,
+                              source=QUOTE_SOURCE,max_age=MAX_SAMPLE_AGE)
+             if verified_quote else None)
     broker=_parse_candidate(last.get("forming_m15"),at,kind=BROKER_KIND,
                             source=FROM_PRICES,max_age=MAX_BROKER_AGE)
     # Never draw a preview whose target closing label is already confirmed.
@@ -212,8 +226,10 @@ def assess_moving_m15(record,*,now=None,last_closed_utc=None):
     if visible is None:
         return {**missing,"reason":"WORKER_BRAK_NOWEJ_M15"}
     return {"visible":True,
-            "reason":"M15_MID_Z_PRÓBEK" if sampled else "M15_BROKER_W_TRAKCIE",
+            "reason":("M15_MID_Z_PRÓBEK" if sampled else
+                      "M15_BROKER_BEZ_POTWIERDZONEGO_QUOTE"
+                      if not verified_quote else "M15_BROKER_W_TRAKCIE"),
             "bar":visible,"broker_bar":broker,
-            "kind":visible["kind"],
+            "kind":visible["kind"],"quote_verified":verified_quote,
             "trade_permission":"WAIT","incomplete":True,
             "missing_extremes_possible":bool(sampled)}
