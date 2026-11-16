@@ -1589,7 +1589,16 @@ with market_tab:
                     auto_zoom=st.session_state.get('chart_price_autoscale',True))
                 st.warning('Wykres dostępny, ale jest mniej niż 70 zamkniętych świec — brak sygnału.')
     else:
-        st.warning('Nie ma danych. Włącz odczyt Capital.com lub dodaj własny CSV edukacyjny. Nie pokazuję fikcyjnych sygnałów.')
+        if remote_paper_view_enabled():
+            st.info('☁️ TRYB CLOUD: ten STARY wykres lokalny jest celowo '
+                    'nieaktywny — przeglądarka nie loguje się ponownie '
+                    'do Capital.com. To NIE oznacza braku świec z Northflank. '
+                    'Aktualny CLOUD M15 i osobny podgląd BID/ASK ~5S '
+                    'znajdują się POWYŻEJ. Lokalnych sygnałów nie generuję.')
+        else:
+            st.warning('Nie ma danych. Włącz odczyt Capital.com lub '
+                       'dodaj własny CSV edukacyjny. '
+                       'Nie pokazuję fikcyjnych sygnałów.')
 
 
 with chat_tab:
