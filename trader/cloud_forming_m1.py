@@ -42,7 +42,7 @@ def serialize_forming_m1(snapshot,*,collected_utc=None):
     closed=_utc(snapshot.get("time"))
     if closed-opened!=pd.Timedelta(minutes=1):
         raise ValueError("Unexpected forming M1 time interval")
-    if not 0 <= (now-opened).total_seconds() <= 65:
+    if not 0 <= (now-opened).total_seconds() < 60:
         raise ValueError("Forming M1 from wrong market minute")
     try:
         o,h,l,c=(float(snapshot[name]) for name in ("Open","High","Low","Close"))
@@ -104,7 +104,7 @@ def assess_cloud_forming_m1(record,*,now=None):
         age=(stamp-captured).total_seconds()
         if (closed-opened!=pd.Timedelta(minutes=1)
                 or not 0<=age<=MAX_RECEIPT_AGE_SECONDS
-                or not opened<=stamp<closed+pd.Timedelta(seconds=5)):
+                or not opened<=stamp<closed):
             return {**empty,"reason":"NIEAKTUALNA_SWI_ECA_M1"}
         o,h,l,c=(float(preview[k]) for k in ("open","high","low","close"))
         bid,ask,spread=(float(preview[k]) for k in ("bid","ask","spread"))
