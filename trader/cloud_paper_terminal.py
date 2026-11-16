@@ -14,6 +14,8 @@ import streamlit as st
 from .remote_checkpoint import RemoteCheckpoint, RemoteError
 from .paper_method_labels import method_attribution
 from .paper_display import annotate_open_paper, annotate_paper_history
+from .cloud_m15_live_overlay import (cloud_quote_overlay,m15_cache_due,
+                                     closed_m15_lag)
 
 
 def _parse_utc(value):
@@ -112,41 +114,80 @@ def cloud_paper_positions(payload, frame):
     return valid[:25],chart_rows
 
 
-@st.fragment(run_every="60s")
+@st.fragment(run_every="5s")
 def render_cloud_terminal(secret_fn):
-    """Owner-only automatic cloud history preview, not a broker LIVE chart."""
-    st.markdown("#### ☁️ US500 — ARCHIWUM CLOUD M15 (SUPABASE)")
+    """Owner-only M15 archive + live REST BID/ASK overlay; no Capital auth.
+
+    Fragment updates the PRICE OVERLAY about every five seconds only while
+    browser is open. Closed M15 and checkpoint load about every 60 seconds.
+    Worker clocks, AUTO and PAPER remain completely independent.
+    """
+    st.markdown("#### ☁️ US500 — CLOUD M15 + CENA BID/ASK ~5S")
     st.caption(
-        "Aktualizowane tylko gdy terminal jest otwarty. Przegladarka NIE "
-        "loguje sie do Capital.com; calodobowy worker Northflank dziala "
-        "osobno i ma wlasne Secrets. Dane sa archiwalne M15, nie "
-        "pięciosekundowym LIVE BID/OFFER.")
-    if not secret_fn("FOKUS_SUPABASE_URL") or not secret_fn("FOKUS_SUPABASE_SECRET_KEY"):
+        "Świece: tylko ZAMKNIĘTE M15, aktualizowane z Supabase co ok. 60 s. "
+        "Żółty ślad: osobne odczyty BID/ASK z REST, odświeżane ok. 5 s "
+        "gdy strona jest otwarta. NIE są to ticki ani świece 5S. "
+        "Streamlit NIE loguje się do brokera, tylko czyta chmurę.")
+    url=secret_fn("FOKUS_SUPABASE_URL")
+    key=secret_fn("FOKUS_SUPABASE_SECRET_KEY")
+    if not url or not key:
         st.warning("Brak prywatnych Secrets Supabase w Streamlit. "
-                   "Nie oznacza to awarii niezaleznego workera Northflank.")
+                   "Nie oznacza to awarii niezależnego workera Northflank.")
         return
     try:
-        remote=RemoteCheckpoint(secret_fn("FOKUS_SUPABASE_URL"),
-                                secret_fn("FOKUS_SUPABASE_SECRET_KEY"))
-        version,payload=remote.fetch()
-        frame=remote.fetch_candles("US500","MINUTE_15",limit=180)
-        audit=cloud_terminal_summary(version,payload,frame)
+        remote=RemoteCheckpoint(url,key)
+        cache=st.session_state.get("_fokus_cloud_m15_cache_v2")
+        if (not isinstance(cache,dict) or cache.get("url")!=url
+                or m15_cache_due(cache)):
+            version,payload=remote.fetch()
+            frame=remote.fetch_candles("US500","MINUTE_15",limit=180)
+            audit=cloud_terminal_summary(version,payload,frame)
+            # Per-BROWSER session cache only; never put credentials in it.
+            st.session_state["_fokus_cloud_m15_cache_v2"]={
+                "url":url,"version":version,"payload":payload,"frame":frame,
+                "fetched_utc":pd.Timestamp.now(tz="UTC").isoformat()}
+        else:
+            version,payload,frame=(cache["version"],cache["payload"],cache["frame"])
+            audit=cloud_terminal_summary(version,payload,frame)
     except (RemoteError,ValueError,TypeError,KeyError,OverflowError,OSError):
-        st.error("Nie udało się odczytać checkpointu lub archiwum "
-                 "M15 z Supabase. To błąd PODGLĄDU, nie dowód awarii "
-                 "workera Northflank. Sprawdź zakładkę STATUS/API.")
+        st.session_state.pop("_fokus_cloud_m15_cache_v2",None)
+        st.error("Nie udało się odczytać checkpointu lub archiwum M15. "
+                 "Nie przedstawiam niezweryfikowanego cache jako aktualnego. "
+                 "Sprawdź STATUS/API i Northflank.")
         return
+    # Price polling is intentionally independent of a healthy M15 archive.
+    # A broken/stale quote must NEVER erase the historical chart or be
+    # drawn as if the price were tradable.
+    try:
+        overlay=cloud_quote_overlay(remote.fetch_live_quote("US500"))
+    except (RemoteError,ValueError,TypeError,KeyError,OverflowError,OSError):
+        overlay={"visible":False,"broker_status":"UNKNOWN","age_seconds":None,
+                 "reason":"Nie udało się odczytać aktualnego BID/ASK.",
+                 "points":[]}
     x,y,z=st.columns(3)
     x.metric("Checkpoint",str(audit["version"]))
     y.metric("Zapisane M15",str(audit["bars"]))
     z.metric("Wiek checkpointu",str(audit["age_minutes"])+" min"
              if audit["age_minutes"] is not None else "BRAK")
     if audit["cloud_online_confirmed"]:
-        st.success("Zapis checkpointu jest świeży. To nie potwierdza "
-                   "kompletności wszystkich świec ani otwarcia rynku.")
+        st.caption("Checkpoint zapisano niedawno. Nie dowodzi to otwarcia "
+                   "rynku ani poprawności każdej świecy M15.")
     else:
         st.warning("Checkpoint nie jest świeży lub jego daty nie potwierdzono. "
                    "Sprawdź Northflank; nie twierdzę, że worker teraz działa.")
+    if overlay["visible"]:
+        st.metric("🟡 BIEŻĄCY MID BID/ASK (REST)",f'{overlay["mid"]:.2f} pkt')
+        st.caption(
+            f'BID {overlay["bid"]:.2f} | ASK {overlay["ask"]:.2f} | '
+            f'Spread {overlay["spread"]:.2f} pkt | '
+            f'Broker {overlay["broker_status"]} | '
+            f'Wiek odczytu {overlay["age_seconds"]} s. '
+            "To próbki API, nie ticki ani cena wykonanego zlecenia.")
+    else:
+        st.warning("⚪ BRAK AKTUALNEJ CENY 5S: "+overlay["reason"]+
+                   " | Broker: "+str(overlay["broker_status"])+
+                   " | Wiek: "+str(overlay["age_seconds"])+
+                   " s. Ostatnie M15 to wyłącznie historia.")
     st.caption("Ostatni zapis skanera UTC: "+
                str(audit["last_scan_utc"] or "BRAK")+
                " | Ostatnia M15 w archiwum UTC: "+
@@ -188,6 +229,23 @@ def render_cloud_terminal(secret_fn):
     candles=go.Figure(go.Candlestick(
         x=frame.index,open=frame.Open,high=frame.High,
         low=frame.Low,close=frame.Close,name="US500 M15 CLOUD"))
+    # Only validated fresh DEMO quote points, never synthetic candles.
+    if overlay["visible"]:
+        points=overlay["points"]
+        if points:
+            candles.add_trace(go.Scatter(
+                x=[p["time"] for p in points],
+                y=[p["mid"] for p in points],
+                mode="lines+markers" if len(points)>1 else "markers",
+                name="🟡 MID BID/ASK ~5S (REST)",
+                line={"color":"#f5c24b","width":2.6},
+                marker={"size":7,"color":"#f5c24b"},
+                hovertemplate="REST %{x}<br>MID: %{y:.2f}<extra></extra>"))
+        candles.add_hline(
+            y=float(overlay["mid"]),line_color="#f5c24b",
+            line_dash="dot",opacity=.65,
+            annotation_text=f'BID/ASK MID {overlay["mid"]:.2f}',
+            annotation_position="top left")
     # Exact OPEN/CLOSE PAPER from the checkpoint, NEVER watch markers or
     # signals inferred from OHLC. M1 PAPER may appear on the M15 time axis.
     annotate_paper_history(candles,chart_paper,
@@ -197,12 +255,21 @@ def render_cloud_terminal(secret_fn):
         annotate_open_paper(candles,open_row)
     candles.update_layout(
         height=410,xaxis_rangeslider_visible=False,template="plotly_dark",
+        uirevision="fokus_cloud_m15_live_v2",
         paper_bgcolor="#111a2d",plot_bgcolor="#111a2d",
         margin={"l":10,"r":10,"t":15,"b":10})
     st.plotly_chart(candles,use_container_width=True,
                     key="cloud_worker_m15_chart")
-    st.caption("Świece: historyczne M15. Trójkąty i kwadraty: WYŁĄCZNIE "
-               "rzeczywiście zapisane otwarcia/zamknięcia PAPER z checkpointu "
-               "(także z M1 na osi czasu M15), po najechaniu: AUTO → metoda, "
-               "TF, ID i wynik. To retrospektywny PAPER, nie rzeczywisty fill "
-               "Capital.com. Nie generujemy tutaj nowych transakcji.")
+    if overlay["visible"]:
+        lag=closed_m15_lag(frame)
+        if lag is not None and lag>35:
+            st.warning(
+                f'⚠️ Bieżące ceny są dostępne, ale ostatnia archiwalna '
+                f'M15 ma {lag:.1f} min. Sprawdź zapis zamkniętych świec '
+                'w Northflank/Supabase; checkpoint nie gwarantuje OHLC.')
+    st.caption("Zielone/czerwone świece: HISTORYCZNE M15. Żółta linia i "
+               "punkty: jedynie ŚWIEŻE obserwacje BID/ASK REST (~5 s, "
+               "do 24 punktów), a nie ticki/świece. Trójkąty i kwadraty: "
+               "WYŁĄCZNIE zapisane PAPER OPEN/CLOSED z checkpointu "
+               "(także M1), po najechaniu AUTO → metoda, TF, ID, wynik. "
+               "Wykres nie tworzy nowych transakcji ani brokerowych filli.")
