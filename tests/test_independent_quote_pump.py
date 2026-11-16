@@ -133,7 +133,8 @@ def test_main_worker_uses_background_sampler_no_concurrent_idle_poll():
     assert '"last_fresh_utc"' in code
     assert 'time.sleep(idle_seconds)' in code
     assert '"FOKUS_PAPER_STRATEGY"' in code
-    assert "POST /positions" not in Path("trader/cloud_quote_pump.py").read_text()
+    assert "self.session.post(" not in Path("trader/cloud_quote_pump.py").read_text()
+    assert "self.session.put(" not in Path("trader/cloud_quote_pump.py").read_text()
 
 
 def _current_m15():
