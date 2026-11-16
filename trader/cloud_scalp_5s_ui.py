@@ -96,8 +96,10 @@ def render_cloud_scalp_5s(secret_fn):
                    "świeżego odczytu workera. M15 pozostaje osobnym archiwum.")
         return
     left,mid,right=st.columns(3)
-    left.metric("BID",f'{result["bid"]:.2f}')
-    mid.metric("ASK",f'{result["ask"]:.2f}')
+    left.metric("BID (LIVE)" if result["fresh"] else
+                "OSTATNI BID — NIE LIVE",f'{result["bid"]:.2f}')
+    mid.metric("ASK (LIVE)" if result["fresh"] else
+               "OSTATNI ASK — NIE LIVE",f'{result["ask"]:.2f}')
     right.metric("Spread (pkt)",f'{result["spread"]:.2f}')
     st.caption("Broker: "+result["broker_status"]+
                " | Ostatnia próba UTC: "+result["received_utc"]+
@@ -108,7 +110,11 @@ def render_cloud_scalp_5s(secret_fn):
         st.warning("WAIT — brak aktualnego, nieopóźnionego BID/ASK. "
                    "Nie wyciągaj wniosków z ostatniej ceny.")
     history=result["samples"]
-    if len(history)>=2:
+    if not result["fresh"] and len(history)>=2:
+        st.caption("Wykres ostatnich 24 próbek jest ukryty, ponieważ "
+                   "aktualnego BID/ASK nie potwierdzono. Stare notowania "
+                   "nie powinny wyglądać na ruch rynku.")
+    if result["fresh"] and len(history)>=2:
         df=pd.DataFrame(history)
         chart=go.Figure(go.Scatter(x=df["time"],y=df["mid"],
                                    mode="lines+markers",
