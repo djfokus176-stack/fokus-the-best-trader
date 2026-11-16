@@ -156,6 +156,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         cache=st.session_state.get("_fokus_cloud_chart_cache_v3")
         if (not isinstance(cache,dict) or cache.get("url")!=url
                 or cache.get("resolution")!=resolution
+                or cache.get("choice")!=choice
                 or m15_cache_due(cache)):
             version,payload=remote.fetch()
             original=remote.fetch_candles("US500",resolution,limit=180)
@@ -163,7 +164,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
             audit=cloud_terminal_summary(version,payload,frame)
             # Per-BROWSER session cache only; never put credentials in it.
             st.session_state["_fokus_cloud_chart_cache_v3"]={
-                "url":url,"resolution":resolution,
+                "url":url,"resolution":resolution,"choice":choice,
                 "version":version,"payload":payload,"frame":frame,
                 "fetched_utc":pd.Timestamp.now(tz="UTC").isoformat()}
         else:
@@ -171,7 +172,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
             audit=cloud_terminal_summary(version,payload,frame)
     except (RemoteError,ValueError,TypeError,KeyError,OverflowError,OSError):
         st.session_state.pop("_fokus_cloud_chart_cache_v3",None)
-        st.error("Nie udało się odczytać checkpointu lub archiwum M15. "
+        st.error("Nie udało się odczytać checkpointu lub archiwum "+choice+". "
                  "Nie przedstawiam niezweryfikowanego cache jako aktualnego. "
                  "Sprawdź STATUS/API i Northflank.")
         return
@@ -235,7 +236,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
                    "checkpoint zapisuje inny proces.")
     if audit["cloud_online_confirmed"]:
         st.caption("Checkpoint zapisano niedawno. Nie dowodzi to otwarcia "
-                   "rynku ani poprawności każdej świecy M15.")
+                   "rynku ani poprawności każdej świecy "+choice+".")
     else:
         st.warning("Checkpoint nie jest świeży lub jego daty nie potwierdzono. "
                    "Sprawdź Northflank; nie twierdzę, że worker teraz działa.")
@@ -251,7 +252,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         st.warning("⚪ BRAK AKTUALNEJ CENY 5S: "+overlay["reason"]+
                    " | Broker: "+str(overlay["broker_status"])+
                    " | Wiek: "+str(overlay["age_seconds"])+
-                   " s. Ostatnie M15 to wyłącznie historia.")
+                   " s. Ostatnie "+choice+" to wyłącznie historia.")
     if forming["visible"]:
         m=forming["preview"]
         st.caption(
@@ -392,7 +393,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
             annotation_text=f'BID/ASK MID {overlay["mid"]:.2f}',
             annotation_position="top left")
     # Separate broker /prices M1 PREVIEW marker; not a closed M15 candle.
-    if forming["visible"]:
+    if forming["visible"] and choice=="M15":
         m=forming["preview"]
         candles.add_trace(go.Scatter(
             x=[m["captured_time"]],y=[m["close"]],
@@ -421,12 +422,14 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
                     key="cloud_worker_chart_"+choice+"_v1")
     if overlay["visible"]:
         lag=closed_m15_lag(frame)
-        if lag is not None and lag>35:
+        limits={"M1":5,"M2":8,"M5":16,"M15":35,"H1":125}
+        if lag is not None and lag>limits[choice]:
             st.warning(
-                f'⚠️ Bieżące ceny są dostępne, ale ostatnia archiwalna '
-                f'M15 ma {lag:.1f} min. Sprawdź zapis zamkniętych świec '
+                f'⚠️ Bieżące ceny są dostępne, ale ostatnia zamknięta '
+                f'{choice} ma {lag:.1f} min. Sprawdź zapis świec '
                 'w Northflank/Supabase; checkpoint nie gwarantuje OHLC.')
     st.caption("Zielone/czerwone świece: HISTORYCZNE, ZAMKNIĘTE "+choice+". "
+               "Dla M2: pary pełnych M1, bez wypełniania braków. "
                "Jasnoniebieska/pomarańczowa OSTATNIA świeca: "
                "ruchoma, NIEPEŁNA "+choice+" z obserwacji MID REST, "
                "wysokie/niskie knoty mogą być niekompletne. "
