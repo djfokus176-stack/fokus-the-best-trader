@@ -538,14 +538,37 @@ class CapitalReadOnly:
         }
 
     def market_quote(self, epic: str = 'US500') -> MarketQuote:
-        """Fast read-only GET: current bid/offer, status and provider timestamp."""
+        """Read-only UTC-timestamped quote from documented markets list API.
+
+        Capital's SINGLE market details /markets/{epic} example has only
+        snapshot.updateTime (not guaranteed UTC). The old 5S collector
+        required snapshot.updateTimeUTC, so it silently labelled good
+        current BID/ASK as stale. GET /markets?epics=US500 documents an
+        unambiguous updateTimeUTC on the exact market row.
+
+        Never interpret updateTime without a timezone as UTC. If UTC is
+        missing from the list row, parse_market_quote returns fresh=False
+        and the UI will NOT present it as current.
+        """
         if not epic.replace('_','').isalnum():
             raise FeedError('Niepoprawny EPIC')
         try:
-            r=self.session.get(f'{self.base_url}/api/v1/markets/{epic}',
-                headers=self.headers(),timeout=8)
+            r=self.session.get(f'{self.base_url}/api/v1/markets',
+                params={'epics':epic},headers=self.headers(),timeout=8)
             r.raise_for_status()
-            return parse_market_quote(r.json(),epic,self.environment)
+            data=r.json()
+            markets=data.get('markets') if isinstance(data,dict) else None
+            if not isinstance(markets,list):
+                raise FeedError('Bieżąca cena: brak listy markets API')
+            matches=[v for v in markets
+                     if isinstance(v,dict) and v.get('epic')==epic]
+            if len(matches)!=1:
+                raise FeedError('Bieżąca cena: brak jednoznacznego rynku EPIC')
+            # Normalize only the documented exact market row, not results
+            # for other products. Keep timestamp validation unchanged.
+            return parse_market_quote(
+                {'instrument':{'epic':epic},'snapshot':matches[0]},
+                epic,self.environment)
         except requests.RequestException as ex:
             raise FeedError(http_error_message(ex,'Bieżąca cena',epic)) from ex
         except (ValueError,TypeError,AttributeError) as ex:
