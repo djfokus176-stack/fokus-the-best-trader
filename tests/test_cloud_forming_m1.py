@@ -130,7 +130,20 @@ class _MockBroker:
             mid=7532.7,spread=.6,status="TRADEABLE",
             update_utc=now,received_utc=now,delay_seconds=0.,fresh=True)
     def forming_candle(self,epic,tf):
-        assert epic=="US500" and tf=="MINUTE"
+        assert epic=="US500"
+        if tf=="MINUTE_15":
+            if self.fail:raise FeedError("Do not expose broker details")
+            now=pd.Timestamp.now(tz="UTC")
+            open_t=now.floor("15min")
+            return {"epic":"US500","environment":"DEMO",
+                    "timeframe":"MINUTE_15",
+                    "source":"Capital.com /prices • bieżąca OHLC",
+                    "time":open_t+pd.Timedelta(minutes=15),
+                    "last_tick":open_t,
+                    "Open":7530.,"High":7534.4,"Low":7528.3,
+                    "Close":7532.7,"bid":7532.4,
+                    "ask":7533.,"spread":.6}
+        assert tf=="MINUTE"
         self.forming_calls+=1
         if self.fail:raise FeedError("Do not expose broker details")
         return broker_m1(pd.Timestamp.now(tz="UTC"))
