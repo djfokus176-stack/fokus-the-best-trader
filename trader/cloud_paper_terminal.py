@@ -17,6 +17,7 @@ from .paper_display import annotate_open_paper, annotate_paper_history
 from .cloud_m15_live_overlay import (cloud_quote_overlay,m15_cache_due,
                                      closed_m15_lag)
 from .cloud_forming_m1 import assess_cloud_forming_m1
+from .cloud_moving_m15 import assess_moving_m15
 
 
 def _parse_utc(value):
@@ -123,9 +124,11 @@ def render_cloud_terminal(secret_fn):
     browser is open. Closed M15 and checkpoint load about every 60 seconds.
     Worker clocks, AUTO and PAPER remain completely independent.
     """
-    st.markdown("#### ☁️ US500 — M15 + CENA BID/ASK ~5S + M1 W TRAKCIE")
+    st.markdown("#### ☁️ US500 — ŚWIECA M15 LIVE (RUCHOME KNOTY) + PAPER")
     st.caption(
-        "Świece: tylko ZAMKNIĘTE M15, aktualizowane z Supabase co ok. 60 s. "
+        "Zamknięte M15 = zielone/czerwone świece historyczne. "
+        "OSTATNIA świeca M15 w trakcie = dane MID z rzeczywistych próbek "
+        "BID/ASK workera co ~5s, z ruchomymi knotami, wyraźnie NIEPEŁNA. "
         "Żółty ślad: osobne odczyty BID/ASK z REST, odświeżane ok. 5 s "
         "gdy strona jest otwarta. NIE są to ticki ani świece 5S. "
         "Nieukończona M1 (gdy dostępna) pochodzi wyłącznie od Northflank "
@@ -166,12 +169,18 @@ def render_cloud_terminal(secret_fn):
         quote_now=pd.Timestamp.now(tz="UTC")
         overlay=cloud_quote_overlay(quote_record,now=quote_now)
         forming=assess_cloud_forming_m1(quote_record,now=quote_now)
+        moving_m15=assess_moving_m15(
+            quote_record,now=quote_now,
+            last_closed_utc=frame.index[-1] if not frame.empty else None)
     except (RemoteError,ValueError,TypeError,KeyError,OverflowError,OSError):
         overlay={"visible":False,"broker_status":"UNKNOWN","age_seconds":None,
                  "reason":"Nie udało się odczytać aktualnego BID/ASK.",
                  "points":[]}
         forming={"visible":False,
                  "reason":"BRAK_ODCZYTU_NIEPELNEJ_M1","preview":None}
+        moving_m15={"visible":False,
+                    "reason":"BŁĄD_ODCZYTU_LIVE_M15","bar":None,
+                    "broker_bar":None}
     x,y,z=st.columns(3)
     x.metric("Checkpoint",str(audit["version"]))
     y.metric("Zapisane M15",str(audit["bars"]))
@@ -209,6 +218,31 @@ def render_cloud_terminal(secret_fn):
         st.caption('🕯️ Podgląd M1 /prices: '+forming["reason"]+
                    '. Nie ma drugiego logowania Capital w Streamlit; '
                    'dane wymagają odświeżonego workera Northflank.')
+    if moving_m15["visible"]:
+        live=moving_m15["bar"]
+        st.success(
+            "🕯️ M15 LIVE — RUCHOME KNOTY (PODGLĄD, NIE SYGNAŁ) | "
+            + ("MID z próbek REST" if moving_m15["missing_extremes_possible"]
+               else "nieukończona OHLC brokera /prices")
+            + f' | O={live["open"]:.2f}, H={live["high"]:.2f}, '
+              f'L={live["low"]:.2f}, C={live["close"]:.2f}'
+            + f' | aktualizacja {live["capture_age_seconds"]} s temu.')
+        if moving_m15["missing_extremes_possible"]:
+            st.caption(
+                "Uwaga: knoty HIGH/LOW obejmują wyłącznie ZAOBSERWOWANE "
+                "próbki REST od " + str(live.get("first_vendor_utc","BRAK"))+
+                "; nie muszą odzwierciedlać ekstremów całych 15 minut. "
+                "Nie wpływają na SL/TP ani AUTO.")
+    else:
+        st.warning(
+            "🟠 M15 LIVE NIEAKTYWNA: "+moving_m15["reason"]+
+            ". Wtedy wykres pokazuje wyłącznie ZAMKNIĘTE świece M15; "
+            "nie wymuszam sztucznych knotów. "
+            "Sprawdź, czy Northflank wdrożył wersję WICK-M15-v1 i "
+            "czy próbki BID/ASK są świeże.")
+    st.caption("Wersja podglądu: WICK-M15-v1 | "
+               "odświeżenie przeglądarki ~5s | "
+               "nie jest to zlecenie ani świeca dla strategii.")
     st.caption("Ostatni zapis skanera UTC: "+
                str(audit["last_scan_utc"] or "BRAK")+
                " | Ostatnia M15 w archiwum UTC: "+
@@ -250,6 +284,38 @@ def render_cloud_terminal(secret_fn):
     candles=go.Figure(go.Candlestick(
         x=frame.index,open=frame.Open,high=frame.High,
         low=frame.Low,close=frame.Close,name="US500 M15 CLOUD"))
+    # IMPORTANT: this is a separate, visibly named, INCOMPLETE bar.
+    # It uses REAL observed MID samples for both moving body and wicks.
+    # The original closed M15 OHLC and PAPER annotations remain immutable.
+    if moving_m15["visible"]:
+        live=moving_m15["bar"]
+        explanation=("M15 — tylko ZAOBSERWOWANE próbki MID; "
+                     "może brakować rzeczywistych ekstremów."
+                     if moving_m15["missing_extremes_possible"]
+                     else "M15 w trakcie: niezamknięty OHLC Capital /prices.")
+        candles.add_trace(go.Candlestick(
+            x=[live["at"]],
+            open=[live["open"]],high=[live["high"]],
+            low=[live["low"]],close=[live["close"]],
+            name=("🕯️ M15 LIVE • MID Z PRÓBEK (KNOTY W RUCHU)"
+                  if moving_m15["missing_extremes_possible"]
+                  else "🕯️ M15 LIVE /prices • NIEPEŁNA"),
+            increasing={"line":{"color":"#34e8f2","width":3},
+                        "fillcolor":"rgba(52,232,242,0.48)"},
+            decreasing={"line":{"color":"#ffad4e","width":3},
+                        "fillcolor":"rgba(255,173,78,0.48)"},
+            hovertext=[explanation+
+                "<br>O: "+str(round(live["open"],2))+
+                " H: "+str(round(live["high"],2))+
+                " L: "+str(round(live["low"],2))+
+                " C: "+str(round(live["close"],2))+
+                "<br>Odebrano: "+str(live["collected_utc"])],
+            hoverinfo="text"))
+        # Keep the moving candle in viewport as each new quarter begins.
+        # No future data or fake calendar gap may be interpolated.
+        left=max(frame.index[0],live["at"]-pd.Timedelta(hours=8))
+        candles.update_xaxes(range=[
+            left,live["at"]+pd.Timedelta(minutes=16)])
     # Only validated fresh DEMO quote points, never synthetic candles.
     if overlay["visible"]:
         points=overlay["points"]
@@ -290,11 +356,11 @@ def render_cloud_terminal(secret_fn):
         annotate_open_paper(candles,open_row)
     candles.update_layout(
         height=410,xaxis_rangeslider_visible=False,template="plotly_dark",
-        uirevision="fokus_cloud_m15_live_v2",
+        uirevision="fokus_cloud_m15_wicks_v1",
         paper_bgcolor="#111a2d",plot_bgcolor="#111a2d",
         margin={"l":10,"r":10,"t":15,"b":10})
     st.plotly_chart(candles,use_container_width=True,
-                    key="cloud_worker_m15_chart")
+                    key="cloud_worker_m15_chart_wicks_v1")
     if overlay["visible"]:
         lag=closed_m15_lag(frame)
         if lag is not None and lag>35:
@@ -302,7 +368,10 @@ def render_cloud_terminal(secret_fn):
                 f'⚠️ Bieżące ceny są dostępne, ale ostatnia archiwalna '
                 f'M15 ma {lag:.1f} min. Sprawdź zapis zamkniętych świec '
                 'w Northflank/Supabase; checkpoint nie gwarantuje OHLC.')
-    st.caption("Zielone/czerwone świece: HISTORYCZNE M15. "
+    st.caption("Zielone/czerwone świece: HISTORYCZNE, ZAMKNIĘTE M15. "
+               "Jasnoniebieska/pomarańczowa OSTATNIA świeca: "
+               "ruchoma, NIEPEŁNA M15 z obserwacji MID REST, "
+               "wysokie/niskie knoty mogą być niekompletne. "
                "Niebieski pusty romb: M1 /prices W TRAKCIE, tylko do "
                "podglądu (jeśli świeży). Żółta linia i "
                "punkty: jedynie ŚWIEŻE obserwacje BID/ASK REST (~5 s, "
