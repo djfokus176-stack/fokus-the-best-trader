@@ -186,6 +186,33 @@ def render_cloud_terminal(secret_fn):
     y.metric("Zapisane M15",str(audit["bars"]))
     z.metric("Wiek checkpointu",str(audit["age_minutes"])+" min"
              if audit["age_minutes"] is not None else "BRAK")
+    pump=payload.get("meta",{}).get("quote_pump")
+    if isinstance(pump,dict) and pump.get("mode")=="BACKGROUND_SAME_CAPITAL_LOGIN":
+        last_try=_parse_utc(pump.get("last_attempt_utc"))
+        last_write=_parse_utc(pump.get("last_write_utc"))
+        last_fresh=_parse_utc(pump.get("last_fresh_utc"))
+        now_diag=pd.Timestamp.now(tz="UTC")
+        def _minutes(ts):
+            return (f"{(now_diag-ts).total_seconds()/60:.1f} min"
+                    if ts is not None else "NIGDY")
+        health=str(pump.get("status","UNKNOWN"))[:48]
+        message=(f"📡 NIEZALEŻNY KOLEKTOR 5S | stan: {health} | "
+                 f"próby: {pump.get('attempts',0)} | "
+                 f"ostatnia próba: {_minutes(last_try)} | "
+                 f"ostatni zapis: {_minutes(last_write)} | "
+                 f"ostatnia ŚWIEŻA cena: {_minutes(last_fresh)}. "
+                 "Ten sam login DEMO; dane osobne od PAPER.")
+        if (health=="LIVE_QUOTE_SAVED" and last_fresh is not None and
+                0 <= (now_diag-last_fresh).total_seconds()<=30):
+            st.success(message)
+        else:
+            st.warning(message)
+    else:
+        st.warning("📡 KOLEKTOR 5S: BRAK POTWIERDZENIA NOWEGO WORKERA "
+                   "BACKGROUND_SAME_CAPITAL_LOGIN w checkpointcie. "
+                   "Możliwe, że Northflank nadal korzysta ze starego "
+                   "commita, wyłączono FOKUS_SCALP_5S_ENABLED albo "
+                   "checkpoint zapisuje inny proces.")
     if audit["cloud_online_confirmed"]:
         st.caption("Checkpoint zapisano niedawno. Nie dowodzi to otwarcia "
                    "rynku ani poprawności każdej świecy M15.")

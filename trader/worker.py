@@ -31,6 +31,7 @@ from .paper_daily_risk import paper_daily_risk, DEFAULT_DAILY_STOP_PTS
 from .wave_shadow_archive import advance_wave_shadow, wave_shadow_scorecard
 from .wave_ae_forward_auto import advance_wave_ae_forward, wave_ae_forward_scorecard
 from .cloud_scalp_quotes import Quote5sSampler, idle_quote_pulses
+from .cloud_quote_pump import build_quote_pump
 from .paper_method_labels import decision_attribution, method_attribution
 from .fokus_3f_forward import advance_3f_forward, forward_3f_scorecard
 
@@ -214,7 +215,7 @@ def scan_once(client,epic,tf,strategy,max_spread,db, *,
 def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
                      enable_setups=True,strict_macro=True,
                      calendar_fetch=fetch_bls_schedule,
-                     clock_confirmed_open=None):
+                     clock_confirmed_open=None,quote_health=None):
     """Single-worker cloud cycle; fail closed on missing/changed checkpoint.
 
     Cloud checkpoint is loaded before the scan and CAS-saved after.
@@ -452,6 +453,10 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             payload["fokus_3f_forward_report"]=forward_3f_scorecard(threef_state)
         latest_shadow_report=shadow_scorecard(shadow_state)
         payload["shadow_learning_report"]=latest_shadow_report
+        # Sample thread diagnostics immediately before commit, not before
+        # potentially long MTF/GPT/Supabase scan. The callback is pure.
+        if callable(quote_health):
+            quote_health=quote_health()
         payload["meta"]={
             "last_scan_utc":datetime.now(timezone.utc).isoformat(),
             "last_scan_summary":status[:350],
@@ -487,6 +492,17 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             "auto_gpt_configured":bool(os.getenv("OPENAI_API_KEY","")),
             "auto_gpt_last_status":auto_state.get("status","NOT_YET_EXECUTED") if isinstance(auto_state,dict) else "NOT_YET_EXECUTED",
             "worker":"GitHub Actions or foreground process",
+            # Nonsecret, non-trading diagnostics for the independent
+            # same-login quote pump, retained in the existing checkpoint.
+            "quote_pump":(
+                {k:quote_health.get(k) for k in (
+                    "mode","status","last_attempt_utc","last_write_utc",
+                    "last_fresh_utc","attempts","trade_permission")}
+                if isinstance(quote_health,dict) else
+                {"mode":"DISABLED_OR_LEGACY","status":"NO_BACKGROUND_PUMP",
+                 "last_attempt_utc":None,"last_write_utc":None,
+                 "last_fresh_utc":None,"attempts":0,
+                 "trade_permission":"WAIT"}),
             "candle_backfill_enabled":bool(backfill_enabled),
             "candle_backfill_status":backfill_state.get("status","DISABLED")
                 if backfill_enabled else "DISABLED",
@@ -586,6 +602,16 @@ def main(argv=None):
     client=CapitalReadOnly(os.getenv("CAPITAL_API_KEY",""),
         os.getenv("CAPITAL_IDENTIFIER",os.getenv("CAPITAL_LOGIN","")),
         os.getenv("CAPITAL_PASSWORD",""),environment="DEMO")
+    quote_pump=None
+    if quote_sampler is not None and not args.once:
+        # Quote collection MUST continue even when the complete MTF +
+        # Supabase PAPER scan consumes all available idle seconds.
+        # Separate HTTP clients, the SAME Capital login.
+        quote_pump=build_quote_pump(client,epic=args.epic,
+                                   sampler=quote_sampler).start()
+        print("CLOUD QUOTE PUMP: 5s observer independent of PAPER scans; "
+              "one broker login, one PAPER checkpoint writer.",
+              flush=True)
     if not candle_time_ok:
         print("WAIT / CANDLE_TIME_UNVERIFIED: collecting DEMO candles, NEW PAPER SETUPS BLOCKED.",flush=True)
     while True:
@@ -593,7 +619,8 @@ def main(argv=None):
             if use_remote:
                 message=remote_scan_once(remote,client,args.epic,args.tf,
                     args.strategy,2.0,enable_setups=(not args.disable_new_setups and candle_time_ok),
-                    strict_macro=not args.skip_macro_calendar)
+                    strict_macro=not args.skip_macro_calendar,
+                    quote_health=quote_pump.snapshot if quote_pump else None)
             else:
                 message=scan_once(client,args.epic,args.tf,args.strategy,2.0,db,
                     enable_setups=(not args.disable_new_setups and candle_time_ok),
@@ -619,14 +646,19 @@ def main(argv=None):
             break
         idle_seconds=(seconds_until_next_m1_scan() if args.align_minute
                       else args.interval)
-        if quote_sampler is not None and not args.once:
-            # Quote-only observation during idle time; never parallel to
-            # scan_once and never changes PAPER/MTF/WAVE decisions.
-            idle_quote_pulses(client,remote,args.epic,idle_seconds,quote_sampler)
-            if quote_sampler.last_status.startswith("QUOTE_WAIT_"):
+        if quote_pump is not None:
+            # Background worker handles all quote samples, also during
+            # the PAPER scan and this wait. Do NOT double-poll.
+            diag=quote_pump.snapshot()
+            if diag["status"].startswith(("QUOTE_WAIT_",
+                                           "QUOTE_PUMP_ERROR_")):
                 print(datetime.now(timezone.utc).isoformat(),
-                    "WAIT / SCALP_5S / "+quote_sampler.last_status+
-                    " / Check private fokus_live_quotes table",flush=True)
+                      "WAIT / CLOUD_QUOTE_PUMP / "+diag["status"]+
+                      " / last_fresh_utc="+str(diag["last_fresh_utc"]),
+                      flush=True)
+            time.sleep(idle_seconds)
+        elif quote_sampler is not None and not args.once:
+            idle_quote_pulses(client,remote,args.epic,idle_seconds,quote_sampler)
         else:
             time.sleep(idle_seconds)
 

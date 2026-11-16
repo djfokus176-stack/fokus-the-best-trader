@@ -197,9 +197,12 @@ def assess_moving_m15(record,*,now=None,last_closed_utc=None):
         # fallback_only by the SAME dedicated DEMO Northflank worker.
         # It remains a visual broker snapshot with unverified BID/ASK.
         try:
+            delay=float(record.get("delay_seconds",1))
+            delay_unknown=(last.get("source_delay_unknown") is True
+                           and delay==9999.0)
             admissible=(record.get("source")==QUOTE_SOURCE
                         and record.get("broker_status")=="TRADEABLE"
-                        and float(record.get("delay_seconds",1))==0
+                        and (delay==0.0 or delay_unknown)
                         and last.get("fallback_only") is True)
         except (ValueError,TypeError,OverflowError):
             admissible=False
