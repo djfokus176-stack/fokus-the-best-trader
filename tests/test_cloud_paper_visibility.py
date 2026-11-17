@@ -94,3 +94,13 @@ def test_ui_distinguishes_stage_two_watch_and_ledger_without_adding_trades():
     assert 'ttl_seconds=35 if choice in ("M1","M2") else 60' in source
     assert "queue_paper(" not in source
     assert "CapitalReadOnly(" not in source
+
+
+def test_cloud_terminal_is_outside_narrow_two_thirds_column():
+    src=Path("app.py").read_text("utf-8")
+    start=src.index("    with col2:")
+    end=src.index("    auto_scan = bool(",start)
+    block=src[start:end]
+    assert block.count("render_cloud_terminal(secret,tf)")==1
+    assert "    if remote_paper_view_enabled():\n        render_cloud_scalp_5s(secret)\n        render_cloud_terminal(secret,tf)" in block
+    assert "            render_cloud_terminal(secret,tf)" not in block
