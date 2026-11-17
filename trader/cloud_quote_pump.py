@@ -43,12 +43,16 @@ class BorrowedDemoQuoteClient(CapitalReadOnly):
 
     def headers(self):
         parent = self._scanner
+        borrow = getattr(parent, "borrowed_headers", None)
+        if callable(borrow):
+            return borrow()
+        # Backward-compatible test/fake client without token lock. The
+        # 595s-since-login cutoff was WRONG: Capital expires REST sessions
+        # after 10 minutes of INACTIVITY, and this worker keeps using it.
         cst = getattr(parent, "cst", None)
         token = getattr(parent, "token", None)
         api_key = getattr(parent, "api_key", None)
-        started = float(getattr(parent, "session_started", 0))
-        age = time.time() - started
-        if (not cst or not token or not api_key or not 0 <= age < 595):
+        if not cst or not token or not api_key:
             raise FeedError("PAPER_BROKER_SESSION_NOT_READY")
         return {"X-CAP-API-KEY": api_key, "CST": cst,
                 "X-SECURITY-TOKEN": token}
@@ -117,7 +121,8 @@ class CloudQuotePump:
         if status is not None:
             wrote = status in ("LIVE_QUOTE_SAVED", "BROKER_NOT_FRESH",
                                "BROKER_M15_ONLY_UNVERIFIED_QUOTE",
-                               "BROKER_M1_ONLY_UNVERIFIED_QUOTE")
+                               "BROKER_M1_ONLY_UNVERIFIED_QUOTE",
+                               "BROKER_MTF_ONLY_UNVERIFIED_QUOTE")
             self._note(status, attempted=True, written=wrote,
                        fresh=status == "LIVE_QUOTE_SAVED")
         return status

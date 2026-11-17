@@ -143,6 +143,8 @@ class _MockBroker:
                     "Open":7530.,"High":7534.4,"Low":7528.3,
                     "Close":7532.7,"bid":7532.4,
                     "ask":7533.,"spread":.6}
+        if tf not in ("MINUTE","MINUTE_15"):
+            raise FeedError("Additional provider TF unavailable in M1 fake")
         assert tf=="MINUTE"
         self.forming_calls+=1
         if self.fail:raise FeedError("Do not expose broker details")

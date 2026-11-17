@@ -20,6 +20,7 @@ from .market import FeedError
 from .remote_checkpoint import RemoteError
 from .cloud_forming_m1 import serialize_forming_m1
 from .cloud_moving_m15 import update_sampled_m15, broker_forming_m15
+from .cloud_broker_timeframes import CONFIG as BROKER_TF, serialize_broker_forming
 
 SOURCE="Capital.com DEMO REST"
 MAX_SAMPLES=24
@@ -33,6 +34,8 @@ FORMING_INTERVAL=5.0  # read the actual unfinished M1 as in legacy v7.1
 FORMING_ERROR_INTERVAL=60.0
 M15_FORMING_INTERVAL=30.0  # extra broker M15 at most every 30s
 M15_FORMING_ERROR_INTERVAL=120.0
+EXTRA_FORMING_INTERVALS={"M5":30.0,"H1":45.0}
+EXTRA_FORMING_ERROR_INTERVAL=90.0
 
 
 class Quote5sSampler:
@@ -47,6 +50,61 @@ class Quote5sSampler:
         self.forming_m15=None
         self.forming_m15_next_due=0.
         self.forming_m15_status="NOT_STARTED"
+        self.extra_forming={}
+        self.extra_forming_next_due={"M5":0.,"H1":0.}
+        self.extra_forming_status={"M5":"NOT_STARTED","H1":"NOT_STARTED"}
+
+    def _collect_extra_forming(self,client,epic,moment):
+        """Optional real M5/H1 broker /prices; never affects accounting."""
+        if os.getenv("FOKUS_CLOUD_MTF_FORMING_ENABLED","true").strip().lower() not in (
+                "true","1","yes","on"):
+            return
+        method=getattr(client,"forming_candle",None)
+        if not callable(method):
+            return
+        for choice in ("M5","H1"):
+            if moment<self.extra_forming_next_due[choice]:
+                continue
+            self.extra_forming_next_due[choice]=(
+                moment+EXTRA_FORMING_INTERVALS[choice])
+            try:
+                raw=method(epic,BROKER_TF[choice][0])
+                self.extra_forming[choice]=serialize_broker_forming(
+                    raw,choice,now=datetime.now(timezone.utc))
+                self.extra_forming_status[choice]="BROKER_OHLC_SAVED"
+            except (FeedError,RemoteError,ValueError,TypeError,KeyError,
+                    AttributeError,OverflowError,OSError) as exc:
+                self.extra_forming.pop(choice,None)
+                self.extra_forming_status[choice]="BROKER_OHLC_WAIT_"+type(exc).__name__
+                hit_limit="HTTP 429" in str(exc)
+                self.extra_forming_next_due[choice]=moment+(
+                    RATE_LIMIT_RETRY_INTERVAL if hit_limit else
+                    EXTRA_FORMING_ERROR_INTERVAL)
+                if hit_limit:
+                    # Stop new MTF requests in this cycle when the broker
+                    # reports throttling; protect the shared DEMO account.
+                    for other in ("M5","H1"):
+                        self.extra_forming_next_due[other]=max(
+                            self.extra_forming_next_due[other],
+                            moment+RATE_LIMIT_RETRY_INTERVAL)
+                    break
+
+    def _recent_extra(self,now):
+        """Only genuinely current broker OHLC goes into the last JSON sample."""
+        output={}
+        for choice,(_,_,key,_) in BROKER_TF.items():
+            val=self.extra_forming.get(choice)
+            if not isinstance(val,dict):
+                continue
+            try:
+                received=datetime.fromisoformat(val["collected_utc"])
+                close=datetime.fromisoformat(val["bar_close_utc"])
+                if (0 <= (now-received).total_seconds() <= 48
+                        and now < close):
+                    output[key]=val
+            except (KeyError,ValueError,TypeError,OverflowError):
+                continue
+        return output
 
     def _prices_only_fallback(self,client,remote,epic,moment):
         """Read-only M15 display backup if /markets quote endpoint fails.
@@ -81,7 +139,9 @@ class Quote5sSampler:
                                    now=datetime.now(timezone.utc))
         except (FeedError,ValueError,TypeError,KeyError,OverflowError):
             pass
-        preferred=m1 or m15
+        self._collect_extra_forming(client,epic,moment)
+        extras=self._recent_extra(datetime.now(timezone.utc))
+        preferred=m1 or m15 or extras.get("forming_m5") or extras.get("forming_h1")
         if preferred is None:
             return None
         bid=float(preferred["bid"]);ask=float(preferred["ask"])
@@ -99,12 +159,15 @@ class Quote5sSampler:
                 "utc":now.isoformat(),"bid":bid,"ask":ask,
                 **({"forming_m1":m1} if m1 else {}),
                 **({"forming_m15":m15} if m15 else {}),
+                **extras,
                 "fallback_only":True,
                 "source_delay_unknown":True}],
         }
         remote.upsert_live_quote(row)
-        self.last_status=("BROKER_M1_ONLY_UNVERIFIED_QUOTE" if m1 else
-                          "BROKER_M15_ONLY_UNVERIFIED_QUOTE")
+        self.last_status=(
+            "BROKER_M1_ONLY_UNVERIFIED_QUOTE" if m1 else
+            "BROKER_M15_ONLY_UNVERIFIED_QUOTE" if m15 else
+            "BROKER_MTF_ONLY_UNVERIFIED_QUOTE")
         self.next_due=moment+PRICES_FALLBACK_INTERVAL
         return self.last_status
 
@@ -165,6 +228,13 @@ class Quote5sSampler:
             elif quote.status!="TRADEABLE":
                 self.forming_m15=None
                 self.forming_m15_status="MARKET_NOT_TRADEABLE"
+            # Actual M5/H1 OHLC from the SAME Capital DEMO session. This
+            # reader is deliberately independent of the quote.fresh flag;
+            # old /markets timestamps must not suppress display-only OHLC.
+            if quote.status=="TRADEABLE":
+                self._collect_extra_forming(client,epic,moment)
+            else:
+                self.extra_forming.clear()
             # Only this same authenticated worker may request incomplete M1.
             # /prices is throttled to ~15s independently of 5s MID polls.
             # An error has no effect on the quote write or PAPER lifecycle.
@@ -222,6 +292,9 @@ class Quote5sSampler:
             # column, writer or API credentials in the frontend.
             # Never forward stale in-progress M15 data.
             if samples and quote.fresh:
+                extra=self._recent_extra(datetime.now(timezone.utc))
+                if extra:
+                    samples[-1]={**samples[-1],**extra}
                 now_m15=datetime.now(timezone.utc)
                 sampled=self.sampled_m15
                 if isinstance(sampled,dict):
@@ -263,8 +336,12 @@ class Quote5sSampler:
                             attached[name]=item
                     except (KeyError,ValueError,TypeError,OverflowError):
                         continue
+                attached.update(self._recent_extra(now_fallback))
                 if attached and float(quote.delay_seconds)==0.0:
-                    selected=attached.get("forming_m1") or attached.get("forming_m15")
+                    selected=(attached.get("forming_m1") or
+                              attached.get("forming_m15") or
+                              attached.get("forming_m5") or
+                              attached.get("forming_h1"))
                     bid=float(selected["bid"])
                     ask=float(selected["ask"])
                     samples=(list(self.samples)[-23:]+[{
@@ -293,7 +370,9 @@ class Quote5sSampler:
                 "LIVE_QUOTE_SAVED" if quote.fresh else
                 ("BROKER_M1_ONLY_UNVERIFIED_QUOTE"
                  if samples[-1].get("forming_m1") else
-                 "BROKER_M15_ONLY_UNVERIFIED_QUOTE")
+                 "BROKER_M15_ONLY_UNVERIFIED_QUOTE"
+                 if samples[-1].get("forming_m15") else
+                 "BROKER_MTF_ONLY_UNVERIFIED_QUOTE")
                 if using_prices_only
                 else "BROKER_NOT_FRESH")
             self.next_due=moment+(LIVE_INTERVAL if quote.status=="TRADEABLE"

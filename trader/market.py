@@ -1,6 +1,7 @@
 """Capital.com READ-ONLY market data. Never sends trading instructions."""
 from __future__ import annotations
 from dataclasses import dataclass
+from threading import RLock
 from datetime import datetime, timezone
 import time
 import requests
@@ -314,25 +315,49 @@ class CapitalReadOnly:
         self.session = requests.Session()
         self.cst = self.token = None
         self.session_started = 0
+        self._auth_lock = RLock()
 
     def headers(self):
-        if not self.cst or time.time() - self.session_started >= 480:
-            # POST below is session authentication only, NEVER a trading order.
-            try:
-                r = self.session.post(f'{self.base_url}/api/v1/session',
-                    headers={'X-CAP-API-KEY':self.api_key, 'Content-Type':'application/json'},
-                    json={'identifier':self.identifier, 'password':self.password,
-                          'encryptedPassword':False}, timeout=10)
-                r.raise_for_status()
-                self.cst = r.headers.get('CST')
-                self.token = r.headers.get('X-SECURITY-TOKEN')
-                if not self.cst or not self.token:
-                    raise FeedError('Brak tokenów sesji')
-                self.session_started = time.time()
-            except requests.RequestException as ex:
-                raise FeedError(http_error_message(ex, f'Logowanie Capital.com {self.environment}')) from ex
-        return {'X-CAP-API-KEY': self.api_key, 'CST': self.cst,
-                'X-SECURITY-TOKEN': self.token}
+        # Protect CST/token replacement from the concurrent READ-ONLY quote
+        # observer. The main scanner owns session authentication/renewal.
+        with self._auth_lock:
+            if not self.cst or time.time() - self.session_started >= 480:
+                # POST /session is authentication only, NEVER an order.
+                try:
+                    r = self.session.post(f'{self.base_url}/api/v1/session',
+                        headers={'X-CAP-API-KEY':self.api_key,
+                                 'Content-Type':'application/json'},
+                        json={'identifier':self.identifier, 'password':self.password,
+                              'encryptedPassword':False}, timeout=10)
+                    r.raise_for_status()
+                    new_cst=r.headers.get('CST')
+                    new_token=r.headers.get('X-SECURITY-TOKEN')
+                    if not new_cst or not new_token:
+                        raise FeedError('Brak tokenów sesji')
+                    # Publish both credentials together under the lock.
+                    self.cst = new_cst
+                    self.token = new_token
+                    self.session_started = time.time()
+                except requests.RequestException as ex:
+                    raise FeedError(http_error_message(
+                        ex, f'Logowanie Capital.com {self.environment}')) from ex
+            return {'X-CAP-API-KEY': self.api_key, 'CST': self.cst,
+                    'X-SECURITY-TOKEN': self.token}
+
+    def borrowed_headers(self):
+        """Atomic token snapshot for a separate read-only HTTP client.
+
+        Capital REST tokens expire after ten minutes of *inactivity*, NOT
+        595 seconds from their initial creation. The 5s observer itself
+        keeps an active authenticated session alive. Do not reject tokens
+        just because the scanner's login timestamp is old, and do not
+        initiate a second login from the observer.
+        """
+        with self._auth_lock:
+            if not self.cst or not self.token or not self.api_key:
+                raise FeedError('PAPER_BROKER_SESSION_NOT_READY')
+            return {'X-CAP-API-KEY':self.api_key,
+                    'CST':self.cst,'X-SECURITY-TOKEN':self.token}
 
     def candles(self, epic='US500', resolution='MINUTE', count=300, max_spread=2.0):
         if resolution not in PERIOD:

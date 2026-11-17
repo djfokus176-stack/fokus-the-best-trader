@@ -17,6 +17,11 @@ from trader.cloud_chart_timeframes import sampled_chart_bar
 from trader.cloud_candle_clock import SECONDS
 
 
+@pytest.fixture(autouse=True)
+def legacy_m1_tests_disable_unrelated_m5_h1_polling(monkeypatch):
+    monkeypatch.setenv("FOKUS_CLOUD_MTF_FORMING_ENABLED","false")
+
+
 def _snapshot(tf):
     now=pd.Timestamp.now(tz="UTC")
     seconds={"MINUTE":60,"MINUTE_15":900}[tf]

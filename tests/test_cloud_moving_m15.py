@@ -162,7 +162,8 @@ def test_missing_markets_utc_still_allows_explicit_unverified_prices_preview():
             # The new collector first tries the M1 /prices path, then M15.
             if timeframe=="MINUTE":
                 raise FeedError("M1 unavailable in this test")
-            assert timeframe=="MINUTE_15"
+            if timeframe!="MINUTE_15":
+                raise FeedError("Extra TF unavailable in M15-only mock")
             return broker_preview(pd.Timestamp.now(tz="UTC"))
 
     class DB:
