@@ -507,6 +507,60 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
     st.caption("LONG/SHORT to wynik analizy, a nie zlecenie. OPEN i CLOSED "
                "pokazuję tylko z zapisanego rejestru PAPER.")
     render_cloud_paper_voice(remote,url=url)
+    # Explicit second lane: REAL tracked, but SIMULATED test fills; never
+    # mutate the production v3 position ledger or claim broker execution.
+    st.markdown("##### 🧪 PAPER TEST — WCZEŚNIEJSZE LONG / SHORT (OSOBNY REJESTR)")
+    trial=payload.get("momentum_paper_test_report") or {}
+    if trial.get("status")!="FORWARD_PAPER_TEST_NOT_LIVE":
+        st.warning("Nowy test LONG/SHORT jeszcze nie rozpoczął skanowania "
+                   "na Northflank. Sprawdź aktualny commit i checkpoint workera. "
+                   "Nie wyświetlam fikcyjnych wejść.")
+    else:
+        ca,cb,cc,cd=st.columns(4)
+        ca.metric("TEST: zatwierdzone setupy",trial.get("started",0))
+        cb.metric("TEST: otwarcia OPEN",trial.get("opened",0))
+        cc.metric("TEST: zamknięte",trial.get("closed",0))
+        cd.metric("TEST: wynik po kosztach",
+                  str(trial.get("pnl_pts",0))+" pkt")
+        pos=trial.get("active")
+        if isinstance(pos,dict) and pos.get("status") in ("PENDING","OPEN"):
+            status=pos.get("status")
+            title=("TEST "+status+" "+str(pos.get("side","WAIT")))
+            details=(" • sygnał UTC "+str(pos.get("setup_utc"))+
+                     " • STOP "+str(pos.get("stop"))+
+                     " • CEL "+str(pos.get("target"))+
+                     " • M1 momentum "+str(pos.get("score"))+"/6"+
+                     " • EMA: "+str(pos.get("confirmation")))
+            if status=="OPEN":
+                st.success("🧪 "+title+details)
+            else:
+                st.info("🧪 "+title+details+
+                        ". PENDING = jeszcze nie otwarta pozycja TEST.")
+        else:
+            st.caption("🧪 TEST: brak aktywnej pozycji. Ostatnia ocena: "+
+                       str(trial.get("last_reason","BRAK"))+
+                       " | ostatnia zamknięta M1 UTC "+
+                       str(trial.get("last_candle_utc","BRAK"))+
+                       ". Ostatni kandydat: "+
+                       str(trial.get("last_candidate","WAIT")))
+        st.caption("Próby z M1 momentum co najmniej 5/6, zgodnej obserwacji "
+                   "EMA od 2/3, M5 zgodny, M15 nieprzeciwny; "
+                   "SL/TP oparte na ATR, RR po spreadzie i poślizgu. "
+                   "Globalne bramki bezpieczeństwa pozostają. "
+                   "Zamknięte: trafność "+
+                   str(trial.get("win_rate_pct")
+                       if trial.get("win_rate_pct") is not None else "BRAK")+
+                   "% • unieważnione "+str(trial.get("invalidated",0))+
+                   " • luki M1 "+str(trial.get("gaps",0))+
+                   ". Test działa na workerze bez otwartej przeglądarki.")
+        st.caption("UWAGA: to **oddzielny eksperyment PAPER**, "
+                   "NIE zatwierdzony sygnał AUTO 3/3 i NIE prawdziwe "
+                   "zlecenie Capital.com. Głosy otwarcia/TP/SL "
+                   "głównego PAPER nie są dźwiękami tego testu.")
+        if trial.get("recent"):
+            with st.expander("🧪 Ostatnie rozliczone LONG/SHORT — wyłącznie PAPER TEST"):
+                st.dataframe(pd.DataFrame(trial["recent"]),
+                             hide_index=True,use_container_width=True)
     st.markdown("##### 📡 RADAR 6 STRATEGII — DLACZEGO LONG / SHORT / WAIT?")
     radar=worker_signal_radar(payload)
     if not radar["current"]:
