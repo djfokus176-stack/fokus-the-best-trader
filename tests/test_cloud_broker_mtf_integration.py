@@ -77,7 +77,7 @@ def test_browser_prefers_actual_provider_wicks_over_inaccurate_mid_window(choice
     now=pd.Timestamp("2026-11-17T13:04:10Z")
     key=CONFIG[choice][2]
     data=serialize_broker_forming(_raw(choice,now,high=7567.),choice,now=now)
-    record=_cached(**{key:data})
+    record=_cached(**{("m5" if choice=="M5" else "h1"):data})
     result=sampled_chart_bar(record,choice,now=now)
     assert result["visible"] is True
     assert result["bar"]["high"]==7567.
@@ -89,7 +89,7 @@ def test_browser_prefers_actual_provider_wicks_over_inaccurate_mid_window(choice
         _raw(choice,now,close=7556.,high=7572.),
         choice,now=now+pd.Timedelta(seconds=7))
     later=now+pd.Timedelta(seconds=7)
-    record=_cached(at=later,**{key:altered})
+    record=_cached(at=later,**{("m5" if choice=="M5" else "h1"):altered})
     moved=sampled_chart_bar(record,choice,now=later)
     assert moved["bar"]["high"]==7572.
     assert moved["bar"]["close"]==7556.
@@ -101,7 +101,7 @@ def test_stale_unmarked_or_closed_provider_ohlc_cannot_animate(choice):
     now=pd.Timestamp("2026-11-17T13:04:10Z")
     key=CONFIG[choice][2]
     provider=serialize_broker_forming(_raw(choice,now),choice,now=now)
-    record=_cached(fresh=False,**{key:provider})
+    record=_cached(fresh=False,**{("m5" if choice=="M5" else "h1"):provider})
     assert sampled_chart_bar(record,choice,now=now)["visible"]
     assert sampled_chart_bar(record,choice,now=now)["quote_verified"] is False
     record["samples"][-1].pop("fallback_only")
