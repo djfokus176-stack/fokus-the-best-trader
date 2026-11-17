@@ -250,6 +250,7 @@ def paper_view_db():
         st.session_state['_paper_remote_forecasts']=payload.get('forecast_research') or {}
         st.session_state['_paper_remote_learning']=payload.get('learning_report') or {}
         st.session_state['_paper_remote_shadow_report']=payload.get('shadow_learning_report') or {}
+        st.session_state['_paper_remote_mtf_veto_report']=payload.get('mtf_veto_forward_report') or {}
         st.session_state['_paper_remote_wave_state']=payload.get('wave_shadow') or {}
         st.session_state['_paper_remote_wave_ae_state']=payload.get('wave_ae_forward') or {}
         st.session_state['_paper_remote_wave_ae_report']=payload.get('wave_ae_forward_report') or {}
@@ -2550,6 +2551,49 @@ with reports_tab:
                         st.warning('Brak poprawnego archiwum skanów. Nie podam '
                                    'zmyślonych częstotliwości. Sprawdź '
                                    'checkpoint workera w STATUS/API.')
+                with st.expander('🧪 MTF — CZY ODRZUCONE WEJŚCIA BYŁY LEPSZE? (FORWARD SHADOW)',expanded=True):
+                    study=st.session_state.get('_paper_remote_mtf_veto_report') or {}
+                    if not study or study.get('status')!='FORWARD_ONLY_OBSERVATIONAL_NOT_TRADEABLE':
+                        st.info('Brak nowego rozliczenia SHADOW. Pierwsze wyniki '
+                                'pojawią się dopiero po nowych, zweryfikowanych '
+                                'sygnałach i kolejnych 20 zamkniętych M1.')
+                    else:
+                        st.caption('Nie odtwarzam brakujących wejść ze starego CSV. '
+                                   'Każdy NOWY surowy setup LONG/SHORT z rzeczywistym '
+                                   'SL/TP trafia do kohorty MTF PASSED lub VETOED '
+                                   'na podstawie decyzji znanej już przy sygnale. '
+                                   'Następna zamknięta M1 ujawnia hipotetyczną '
+                                   'cenę OPEN; wyjście jest liczone po spreadzie '
+                                   'i poślizgu 0,25 pkt na stronę. '
+                                   'To NIE są transakcje ani dowód zyskowności.')
+                        a,b,c,d=st.columns(4)
+                        a.metric('Nowe surowe setupy',study.get('started',0))
+                        b.metric('Rozliczone SHADOW',study.get('closed',0))
+                        c.metric('Jeszcze aktywne',study.get('active',0))
+                        d.metric('Unieważnione',study.get('invalidated',0))
+                        st.caption('Luki w nowych M1: '+str(study.get('gaps',0))+
+                                   ' | Sygnały pominięte z powodu globalnych '
+                                   'blokad: '+str(study.get('skipped_blocked',0))+
+                                   ' | Zajęte sloty strategii: '+
+                                   str(study.get('skipped_busy',0))+
+                                   ' | Ostatnia świeca UTC: '+
+                                   str(study.get('last_candle_utc') or 'BRAK'))
+                        table=pd.DataFrame(study.get('groups') or [])
+                        if not table.empty:
+                            st.dataframe(table.rename(columns={
+                                'strategy':'Strategia','mtf':'Filtr MTF',
+                                'closed':'Zamknięte','wins':'P&L dodatni',
+                                'win_rate_pct':'Trafność %',
+                                'sum_pts':'Suma pkt','mean_pts':'Średnio pkt',
+                                'mean_r':'Średnio R'}).drop(
+                                    columns=['research_only'],errors='ignore'),
+                                use_container_width=True,hide_index=True)
+                        st.warning('UWAGA: kohorty PASSED i VETOED nie są '
+                                   'losowo dobrane; różnice mogą wynikać z '
+                                   'warunków rynku, nie tylko działania MTF. '
+                                   'Minimum 100 rozliczeń na kohortę to dopiero '
+                                   'próg eksploracyjny, nie potwierdzenie przewagi. '
+                                   'Wyniki nie zmieniają PAPER ani progu 3/3.')
                 with st.expander('🔎 ARCHIWUM RADARU — SUROWE SYGNAŁY I POWODY BLOKAD',expanded=True):
                     st.caption('Nie są to pozycje PAPER ani zweryfikowane typy. Zapis z workera '
                                'na kolejnych zamkniętych świecach, również gdy decyzją jest WAIT.')
