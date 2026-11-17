@@ -18,6 +18,7 @@ VERSION = 1
 SOURCE = "Capital.com DEMO REST"
 MAX_HISTORY = 100
 MAX_TRADES_PER_UTC_DAY = 8
+MAX_DAILY_LOSS_PTS = 15.0
 MAX_HOLD_BARS = 20
 COOLDOWN_M1 = 5
 SLIPPAGE = .25
@@ -127,11 +128,11 @@ def _test_candidate(frame, progress, views, spread):
         return None, "SPREAD_ZBYT_DUZY_WOBEC_ATR"
     latest = frame.iloc[-6:-1]
     if side == "LONG":
-        stop = min(mid-1.1*atr, float(latest.Low.min())-.12*atr)
+        stop = min(mid-2.0*atr, float(latest.Low.min())-.12*atr)
         risk = mid-stop
         target = mid + 2*risk
     else:
-        stop = max(mid+1.1*atr, float(latest.High.max())+.12*atr)
+        stop = max(mid+2.0*atr, float(latest.High.max())+.12*atr)
         risk = stop-mid
         target = mid - 2*risk
     if not all(isfinite(v) for v in (stop, risk, target)):
@@ -279,6 +280,12 @@ def advance_momentum_paper_test(state, frame, progress, views, blockers=(),
         starts_today+=1
     if starts_today >= MAX_TRADES_PER_UTC_DAY:
         _log_reason(data,"DZIENNY_LIMIT_TEST_8")
+        return data
+    daily_pnl=sum(float(p.get("pnl_pts") or 0)
+                  for p in data["closed"]
+                  if str(p.get("setup_utc",""))[:10]==current_day)
+    if daily_pnl<=-MAX_DAILY_LOSS_PTS:
+        _log_reason(data,"DZIENNY_STOP_TEST_15_PKT")
         return data
     candidate,reason=_test_candidate(frame,progress,views,spread_value)
     data["last_candidate"]=candidate["side"] if candidate else "WAIT"
