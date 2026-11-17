@@ -7,6 +7,7 @@ requires only its own server-side Supabase read credentials to show results.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -83,6 +84,65 @@ def cloud_terminal_summary(version, payload, frame, *, now=None):
         "trade_permission":"WAIT",
         "no_direct_capital_login":True,
     }
+
+
+def cloud_paper_decision(meta, *, now=None):
+    """Read-only interpretation of the worker's committed scan, never an order.
+
+    No inference from chart prices. A direction is shown only if the worker
+    explicitly logged it; even LONG/SHORT is NOT an opened PAPER position.
+    """
+    raw=str(meta.get("last_scan_summary") or "")
+    current=_parse_utc(now) if now is not None else pd.Timestamp.now(tz="UTC")
+    stamp=_parse_utc(meta.get("last_scan_utc"))
+    age=(current-stamp).total_seconds() if stamp is not None else None
+    fresh=bool(age is not None and 0<=age<=180)
+    action=re.search(r"\s/\s(LONG|SHORT|WAIT)\s/",raw)
+    queued=re.search(r"(?:^|\s/\s)QUEUE=(YES|NO)(?:\s/|$)",raw)
+    gates=re.search(r"(?:^|\s/\s)GATES=([A-Z0-9_,]+)(?:\s/|$)",raw)
+    method=re.search(r"(?:^|\s/\s)CANDIDATE_METHOD=([^/]{1,100})",raw)
+    candidate=action.group(1) if action else "UNKNOWN"
+    queue=queued.group(1) if queued else "UNKNOWN"
+    blocking=gates.group(1) if gates else "UNKNOWN"
+    method_name=method.group(1).strip() if method else "BRAK"
+    if not fresh:
+        headline="BRAK BIEŻĄCEJ DECYZJI — ostatni zapis historyczny"
+    elif candidate=="WAIT":
+        headline="WAIT — bot nie zatwierdził nowego wejścia PAPER"
+    elif candidate in ("LONG","SHORT") and queue=="YES":
+        headline=candidate+" — setup PAPER zakolejkowany, nie oznacza OPEN"
+    elif candidate in ("LONG","SHORT"):
+        headline=candidate+" — kandydat, BEZ wejścia PAPER"
+    else:
+        headline="BRAK POTWIERDZONEJ DECYZJI PAPER"
+    return {
+        "headline":headline,"candidate":candidate,"queue":queue,
+        "gates":blocking,"method":method_name,"fresh":fresh,
+        "scan_utc":stamp.isoformat() if stamp is not None else "BRAK",
+        "age_seconds":age,
+        "is_trade_instruction":False,
+    }
+
+
+def cloud_chart_view_range(frame, choice, *, moving=None):
+    """Zoom around *real* recent candles; no synthetic price or candle data."""
+    if choice not in ("M1","M2","M5","M15","H1"):
+        raise ValueError("Unsupported UI chart timeframe")
+    if frame.empty and moving is None:
+        return None
+    seconds={"M1":60,"M2":120,"M5":300,"M15":900,"H1":3600}[choice]
+    count={"M1":65,"M2":60,"M5":55,"M15":45,"H1":45}[choice]
+    last=(_parse_utc(moving["at"]) if moving is not None
+          else frame.index[-1])
+    if last is None:
+        return None
+    if len(frame):
+        left=frame.index[max(0,len(frame)-count)]
+    else:
+        left=last-pd.Timedelta(seconds=seconds*35)
+    if left>=last:
+        left=last-pd.Timedelta(seconds=seconds*2)
+    return [left,last+pd.Timedelta(seconds=seconds*2)]
 
 def cloud_paper_positions(payload, frame):
     """Read-only rows from one checkpoint; never infer unrecorded signals.
@@ -333,6 +393,24 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
                str(audit["last_m15_utc"] or "BRAK"))
     st.caption("Ostatnia informacja workera (nie tej przeglądarki): "+
                audit["worker_summary"])
+    # Only the signed worker checkpoint may tell us what it analysed.
+    # This DISPLAY does not issue a LONG/SHORT recommendation or order.
+    decision=cloud_paper_decision(payload.get("meta") or {})
+    st.markdown("##### 🎯 CO WSKAZUJE BOT — OSTATNIA DECYZJA PAPER")
+    details=("Metoda: "+decision["method"]+
+             " | GATES="+decision["gates"]+
+             " | QUEUE="+decision["queue"]+
+             " | skan UTC: "+decision["scan_utc"])
+    if not decision["fresh"]:
+        st.warning(decision["headline"]+" | "+details)
+    elif decision["candidate"]=="WAIT":
+        st.info(decision["headline"]+" | "+details)
+    elif decision["queue"]=="YES":
+        st.success(decision["headline"]+" | "+details)
+    else:
+        st.warning(decision["headline"]+" | "+details)
+    st.caption("LONG/SHORT to wynik analizy, a nie zlecenie. OPEN i CLOSED "
+               "pokazuję tylko z zapisanego rejestru PAPER.")
     recent_paper,chart_paper=cloud_paper_positions(payload,frame)
     if recent_paper:
         active=next((p for p in recent_paper
@@ -372,7 +450,21 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         candles=go.Figure(go.Candlestick(
             x=frame.index,open=frame.Open,high=frame.High,
             low=frame.Low,close=frame.Close,
-            name="US500 "+choice+" CLOSED CLOUD"))
+            increasing={"line":{"color":"#27cf94","width":1.5},
+                        "fillcolor":"#27cf94"},
+            decreasing={"line":{"color":"#ff5b6d","width":1.5},
+                        "fillcolor":"#ff5b6d"},
+            name="US500 "+choice+" — ZAMKNIĘTE"))
+        # Read-only visual indicators from CLOSED candles only. They are
+        # NOT read by any strategy and never create an entry signal.
+        for period,color in ((9,"#ffd447"),(21,"#57b4ff"),(50,"#bd82f7")):
+            ema=frame["Close"].ewm(span=period,adjust=False,
+                                     min_periods=period).mean()
+            candles.add_trace(go.Scatter(
+                x=frame.index,y=ema,mode="lines",
+                name=f"EMA {period} • tylko podgląd",
+                line={"color":color,"width":1.5},
+                hovertemplate=f"EMA {period}: %{{y:.2f}}<extra></extra>"))
     # IMPORTANT: this is a separate, visibly named, INCOMPLETE bar.
     # It uses REAL observed MID samples for both moving body and wicks.
     # The original closed M15 OHLC and PAPER annotations remain immutable.
@@ -404,13 +496,8 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
                 " C: "+str(round(live["close"],2))+
                 "<br>Odebrano: "+str(live["collected_utc"])],
             hoverinfo="text"))
-        # Keep the moving candle in viewport as each new quarter begins.
-        # No future data or fake calendar gap may be interpolated.
-        left=(max(frame.index[0],live["at"]-pd.Timedelta(hours=8))
-              if not frame.empty else live["at"]-pd.Timedelta(hours=1))
-        candles.update_xaxes(range=[
-            left,live["at"]+pd.Timedelta(seconds=(
-                2*{"M1":60,"M2":120,"M5":300,"M15":900,"H1":3600}[choice]))])
+        # A visible 45-65 candle window replaces the former fixed
+        # eight-hour range (which made M1 candles nearly invisible).
     # Only validated fresh DEMO quote points, never synthetic candles.
     if overlay["visible"]:
         points=overlay["points"]
@@ -449,11 +536,20 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
     open_row=next((p for p in recent_paper if p.get("status")=="OPEN"),None)
     if open_row is not None:
         annotate_open_paper(candles,open_row)
+    viewport=cloud_chart_view_range(
+        frame,choice,moving=moving_chart["bar"] if moving_chart["visible"] else None)
     candles.update_layout(
-        height=410,xaxis_rangeslider_visible=False,template="plotly_dark",
-        uirevision="fokus_cloud_"+choice+"_v1",
-        paper_bgcolor="#111a2d",plot_bgcolor="#111a2d",
-        margin={"l":10,"r":10,"t":15,"b":10})
+        height=570,xaxis_rangeslider_visible=False,template="plotly_dark",
+        uirevision="fokus_cloud_"+choice+"_readable_v2",
+        paper_bgcolor="#101928",plot_bgcolor="#101928",
+        font={"size":13,"color":"#e8eef8"},
+        legend={"orientation":"h","y":1.15,"x":0,"font":{"size":11}},
+        hovermode="x unified",
+        xaxis={"showgrid":True,"gridcolor":"#23354a","showspikes":True,
+               "spikecolor":"#e8eef8","range":viewport},
+        yaxis={"showgrid":True,"gridcolor":"#23354a","tickformat":".2f",
+               "side":"right","fixedrange":False},
+        margin={"l":12,"r":36,"t":66,"b":28})
     st.plotly_chart(candles,use_container_width=True,
                     key="cloud_worker_chart_"+choice+"_v1")
     if overlay["visible"]:
