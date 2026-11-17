@@ -169,7 +169,7 @@ def test_documented_prices_fallback_is_visual_only_and_delay_unknown(monkeypatch
     sampler=Quote5sSampler()
     c=QuoteFailButPricesWork();db=Remote()
     assert sampler.pulse(c,db,monotonic=10.)=="BROKER_M15_ONLY_UNVERIFIED_QUOTE"
-    assert c.calls==["markets","status","MINUTE_15"]
+    assert c.calls==["markets","status","MINUTE","MINUTE_15"]
     assert len(db.rows)==1
     row=db.rows[-1]
     assert row["fresh"] is False
@@ -182,7 +182,7 @@ def test_documented_prices_fallback_is_visual_only_and_delay_unknown(monkeypatch
     assert result["quote_verified"] is False
     assert result["kind"]=="BROKER_INCOMPLETE_M15"
     assert result["trade_permission"]=="WAIT"
-    assert sampler.next_due==40
+    assert sampler.next_due==20
 
 
 def test_prices_only_fallback_does_not_allow_closed_unknown_markets(monkeypatch):

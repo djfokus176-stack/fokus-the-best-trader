@@ -20,6 +20,7 @@ from .cloud_forming_m1 import assess_cloud_forming_m1
 from .cloud_moving_m15 import assess_moving_m15
 from .cloud_chart_timeframes import (
     closed_chart_frame,source_resolution,sampled_chart_bar)
+from .cloud_candle_clock import render_candle_clock
 
 
 def _parse_utc(value):
@@ -141,6 +142,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         options=choices,index=choices.index(labels.get(default_tf,"M1")),
         key="cloud_price_chart_interval")
     resolution=source_resolution(choice)
+    render_candle_clock(choice)
     st.caption(
         "Zamknięte świece wybranego interwału = zielone/czerwone. "
         "M2 powstaje WYŁĄCZNIE z dwóch kompletnych, kolejnych M1. "
@@ -276,7 +278,10 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         live=moving_chart["bar"]
         live_message=(
             "🕯️ "+choice+" W TRAKCIE — RUCHOME KNOTY (NIE SYGNAŁ) | "
-            + ("MID z próbek REST" if moving_chart["missing_extremes_possible"]
+            + ("TYLKO aktualna M1 /prices (częściowy "+choice+")"
+               if moving_chart.get("broker_m1_only") else
+               "MID z próbek REST"
+               if moving_chart["missing_extremes_possible"]
                else "nieukończona OHLC brokera /prices")
             + f' | O={live["open"]:.2f}, H={live["high"]:.2f}, '
               f'L={live["low"]:.2f}, C={live["close"]:.2f}'
@@ -288,19 +293,19 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
                        "NIE potwierdzenie możliwości handlu.")
         else:
             st.success(live_message)
-        if moving_m15["missing_extremes_possible"]:
+        if moving_chart["missing_extremes_possible"]:
             st.caption(
-                "Uwaga: knoty HIGH/LOW obejmują wyłącznie ZAOBSERWOWANE "
-                "próbki REST od " + str(live.get("first_vendor_utc","BRAK"))+
-                "; nie muszą odzwierciedlać ekstremów całych 15 minut. "
-                "Nie wpływają na SL/TP ani AUTO.")
+                "Uwaga: HIGH/LOW obejmują tylko dostępny fragment "
+                "interwału, od "+str(live.get("first_vendor_utc","BRAK"))+
+                ". Nie muszą odzwierciedlać ekstremów całej "+choice+
+                ". Bez wpływu na SL/TP ani AUTO.")
     else:
         st.warning(
             "🟠 "+choice+" W TRAKCIE NIEAKTYWNA: "+moving_chart["reason"]+
             ". Wykres pokazuje wtedy wyłącznie ZAMKNIĘTE świece; "
             "nie tworzę sztucznych knotów. Sprawdź stan "
             "NIEZALEŻNEGO KOLEKTORA 5S powyżej.")
-    st.caption("Wersja podglądu: WICK-M15-v1 / CLOUD-TF-v1 | "
+    st.caption("Wersja podglądu: WICK-M15-v1 / CLOUD-TF-v1 / LEGACY-PRICES-v1 | "
                "odświeżenie przeglądarki ~5s | "
                "nie jest to zlecenie ani świeca dla strategii.")
     st.caption("Ostatni zapis skanera UTC: "+
@@ -353,16 +358,16 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         live=moving_chart["bar"]
         explanation=(choice+" — tylko ZAOBSERWOWANE próbki MID; "
                      "może brakować rzeczywistych ekstremów."
-                     if moving_m15["missing_extremes_possible"]
+                     if moving_chart["missing_extremes_possible"]
                      else "M15 w trakcie: niezamknięty OHLC Capital /prices.")
         candles.add_trace(go.Candlestick(
             x=[live["at"]],
             open=[live["open"]],high=[live["high"]],
             low=[live["low"]],close=[live["close"]],
             name=("🕯️ "+choice+" • MID Z PRÓBEK (KNOTY W RUCHU)"
-                  if moving_m15["missing_extremes_possible"]
+                  if moving_chart["missing_extremes_possible"]
                   else "🕯️ M15 /prices • NIEPEŁNA / QUOTE NIEZWERYFIKOWANY"
-                  if moving_m15.get("quote_verified") is False
+                  if moving_chart.get("quote_verified") is False
                   else "🕯️ M15 LIVE /prices • NIEPEŁNA"),
             increasing={"line":{"color":"#34e8f2","width":3},
                         "fillcolor":"rgba(52,232,242,0.48)"},

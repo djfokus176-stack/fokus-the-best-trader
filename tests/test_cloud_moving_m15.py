@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from trader.market import MarketQuote
+from trader.market import MarketQuote, FeedError
 from trader.cloud_moving_m15 import (
     SAMPLED_KIND, BROKER_KIND, FROM_PRICES,
     update_sampled_m15, broker_forming_m15,assess_moving_m15,
@@ -157,7 +157,12 @@ def test_missing_markets_utc_still_allows_explicit_unverified_prices_preview():
                 update_utc=None,received_utc=at.to_pydatetime(),
                 delay_seconds=0.)
         def forming_candle(self,epic,timeframe):
-            assert epic=="US500" and timeframe=="MINUTE_15"
+            assert epic=="US500"
+            # This legacy M15 test double cannot provide broker M1.
+            # The new collector first tries the M1 /prices path, then M15.
+            if timeframe=="MINUTE":
+                raise FeedError("M1 unavailable in this test")
+            assert timeframe=="MINUTE_15"
             return broker_preview(pd.Timestamp.now(tz="UTC"))
 
     class DB:

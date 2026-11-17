@@ -82,12 +82,25 @@ def assess_cloud_forming_m1(record,*,now=None):
         quoted=assess_quote_snapshot(record,now=now)
     except (TypeError,KeyError,ValueError,OverflowError):
         return {**empty,"reason":"NIEPOPRAWNY_BID_ASK"}
-    if not quoted["fresh"]:
-        return {**empty,"reason":"NOT_TRADEABLE_OR_STALE_QUOTE"}
     history=record.get("samples")
     if not isinstance(history,list) or not history:
         return empty
     last=history[-1]
+    verified_quote=bool(quoted["fresh"])
+    if not verified_quote:
+        # Legacy /prices gives independent real current OHLC. Only the
+        # dedicated worker may explicitly mark an UNVERIFIED quote fallback.
+        # This never promotes /markets to a trusted live quote for trades.
+        try:
+            admissible=(
+                record.get("broker_status")=="TRADEABLE"
+                and last.get("fallback_only") is True
+                and last.get("source_delay_unknown") is True
+                and float(record.get("delay_seconds"))==9999.0)
+        except (TypeError,ValueError,AttributeError,OverflowError):
+            admissible=False
+        if not admissible:
+            return {**empty,"reason":"NOT_TRADEABLE_OR_STALE_QUOTE"}
     preview=last.get("forming_m1") if isinstance(last,dict) else None
     if not isinstance(preview,dict):
         return empty
@@ -115,7 +128,10 @@ def assess_cloud_forming_m1(record,*,now=None):
             return {**empty,"reason":"WADLIWE_OHLC_M1"}
     except (KeyError,TypeError,ValueError,OverflowError):
         return {**empty,"reason":"WADLIWE_OHLC_M1"}
-    return {"visible":True,"reason":"BROKER_INCOMPLETE_M1",
+    return {"visible":True,
+            "reason":("BROKER_INCOMPLETE_M1" if verified_quote
+                      else "BROKER_M1_PRICES_QUOTE_NIEZWERYFIKOWANY"),
+            "quote_verified":verified_quote,
             "preview":{**preview,
                        "open_time":opened,"close_time":closed,
                        "captured_time":captured,
