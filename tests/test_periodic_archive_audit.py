@@ -230,6 +230,10 @@ def test_worker_and_ui_both_use_same_archive_without_extra_db_or_broker_orders()
     assert "periodic_audit_archive" in worker
     assert "periodic_audit_report" in Path("trader/periodic_archive_audit.py").read_text("utf8")
     assert "render_periodic_archive_ui(payload)" in terminal
+    app=Path("app.py").read_text("utf8")
+    assert "widget_scope=\"reports\"" in app
+    assert "'_paper_remote_periodic_audit'" in app
+    assert "widget_scope" in ui
     assert "FOKUS_AUDYT_" in ui and "date_input(" in ui
     assert "queue_paper(" not in engine and "session.post(" not in engine
     assert "CapitalReadOnly(" not in engine
