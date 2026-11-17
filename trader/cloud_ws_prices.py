@@ -35,6 +35,9 @@ BROKER_RES = {"MINUTE":"M1","MINUTE_5":"M5",
               "MINUTE_15":"M15","HOUR":"H1"}
 WS_PING_SECONDS = 240
 WRITE_SECONDS = 5.0
+# If the server keeps a socket open but sends no quotes, reconnect to refresh
+# subscriptions. Never extend the quoted price's freshness in the UI.
+WS_QUOTE_IDLE_RECONNECT_SECONDS = 45.0
 QUOTE_MAX_AGE_SECONDS = 15.0
 BROKER_OHLC_MAX_AGE_SECONDS = 20.0
 
@@ -318,17 +321,42 @@ class CloudWSQuotePump:
         conn.send(json.dumps(envelope))
 
     def feed(self,msg,*,now=None):
-        """Injectable protocol handler used in the integration tests."""
-        if (isinstance(msg,dict) and
-                msg.get("status") not in ("OK",None)):
+        """Classify known protocol outcomes without revealing broker data.
+
+        A rejected OHLC subscription must not tear down the independent
+        BID/ASK quote subscription (the live chart can still display the
+        observed MID, correctly labelled as incomplete).
+        """
+        if not isinstance(msg,dict):
+            return "ignored"
+        dest=msg.get("destination")
+        if dest=="OHLCMarketData.subscribe":
+            subs=(msg.get("payload") or {}).get("subscriptions",{})
+            if (msg.get("status")!="OK" or not isinstance(subs,dict)
+                    or not subs or any(v!="PROCESSED" for v in subs.values())):
+                self._mark("WS_OHLC_UNAVAILABLE")
+                return "ignored"
+        elif dest=="marketData.subscribe":
+            subs=(msg.get("payload") or {}).get("subscriptions",{})
+            if (msg.get("status")!="OK" or not isinstance(subs,dict)
+                    or not subs or any(v!="PROCESSED" for v in subs.values())):
+                raise RuntimeError("WS_QUOTE_SUBSCRIPTION_REJECTED")
+        elif msg.get("status") not in ("OK",None):
             raise RuntimeError("WS_SERVER_REJECTED")
-        if isinstance(msg,dict) and msg.get("destination") in (
-                "marketData.subscribe","OHLCMarketData.subscribe"):
-            subscriptions=msg.get("payload",{}).get("subscriptions",{})
-            if not isinstance(subscriptions,dict) or not subscriptions or (
-                    any(v!="PROCESSED" for v in subscriptions.values())):
-                raise RuntimeError("WS_SUBSCRIPTION_FAILED")
         return self.observed.accept(msg,now=now)
+
+    @staticmethod
+    def _safe_error_code(exc):
+        # No exception text beyond our own fixed codes. Network exceptions
+        # sometimes contain credential-bearing request details.
+        if isinstance(exc,RuntimeError):
+            code=str(exc)
+            if code in ("WS_NO_SCANNER_SESSION",
+                        "WS_CREDENTIALS_ROTATED","WS_CONNECTION_CLOSED",
+                        "WS_QUOTE_SUBSCRIPTION_REJECTED","WS_SERVER_REJECTED",
+                        "WS_NO_QUOTES_45S"):
+                return code
+        return "WS_WAIT_"+type(exc).__name__
 
     def flush(self,*,now=None,force=False):
         moment=self.clock()
@@ -358,8 +386,13 @@ class CloudWSQuotePump:
             self._mark("WS_SUBSCRIBED_WAIT_QUOTE")
             last_ping=self.clock()
             last_auth_check=self.clock()
+            last_quote_received=self.clock()
             while not self._stop.is_set():
                 moment=self.clock()
+                if moment-last_quote_received>=WS_QUOTE_IDLE_RECONNECT_SECONDS:
+                    # The server may be silently wedged even when recv() only
+                    # times out. Never manufacture prices to keep the chart up.
+                    raise RuntimeError("WS_NO_QUOTES_45S")
                 if moment-last_ping>=WS_PING_SECONDS:
                     self._send(conn,"ping",cst,token,3)
                     last_ping=moment
@@ -385,6 +418,8 @@ class CloudWSQuotePump:
                 except (TypeError,ValueError):
                     continue
                 kind=self.feed(msg)
+                if kind=="quote":
+                    last_quote_received=self.clock()
                 if kind in ("quote","ohlc"):
                     self.flush()
         finally:
@@ -403,10 +438,12 @@ class CloudWSQuotePump:
             except Exception as exc:
                 # No raw exception text: it might contain CST/session tokens.
                 errors=min(errors+1,6)
-                self._mark("WS_WAIT_"+type(exc).__name__)
+                self._mark(self._safe_error_code(exc))
             if self._stop.is_set():
                 break
-            self._stop.wait(min(120,5*(2**(errors-1))))
+            # Bounded reconnect, but never a high-frequency login storm.
+            # Uses the scanner's existing credentials (no extra REST login).
+            self._stop.wait(min(60,10*(2**(errors-1))))
 
     def start(self):
         if self._thread is not None:

@@ -214,7 +214,7 @@ def test_connection_errors_cannot_fake_live_quote_or_write():
     conn=_Conn([bad])
     db=_Remote()
     pump=CloudWSQuotePump(_Scanner(),db,factory=lambda:conn)
-    with pytest.raises(RuntimeError,match="WS_SERVER_REJECTED"):
+    with pytest.raises(RuntimeError,match="WS_QUOTE_SUBSCRIPTION_REJECTED"):
         pump._one_connection()
     assert db.rows==[]
     assert conn.closed
@@ -235,3 +235,36 @@ def test_worker_only_substitutes_websocket_quote_pump_not_paper_ledger():
     assert '"destination":kind' in stream
     assert "WS_PING_SECONDS = 240" in stream
     assert WS_URL.startswith("wss://")
+
+def test_ohlc_subscription_rejected_but_real_bid_ask_quote_still_saved():
+    """Losing optional native candles must not kill the independently subscribed quote."""
+    ack_quote={"status":"OK","destination":"marketData.subscribe",
+               "payload":{"subscriptions":{"US500":"PROCESSED"}}}
+    rejected_ohlc={"status":"ERROR","destination":"OHLCMarketData.subscribe",
+                   "payload":{"subscriptions":{"US500:MINUTE:classic":"REJECTED"}}}
+    at=pd.Timestamp.now(tz="UTC")
+    conn=_Conn([ack_quote,rejected_ohlc,event(7400.,at)])
+    db=_Remote()
+    pump=CloudWSQuotePump(_Scanner(),db,factory=lambda:conn)
+    with pytest.raises(RuntimeError,match="FAKE_END"):
+        pump._one_connection()
+    assert db.rows and db.rows[-1]["fresh"] is True
+    assert db.rows[-1]["samples"][-1]["transport"]==TRANSPORT
+    checked=assess_streaming_candle(db.rows[-1],"M1",now=pd.Timestamp.now(tz="UTC"))
+    assert checked["visible"] is True
+    assert checked["basis"]=="MID_OBSERVED"
+
+
+@pytest.mark.parametrize("reason",[
+    "WS_QUOTE_SUBSCRIPTION_REJECTED", "WS_CREDENTIALS_ROTATED",
+    "WS_NO_SCANNER_SESSION", "WS_CONNECTION_CLOSED","WS_NO_QUOTES_45S",
+])
+def test_safe_explicit_websocket_runtime_reason(reason):
+    assert CloudWSQuotePump._safe_error_code(RuntimeError(reason))==reason
+
+
+def test_error_reason_must_never_leak_unknown_vendor_message_or_tokens():
+    assert CloudWSQuotePump._safe_error_code(
+        RuntimeError("WS_SERVER_REJECTED CST_SENSITIVE_TOKEN"))=="WS_WAIT_RuntimeError"
+    assert CloudWSQuotePump._safe_error_code(
+        ValueError("secret"))=="WS_WAIT_ValueError"
