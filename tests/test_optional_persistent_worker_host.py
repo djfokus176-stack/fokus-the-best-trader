@@ -70,7 +70,7 @@ def test_worker_docker_build_contains_verified_bls_backup():
     assert "COPY data/macro_calendar_manual.json ./data/macro_calendar_manual.json" in docker
     assert "!data/macro_calendar_manual.json" in ignored.splitlines()
     backup=load_verified_manual_bls(
-        now=datetime(2026,11,10,12,0,tzinfo=timezone.utc))
+        now=datetime(2026,11,17,13,0,tzinfo=timezone.utc))
     assert backup.source=="BLS_VERIFIED_MANUAL_NOT_LIVE"
     assert len(backup)>=12
 
