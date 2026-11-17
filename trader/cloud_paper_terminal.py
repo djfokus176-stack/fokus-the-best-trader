@@ -20,6 +20,7 @@ from .cloud_forming_m1 import assess_cloud_forming_m1
 from .cloud_moving_m15 import assess_moving_m15
 from .cloud_chart_timeframes import (
     closed_chart_frame,source_resolution,sampled_chart_bar)
+from .cloud_candle_clock import render_candle_clock
 
 
 def _parse_utc(value):
@@ -141,6 +142,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         options=choices,index=choices.index(labels.get(default_tf,"M1")),
         key="cloud_price_chart_interval")
     resolution=source_resolution(choice)
+    render_candle_clock(choice)
     st.caption(
         "Zamknięte świece wybranego interwału = zielone/czerwone. "
         "M2 powstaje WYŁĄCZNIE z dwóch kompletnych, kolejnych M1. "
@@ -300,7 +302,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
             ". Wykres pokazuje wtedy wyłącznie ZAMKNIĘTE świece; "
             "nie tworzę sztucznych knotów. Sprawdź stan "
             "NIEZALEŻNEGO KOLEKTORA 5S powyżej.")
-    st.caption("Wersja podglądu: WICK-M15-v1 / CLOUD-TF-v1 | "
+    st.caption("Wersja podglądu: WICK-M15-v1 / CLOUD-TF-v1 / LEGACY-PRICES-v1 | "
                "odświeżenie przeglądarki ~5s | "
                "nie jest to zlecenie ani świeca dla strategii.")
     st.caption("Ostatni zapis skanera UTC: "+
