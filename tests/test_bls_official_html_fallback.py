@@ -77,10 +77,10 @@ def test_http403_on_both_official_sources_uses_verified_temporary_snapshot():
 
 def test_http403_after_old_snapshot_expiry_requires_checked_manual_expiry():
     def get(url,**kwargs):return Response(403,"Forbidden",url)
-    cal=fetch_bls_schedule(get=get,now=datetime(2026,11,10,0,0,tzinfo=timezone.utc))
+    cal=fetch_bls_schedule(get=get,now=datetime(2026,11,17,13,0,tzinfo=timezone.utc))
     assert cal.source=="BLS_VERIFIED_MANUAL_NOT_LIVE"
     with pytest.raises(ValueError,match="BLS_MANUAL_VERIFICATION_EXPIRED"):
-        fetch_bls_schedule(get=get,now=datetime(2026,11,17,0,0,tzinfo=timezone.utc))
+        fetch_bls_schedule(get=get,now=datetime(2026,11,24,12,45,tzinfo=timezone.utc))
 
 
 def test_html_without_valid_calendar_does_not_enable_paper():

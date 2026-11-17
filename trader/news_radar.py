@@ -9,6 +9,8 @@ from email.utils import parsedate_to_datetime
 from zoneinfo import ZoneInfo
 from html.parser import HTMLParser
 import re
+from threading import Lock
+from time import monotonic
 from xml.etree import ElementTree as ET
 from urllib.parse import urlparse
 import requests
@@ -211,48 +213,119 @@ def fetch_bls_schedule_html(get=requests.get, timeout=12, *, now=None):
     return sorted(future,key=lambda x:x["data_utc"])
 
 
-def fetch_bls_schedule(get=requests.get, timeout=12, *, now=None):
-    # Identify client and use official sources only. If the .ics is
-    # forbidden, try BLS's own current monthly HTML calendar; fail closed
-    # when neither can be validated.
-    headers={
-        "User-Agent":"FokusTraderResearch/1.1 (+https://github.com/djfokus176-stack/fokus-the-best-trader)",
-        "Accept":"text/calendar, text/plain;q=0.9, */*;q=0.5",
-    }
-    try:
-        r=get(BLS_ICS,timeout=timeout,headers=headers)
-        r.raise_for_status()
-    except requests.HTTPError as exc:
-        # Some network environments reject .ics while allowing BLS's own
-        # published HTML schedule. Never use third-party mirrors or stale
-        # bundled dates; if official HTML is also unavailable, fail closed.
-        if getattr(getattr(exc,"response",None),"status_code",None)!=403:
-            raise
-        try:
-            return fetch_bls_schedule_html(get=get,timeout=timeout,now=now)
-        except requests.HTTPError as html_exc:
-            # GH-hosted IPs may be denied by both official BLS endpoints.
-            # A human-verified snapshot can cover a SHORT PAPER research
-            # window, but it is NEVER a live calendar and expires firmly.
-            # No fallback on arbitrary HTTP errors or unparseable sources.
-            if getattr(getattr(html_exc,"response",None),"status_code",None)!=403:
-                raise
-            from .bls_verified_snapshot import verified_schedule
-            try:
-                return verified_schedule(now=now)
-            except ValueError as snapshot_exc:
-                if str(snapshot_exc)!="BLS_VERIFIED_SNAPSHOT_EXPIRED":
-                    raise
-                from .manual_bls_calendar import load_verified_manual_bls
-                return load_verified_manual_bls(now=now)
-    if len(r.content)>1_500_000:raise ValueError("Zbyt duży kalendarz")
-    full=parse_bls_calendar(r.content.decode("utf-8-sig",errors="replace"),limit=0)
-    cutoff=(now or datetime.now(timezone.utc))-timedelta(days=7)
-    active=[e for e in full if e["data_utc"]>=cutoff]
-    if not active:
-        raise ValueError("Kalendarz BLS nie zawiera aktualnych dat — nie wyświetlam fałszywego braku publikacji.")
+# Cache only successful, source-validated schedules. A verified backup can
+# NEVER survive its own hard expiry, even if the worker stays alive.
+_BLS_CACHE_LOCK = Lock()
+_BLS_CACHE = {"until": 0.0, "calendar": None, "hard_expiry": None}
+
+
+def _validated_bls_ics(full, instant):
+    """Prevent a 200 OK but incomplete/stale .ics from opening the PAPER gate."""
+    active = [e for e in full if e["data_utc"] >= instant-timedelta(days=7)]
+    future_major = {e["data_utc"] for e in active
+        if instant < e["data_utc"] <= instant+timedelta(days=60)
+        and any(term in e["wydarzenie"].lower() for term in EVENT_TERMS)}
+    if len(future_major) < 2:
+        raise ValueError("BLS_ICS_NO_UPCOMING_MAJOR_RELEASES")
     return active[:300]
 
+
+def _bls_verified_backup(instant):
+    """Short-lived, verifiable PAPER-only backup: expiry is mandatory."""
+    try:
+        from .bls_verified_snapshot import verified_schedule
+        return verified_schedule(now=instant)
+    except ValueError:
+        pass
+    from .manual_bls_calendar import load_verified_manual_bls
+    try:
+        return load_verified_manual_bls(now=instant)
+    except ValueError as exc:
+        # Only a finite internal diagnostic code, never raw HTTP errors,
+        # credentials, response bodies, HTML, or user-provided messages.
+        code = str(exc)
+        if not re.fullmatch(r"BLS_[A-Z0-9_]{5,76}", code):
+            code = "BLS_BACKUP_INVALID"
+        raise ValueError("BLS_ALL_SOURCES_UNAVAILABLE__"+code) from None
+
+
+def fetch_bls_schedule(get=requests.get, timeout=12, *, now=None):
+    """Official ICS -> official two-month HTML -> strictly expiring backup.
+
+    Each upstream can fail independently (403, 429, timeout, invalid 200).
+    Only a *fresh, validated* calendar permits PAPER setups. Nothing is
+    auto-extended or treated as a confirmed absence of macro releases.
+    """
+    instant = now if now is not None else datetime.now(timezone.utc)
+    if instant.tzinfo is None:
+        raise ValueError("BLS_TIMEZONE_UNVERIFIED")
+    instant = instant.astimezone(timezone.utc)
+    cacheable = get is requests.get and now is None
+    if cacheable:
+        with _BLS_CACHE_LOCK:
+            hard_expiry = _BLS_CACHE["hard_expiry"]
+            if (monotonic() < _BLS_CACHE["until"]
+                    and (hard_expiry is None or instant < hard_expiry)
+                    and _BLS_CACHE["calendar"] is not None):
+                return _BLS_CACHE["calendar"]
+
+    # The ICS feed may be blocked to cloud providers. A failed or incomplete
+    # ICS is not a reason to skip BLS's own monthly HTML pages.
+    calendar = None
+    headers = {
+        "User-Agent": "FokusTraderResearch/1.1 (+https://github.com/djfokus176-stack/fokus-the-best-trader)",
+        "Accept": "text/calendar, text/plain;q=0.9, */*;q=0.5",
+    }
+    try:
+        r = get(BLS_ICS, timeout=timeout, headers=headers)
+        r.raise_for_status()
+        if len(r.content) > 1_500_000:
+            raise ValueError("BLS_ICS_TOO_LARGE")
+        full = parse_bls_calendar(r.content.decode("utf-8-sig"), limit=0)
+        calendar = _validated_bls_ics(full, instant)
+    except requests.HTTPError as exc:
+        # Explicit HTTP 403/429 are known cloud-host rejection/throttling.
+        # A 500 or unexpected code must NOT silently unlock a backup.
+        code = getattr(getattr(exc, "response", None), "status_code", None)
+        if code not in (403, 429):
+            raise
+    except (requests.ConnectionError, requests.Timeout):
+        pass
+    except (ValueError, UnicodeError, ET.ParseError):
+        # An incomplete or malformed HTTP 200 is NOT an approved calendar;
+        # try the separate official HTML format instead.
+        pass
+
+    if calendar is None:
+        try:
+            calendar = fetch_bls_schedule_html(get=get, timeout=timeout, now=instant)
+        except requests.HTTPError as exc:
+            code = getattr(getattr(exc, "response", None), "status_code", None)
+            if code not in (403, 429):
+                raise
+            calendar = _bls_verified_backup(instant)
+        except (requests.ConnectionError, requests.Timeout):
+            calendar = _bls_verified_backup(instant)
+        # A parse/validation error on HTTP 200 is NOT network blocking.
+        # Let it block PAPER: do not mask it with a potentially outdated copy.
+
+    if cacheable:
+        hard_expiry = None
+        expiry_text = getattr(calendar, "expires_utc", None)
+        if expiry_text:
+            try:
+                hard_expiry = datetime.fromisoformat(expiry_text).astimezone(timezone.utc)
+            except (TypeError, ValueError):
+                raise ValueError("BLS_BACKUP_MISSING_VALID_EXPIRY") from None
+            if hard_expiry <= instant:
+                raise ValueError("BLS_BACKUP_ALREADY_EXPIRED")
+        ttl = 300.0
+        if hard_expiry is not None:
+            ttl = min(ttl, (hard_expiry-instant).total_seconds())
+        with _BLS_CACHE_LOCK:
+            _BLS_CACHE.update(until=monotonic()+max(0.0, ttl),
+                              calendar=calendar, hard_expiry=hard_expiry)
+    return calendar
 
 def macro_blackout(events, now=None, minutes_before=20,minutes_after=20):
     """Only confirmed scheduled high-impact BLS events; UNKNOWN != clear."""

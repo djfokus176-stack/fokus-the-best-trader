@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime,timezone
 import os
+import re
 import sqlite3
 import time
 from .market import CapitalReadOnly,FeedError,PERIOD
@@ -157,7 +158,13 @@ def scan_once(client,epic,tf,strategy,max_spread,db, *,
         except (OSError,ValueError,TimeoutError,FeedError,TypeError) as exc:
             reasons.append("MACRO_CALENDAR_UNAVAILABLE")
             code=getattr(getattr(exc,"response",None),"status_code",None)
+            # Expose only known internal BLS reason identifiers. Raw
+            # network errors may contain sensitive URLs or response bodies.
+            detail=str(exc) if isinstance(exc,ValueError) else ""
+            if not re.fullmatch(r"BLS_[A-Z0-9_]{5,120}",detail):
+                detail=""
             diagnostics.append("BLS_CALENDAR:"+type(exc).__name__+
+                               (":"+detail if detail else "")+
                                (f":HTTP{code}" if code else ""))
     # PAPER-only daily circuit breaker, evaluated AFTER prior positions
     # progressed on closed candles, but BEFORE any new PENDING setup.
