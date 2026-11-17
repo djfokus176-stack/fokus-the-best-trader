@@ -170,7 +170,8 @@ def test_documented_prices_fallback_is_visual_only_and_delay_unknown(monkeypatch
     sampler=Quote5sSampler()
     c=QuoteFailButPricesWork();db=Remote()
     assert sampler.pulse(c,db,monotonic=10.)=="BROKER_M15_ONLY_UNVERIFIED_QUOTE"
-    assert c.calls==["markets","status","MINUTE","MINUTE_15"]
+    assert c.calls==["markets","status","MINUTE","MINUTE_15",
+                    "MINUTE_5","HOUR"]  # extra read-only MTF probes
     assert len(db.rows)==1
     row=db.rows[-1]
     assert row["fresh"] is False
