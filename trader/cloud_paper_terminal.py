@@ -22,6 +22,7 @@ from .cloud_moving_m15 import assess_moving_m15
 from .cloud_chart_timeframes import (
     closed_chart_frame,source_resolution,sampled_chart_bar)
 from .cloud_ws_prices import assess_streaming_candle
+from .cloud_signal_radar import worker_signal_radar
 from .cloud_candle_clock import render_candle_clock
 
 
@@ -411,6 +412,41 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         st.warning(decision["headline"]+" | "+details)
     st.caption("LONG/SHORT to wynik analizy, a nie zlecenie. OPEN i CLOSED "
                "pokazuję tylko z zapisanego rejestru PAPER.")
+    st.markdown("##### 📡 RADAR 6 STRATEGII — DLACZEGO LONG / SHORT / WAIT?")
+    radar=worker_signal_radar(payload)
+    if not radar["current"]:
+        st.warning("Nie ma zweryfikowanego audytu SZÓSTKI z bieżącego skanu: "
+                   +radar["reason"]+". Nie pokazuję starych kierunków "
+                   "jako aktualnych sygnałów.")
+    else:
+        a,b,c,d=st.columns(4)
+        a.metric("LONG po MTF",str(radar["mtf_long"])+"/6")
+        b.metric("SHORT po MTF",str(radar["mtf_short"])+"/6")
+        c.metric("Odrzucone przez MTF",str(radar["veto"]))
+        watch=radar["watch"]
+        d.metric("Obserwacja M1 (NIE PAPER)",
+                 watch["side"]+((" "+str(watch["score"])+"/6")
+                                if watch["score"] is not None else ""))
+        if radar["conflict"]:
+            st.warning("Konflikt surowych LONG i SHORT. "
+                       "Nie łączę sprzecznych kandydatów.")
+        if watch["side"] in ("LONG","SHORT"):
+            st.info("👀 OBSERWUJ "+watch["side"]+" — "+
+                    watch["reason"]+" Nie jest to wejście PAPER, "
+                    "poziom transakcji ani potwierdzenie MTF.")
+        else:
+            st.caption("👀 Wczesna obserwacja M1: "+watch["reason"])
+        st.caption("Surowe setupy: LONG "+str(radar["raw_long"])+
+                   ", SHORT "+str(radar["raw_short"])+
+                   ". Ocena zakończonej świecy UTC: "+radar["candle_utc"]+
+                   ". Etapy 0/3–3/3 oznaczają spełnione warunki, "
+                   "NIE prawdopodobieństwo zysku.")
+        st.dataframe(pd.DataFrame(radar["rows"]),
+                     hide_index=True,use_container_width=True)
+        st.caption("Kolumna Brakuje oznacza pierwszy niezrealizowany etap. "
+                   "Nawet zatwierdzony setup wymaga GATES=OK, "
+                   "QUEUE=YES i późniejszego faktycznego PAPER OPEN. "
+                   "Radar nie wysyła zleceń i nie zmienia strategii.")
     recent_paper,chart_paper=cloud_paper_positions(payload,frame)
     if recent_paper:
         active=next((p for p in recent_paper
