@@ -170,7 +170,7 @@ def test_existing_worker_writes_safely_in_same_loop_without_new_table(monkeypatc
     assert len(first["samples"])==1
     assert client.forming_calls==1
     assert worker.pulse(client,remote,monotonic=105.)=="LIVE_QUOTE_SAVED"
-    assert client.forming_calls==1  # /prices no faster than every 15s
+    assert client.forming_calls==2  # /prices M1 now polls every ~5s for moving wicks
     assert client.quote_calls==2
     assert len(remote.records)==2
     assert len(remote.records[-1]["samples"])==2
