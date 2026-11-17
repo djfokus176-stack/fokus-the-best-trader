@@ -115,12 +115,13 @@ def test_pump_runs_without_needing_scan_idle_time():
         scan.session.close()
 
 
-def test_clock_and_token_failure_never_authenticates_in_pump():
+def test_old_login_age_does_not_cancel_active_broker_session():
     scan=Scanner()
     scan.authenticate_for_test()
     scan.session_started=time.time()-610
-    with pytest.raises(FeedError,match="PAPER_BROKER_SESSION_NOT_READY"):
-        BorrowedDemoQuoteClient(scan).headers()
+    # Validity is 10 min since LAST use, not time since login.
+    assert BorrowedDemoQuoteClient(scan).headers()["CST"]=="CST_T"
+    scan.session.close()
 
 
 def test_main_worker_uses_background_sampler_no_concurrent_idle_poll():
