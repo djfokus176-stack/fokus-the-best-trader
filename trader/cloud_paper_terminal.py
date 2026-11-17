@@ -151,7 +151,8 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         "Żółty ślad: osobne odczyty BID/ASK z REST, odświeżane ok. 5 s "
         "gdy strona jest otwarta. NIE są to ticki ani świece 5S. "
         "Nieukończona M1 (gdy dostępna) pochodzi wyłącznie od Northflank "
-        "z /prices co ~15s, nie jest świecą M15 ani sygnałem. "
+        "z /prices co ok. 5s; M5/H1 z osobnych GET /prices co ok. "
+        "30–45s (gdy broker odpowiada). Tylko do podglądu, nie PAPER. "
         "Streamlit NIE loguje się do brokera, tylko czyta chmurę.")
     url=secret_fn("FOKUS_SUPABASE_URL")
     key=secret_fn("FOKUS_SUPABASE_SECRET_KEY")
@@ -344,13 +345,16 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         st.caption("W checkpointcie brak zarejestrowanych pozycji PAPER US500; "
                    "nie wyświetlam wymyślonych LONG/SHORT.")
     if frame.empty:
-        st.info("W Supabase nie ma jeszcze kompletnych świec "+choice+
-                " do wyświetlenia. Nie uzupełniam luk.")
-        return
-    candles=go.Figure(go.Candlestick(
-        x=frame.index,open=frame.Open,high=frame.High,
-        low=frame.Low,close=frame.Close,
-        name="US500 "+choice+" CLOSED CLOUD"))
+        st.info("Brak zamkniętych świec "+choice+" w archiwum. "
+                "Bieżąca OHLC może być pokazana osobno, bez fikcyjnej historii.")
+        if not moving_chart["visible"]:
+            return
+        candles=go.Figure()
+    else:
+        candles=go.Figure(go.Candlestick(
+            x=frame.index,open=frame.Open,high=frame.High,
+            low=frame.Low,close=frame.Close,
+            name="US500 "+choice+" CLOSED CLOUD"))
     # IMPORTANT: this is a separate, visibly named, INCOMPLETE bar.
     # It uses REAL observed MID samples for both moving body and wicks.
     # The original closed M15 OHLC and PAPER annotations remain immutable.
@@ -359,16 +363,16 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         explanation=(choice+" — tylko ZAOBSERWOWANE próbki MID; "
                      "może brakować rzeczywistych ekstremów."
                      if moving_chart["missing_extremes_possible"]
-                     else "M15 w trakcie: niezamknięty OHLC Capital /prices.")
+                     else choice+" w trakcie: niezamknięty OHLC Capital /prices.")
         candles.add_trace(go.Candlestick(
             x=[live["at"]],
             open=[live["open"]],high=[live["high"]],
             low=[live["low"]],close=[live["close"]],
             name=("🕯️ "+choice+" • MID Z PRÓBEK (KNOTY W RUCHU)"
                   if moving_chart["missing_extremes_possible"]
-                  else "🕯️ M15 /prices • NIEPEŁNA / QUOTE NIEZWERYFIKOWANY"
+                  else "🕯️ "+choice+" /prices • NIEPEŁNA / QUOTE NIEZWERYFIKOWANY"
                   if moving_chart.get("quote_verified") is False
-                  else "🕯️ M15 LIVE /prices • NIEPEŁNA"),
+                  else "🕯️ "+choice+" LIVE /prices • NIEPEŁNA"),
             increasing={"line":{"color":"#34e8f2","width":3},
                         "fillcolor":"rgba(52,232,242,0.48)"},
             decreasing={"line":{"color":"#ffad4e","width":3},
@@ -382,7 +386,8 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
             hoverinfo="text"))
         # Keep the moving candle in viewport as each new quarter begins.
         # No future data or fake calendar gap may be interpolated.
-        left=max(frame.index[0],live["at"]-pd.Timedelta(hours=8))
+        left=(max(frame.index[0],live["at"]-pd.Timedelta(hours=8))
+              if not frame.empty else live["at"]-pd.Timedelta(hours=1))
         candles.update_xaxes(range=[
             left,live["at"]+pd.Timedelta(seconds=(
                 2*{"M1":60,"M2":120,"M5":300,"M15":900,"H1":3600}[choice]))])
@@ -442,8 +447,8 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
     st.caption("Zielone/czerwone świece: HISTORYCZNE, ZAMKNIĘTE "+choice+". "
                "Dla M2: pary pełnych M1, bez wypełniania braków. "
                "Jasnoniebieska/pomarańczowa OSTATNIA świeca: "
-               "ruchoma, NIEPEŁNA "+choice+" z obserwacji MID REST, "
-               "wysokie/niskie knoty mogą być niekompletne. "
+               "ruchoma, NIEPEŁNA "+choice+" z prawdziwego /prices albo "
+               "z próbek MID. W drugim przypadku knoty mogą być niekompletne. 
                "Niebieski pusty romb: M1 /prices W TRAKCIE, tylko do "
                "podglądu (jeśli świeży). Żółta linia i "
                "punkty: jedynie ŚWIEŻE obserwacje BID/ASK REST (~5 s, "
