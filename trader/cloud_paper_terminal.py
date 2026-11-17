@@ -448,7 +448,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
                "Dla M2: pary pełnych M1, bez wypełniania braków. "
                "Jasnoniebieska/pomarańczowa OSTATNIA świeca: "
                "ruchoma, NIEPEŁNA "+choice+" z prawdziwego /prices albo "
-               "z próbek MID. W drugim przypadku knoty mogą być niekompletne. 
+               "z próbek MID. W drugim przypadku knoty mogą być niekompletne. "
                "Niebieski pusty romb: M1 /prices W TRAKCIE, tylko do "
                "podglądu (jeśli świeży). Żółta linia i "
                "punkty: jedynie ŚWIEŻE obserwacje BID/ASK REST (~5 s, "
