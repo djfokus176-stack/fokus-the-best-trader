@@ -283,15 +283,31 @@ def fetch_bls_schedule(get=requests.get, timeout=12, *, now=None):
             raise ValueError("BLS_ICS_TOO_LARGE")
         full = parse_bls_calendar(r.content.decode("utf-8-sig"), limit=0)
         calendar = _validated_bls_ics(full, instant)
-    except (requests.RequestException, ValueError, UnicodeError, ET.ParseError):
-        # Never silently interpret a failed upstream as 'no news today'.
+    except requests.HTTPError as exc:
+        # Explicit HTTP 403/429 are known cloud-host rejection/throttling.
+        # A 500 or unexpected code must NOT silently unlock a backup.
+        code = getattr(getattr(exc, "response", None), "status_code", None)
+        if code not in (403, 429):
+            raise
+    except (requests.ConnectionError, requests.Timeout):
+        pass
+    except (ValueError, UnicodeError, ET.ParseError):
+        # An incomplete or malformed HTTP 200 is NOT an approved calendar;
+        # try the separate official HTML format instead.
         pass
 
     if calendar is None:
         try:
             calendar = fetch_bls_schedule_html(get=get, timeout=timeout, now=instant)
-        except (requests.RequestException, ValueError, UnicodeError, ET.ParseError):
+        except requests.HTTPError as exc:
+            code = getattr(getattr(exc, "response", None), "status_code", None)
+            if code not in (403, 429):
+                raise
             calendar = _bls_verified_backup(instant)
+        except (requests.ConnectionError, requests.Timeout):
+            calendar = _bls_verified_backup(instant)
+        # A parse/validation error on HTTP 200 is NOT network blocking.
+        # Let it block PAPER: do not mask it with a potentially outdated copy.
 
     if cacheable:
         hard_expiry = None
