@@ -31,6 +31,7 @@ from .obstacle_ab import obstacle_ab_snapshot
 from .shadow_learning import advance_shadow, shadow_scorecard
 from .mtf_veto_forward import advance_mtf_comparison, mtf_comparison_report
 from .momentum_paper_test import advance_momentum_paper_test, momentum_paper_test_report
+from .raw_m1_forward_paper import advance_raw_paper, raw_paper_report
 from .capital_demo_broker import advance_demo_broker, config as demo_broker_config, DemoExecutionError
 from .paper_daily_risk import paper_daily_risk, DEFAULT_DAILY_STOP_PTS
 from .wave_shadow_archive import advance_wave_shadow, wave_shadow_scorecard
@@ -249,6 +250,7 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
     shadow_state=payload.get("shadow_per_strategy") or {}
     mtf_veto_state=payload.get("mtf_veto_forward") or {}
     momentum_test_state=payload.get("momentum_paper_test") or {}
+    raw_test_state=payload.get("raw_m1_forward_paper") or {}
     wave_state=payload.get("wave_shadow") or {}
     ae_state=payload.get("wave_ae_forward") or {}
     threef_state=payload.get("fokus_3f_forward") or {}
@@ -307,7 +309,7 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
                          "events":[],"errors":{"worker":type(exc).__name__},
                          "sources":{}}
     def review_snapshot(snapshot,decision,votes,views,blockers):
-        nonlocal auto_state,candidates,forecast_state,vote_audit,shadow_state,mtf_veto_state,momentum_test_state
+        nonlocal auto_state,candidates,forecast_state,vote_audit,shadow_state,mtf_veto_state,momentum_test_state,raw_test_state
         # Only a read-only audit. These results were ALREADY computed by
         # evaluate_auto / filter_mtf_decision. Never alter trade decisions.
         vote_audit={
@@ -364,6 +366,24 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
                 momentum_test_state={**(momentum_test_state if isinstance(
                     momentum_test_state,dict) else {}),
                     "last_reason":"ERROR_"+type(exc).__name__}
+            # Independent RAW M1 PAPER test: the exact unfiltered M1 LONG/
+            # SHORT candidates (including those rejected by directional MTF)
+            # are monitored as actual forward-only simulated positions.
+            # Global data, account, broker, macro and risk GATES still apply.
+            # No order, no v3 mutation, no switching production AUTO filters.
+            if tf=="MINUTE":
+                try:
+                    raw_enabled=(os.getenv("FOKUS_RAW_M1_PAPER_TEST_ENABLED",
+                        "true").strip().lower() in ("true","1","yes","on"))
+                    raw_test_state=advance_raw_paper(
+                        raw_test_state,snapshot.frame,votes,blockers,
+                        spread=snapshot.spread,source=snapshot.source,
+                        epic=epic,enabled=raw_enabled)
+                except (ValueError,TypeError,KeyError,OverflowError,
+                        IndexError,RuntimeError,ArithmeticError) as exc:
+                    raw_test_state={**(raw_test_state if isinstance(
+                        raw_test_state,dict) else {}),
+                        "last_reason":"ERROR_"+type(exc).__name__}
             # Independent FORWARD counterfactual: what happened to REAL raw
             # setups that MTF passed vs vetoed? Never alters PAPER decisions.
             # A broken research record must not block the actual scanner.
@@ -499,6 +519,10 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             payload["momentum_paper_test"]=momentum_test_state
             payload["momentum_paper_test_report"]=momentum_paper_test_report(
                 momentum_test_state)
+            if tf=="MINUTE":
+                payload["raw_m1_forward_paper"]=raw_test_state
+                payload["raw_m1_forward_paper_report"]=raw_paper_report(
+                    raw_test_state)
         if strategy==AUTO_MODE:
             payload["mtf_veto_forward"]=mtf_veto_state
             payload["mtf_veto_forward_report"]=mtf_comparison_report(
