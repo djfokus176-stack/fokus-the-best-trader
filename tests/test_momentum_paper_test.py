@@ -165,4 +165,4 @@ def test_research_implementation_does_not_touch_existing_paper_v3():
     assert "CapitalReadOnly(" not in source
     assert "paper_positions_v3" not in source
     assert "execute_order" not in source
-    assert "min_score" not in source.lower()
+    assert "MIN_SCORE = 5" in source
