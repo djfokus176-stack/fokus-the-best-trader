@@ -42,10 +42,28 @@ def assess_quote_snapshot(record, *, now=None):
     except (ValueError,TypeError,OverflowError):
         raise ValueError("SCALP 5S: bad UTC") from None
     status=str(record.get("broker_status","UNKNOWN"))
-    is_fresh=(record.get("fresh") is True and status=="TRADEABLE"
-              and delay==0 and -2<=seconds<=12)
-    samples=[]
     raw=record.get("samples") or []
+    # The private Supabase schema has a historical fixed source key
+    # 'Capital.com DEMO REST'. A STREAMING_ACTIVE row MUST carry its
+    # explicit provenance marker, or it is not accepted as an active feed.
+    stream=(isinstance(raw,list) and bool(raw)
+            and isinstance(raw[-1],dict)
+            and raw[-1].get("transport")=="CAPITAL_WS_V1")
+    vendor_ok=False
+    if stream:
+        try:
+            vendor=pd.Timestamp(record["broker_update_utc"])
+            if pd.isna(vendor) or vendor.tzinfo is None:
+                raise ValueError()
+            age_vendor=(current-vendor.tz_convert("UTC")).total_seconds()
+            vendor_ok=-2<=age_vendor<=15
+        except (TypeError,ValueError,OverflowError,KeyError):
+            vendor_ok=False
+    is_fresh=(record.get("fresh") is True and delay==0
+              and -2<=seconds<=12
+              and ((status=="TRADEABLE" and not stream)
+                   or (status=="STREAMING_ACTIVE" and stream and vendor_ok)))
+    samples=[]
     if not isinstance(raw,list) or len(raw)>24:
         raise ValueError("SCALP 5S: corrupt samples")
     for sample in raw:
@@ -72,9 +90,11 @@ def assess_quote_snapshot(record, *, now=None):
 def render_cloud_scalp_5s(secret_fn):
     st.markdown("#### ⚡ US500 — CENA / BID–ASK CO 5 SEKUND")
     st.caption(
-        "Odczyt co ok. 5 s z chmury — NIE gwarantuje nowego ticka. "
-        "Worker próbuje aktualizacji co 5 s POMIĘDZY pełnymi skanami M1. "
-        "Bez API Capital.com w przeglądarce, bez automatycznych transakcji.")
+        "Panel odświeża dane z Supabase co ~5 s. Nowy transport "
+        "Capital WebSocket przesyła rzeczywiste zdarzenia cenowe; "
+        "REST pozostaje do świec zamkniętych i PAPER. "
+        "Brak nowych ticków = brak sztucznego ruchu. "
+        "Przeglądarka NIE loguje się do brokera.")
     url=secret_fn("FOKUS_SUPABASE_URL")
     key=secret_fn("FOKUS_SUPABASE_SECRET_KEY")
     if not url or not key:
@@ -101,7 +121,10 @@ def render_cloud_scalp_5s(secret_fn):
     mid.metric("ASK (LIVE)" if result["fresh"] else
                "OSTATNI ASK — NIE LIVE",f'{result["ask"]:.2f}')
     right.metric("Spread (pkt)",f'{result["spread"]:.2f}')
-    st.caption("Broker: "+result["broker_status"]+
+    transport="WebSocket" if record.get("samples") and isinstance(
+        record["samples"][-1],dict) and (
+        record["samples"][-1].get("transport")=="CAPITAL_WS_V1") else "REST"
+    st.caption("Broker: "+result["broker_status"]+" | Transport: "+transport+
                " | Ostatnia próba UTC: "+result["received_utc"]+
                " | Wiek: "+str(result["age_seconds"])+" s")
     if result["fresh"]:
@@ -125,6 +148,7 @@ def render_cloud_scalp_5s(secret_fn):
             margin={"l":10,"r":10,"t":12,"b":8})
         st.plotly_chart(chart,use_container_width=True,
                         key="fokus_cloud_5s_chart")
-        st.caption("Ostatnie maksymalnie 24 pobrane próbki (~2 min). "
-                   "To punkty obserwacji REST, NIE ticki giełdowe "
-                   "ani świece pięciosekundowe.")
+        st.caption("Ostatnie maksymalnie 24 rzeczywiste obserwacje. "
+                   "WebSocket może dostarczać je znacznie częściej niż "
+                   "co 5 s, więc to NIE musi być historia 2 minut. "
+                   "Brak interpolacji i fikcyjnych knotów.")
