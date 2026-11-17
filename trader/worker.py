@@ -28,6 +28,7 @@ from .remote_checkpoint import (RemoteCheckpoint, configured, dump_state,
                                 restore_state, RemoteError)
 from .strategy_progress import progress_for_votes
 from .shadow_learning import advance_shadow, shadow_scorecard
+from .mtf_veto_forward import advance_mtf_comparison, mtf_comparison_report
 from .paper_daily_risk import paper_daily_risk, DEFAULT_DAILY_STOP_PTS
 from .wave_shadow_archive import advance_wave_shadow, wave_shadow_scorecard
 from .wave_ae_forward_auto import advance_wave_ae_forward, wave_ae_forward_scorecard
@@ -243,6 +244,7 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
     forecast_state=payload.get("forecast_research",{})
     vote_audit=payload.get("last_vote_audit") or {}
     shadow_state=payload.get("shadow_per_strategy") or {}
+    mtf_veto_state=payload.get("mtf_veto_forward") or {}
     wave_state=payload.get("wave_shadow") or {}
     ae_state=payload.get("wave_ae_forward") or {}
     threef_state=payload.get("fokus_3f_forward") or {}
@@ -301,7 +303,7 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
                          "events":[],"errors":{"worker":type(exc).__name__},
                          "sources":{}}
     def review_snapshot(snapshot,decision,votes,views,blockers):
-        nonlocal auto_state,candidates,forecast_state,vote_audit,shadow_state
+        nonlocal auto_state,candidates,forecast_state,vote_audit,shadow_state,mtf_veto_state
         # Only a read-only audit. These results were ALREADY computed by
         # evaluate_auto / filter_mtf_decision. Never alter trade decisions.
         vote_audit={
@@ -330,6 +332,18 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
         if strategy==AUTO_MODE:
             shadow_state=advance_shadow(shadow_state,snapshot.frame,votes,
                                         blockers,spread=snapshot.spread)
+            # Independent FORWARD counterfactual: what happened to REAL raw
+            # setups that MTF passed vs vetoed? Never alters PAPER decisions.
+            # A broken research record must not block the actual scanner.
+            try:
+                mtf_veto_state=advance_mtf_comparison(
+                    mtf_veto_state,snapshot.frame,votes,blockers,
+                    spread=snapshot.spread,source=snapshot.source,epic=epic)
+            except (ValueError,TypeError,KeyError,OverflowError,
+                    IndexError,RuntimeError,ArithmeticError) as exc:
+                mtf_veto_state={**(mtf_veto_state if isinstance(
+                    mtf_veto_state,dict) else {}),
+                    "last_error":"ERROR_"+type(exc).__name__}
         # Informational M1 bias from completed candles only, never a PAPER
         # entry, MTF override or broker order. Persist beside the six votes.
         from .early_watch import evaluate_early_watch
@@ -448,6 +462,10 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
         from .paper_learning import strategy_scorecard
         payload["learning_report"]=strategy_scorecard(db,epic=epic)
         payload["shadow_per_strategy"]=shadow_state
+        if strategy==AUTO_MODE:
+            payload["mtf_veto_forward"]=mtf_veto_state
+            payload["mtf_veto_forward_report"]=mtf_comparison_report(
+                mtf_veto_state)
         if wave_state:
             payload["wave_shadow"]=wave_state
             # WAVE SHADOW must persist even on market closure, before
