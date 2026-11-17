@@ -248,3 +248,16 @@ def test_optional_archive_can_shrink_without_blocking_main_checkpoint():
     assert tiny["tables"]["paper_positions_v3"][0]["trade_id"]=="a"
     assert "periodic_audit_archive" not in tiny
     assert tiny["periodic_audit_status"]=="OMITTED_CHECKPOINT_SIZE_LIMIT"
+
+
+def test_selecting_previous_day_within_current_month_does_not_include_future_trades():
+    first=trade(key="in-scope",setup="2026-11-10T09:00:00+00:00",
+                opened="2026-11-10T09:01:00+00:00",
+                closed="2026-11-10T10:00:00+00:00",pnl=2)
+    later=trade(key="later",pnl=50)
+    a=advance_periodic_archive({},payload(first,later),now=NOW)
+    comparison=period_comparison(a,"PAPER v3","month",
+                                 reference=date(2026,11,10),now=NOW)
+    assert comparison["current_partial"] is True
+    assert comparison["current"]["net_pts"]==2
+    assert comparison["matching"]=="SAME_ELAPSED_UTC_DURATION"
