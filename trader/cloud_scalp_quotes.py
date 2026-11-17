@@ -76,9 +76,18 @@ class Quote5sSampler:
                     AttributeError,OverflowError,OSError) as exc:
                 self.extra_forming.pop(choice,None)
                 self.extra_forming_status[choice]="BROKER_OHLC_WAIT_"+type(exc).__name__
+                hit_limit="HTTP 429" in str(exc)
                 self.extra_forming_next_due[choice]=moment+(
-                    RATE_LIMIT_RETRY_INTERVAL if "HTTP 429" in str(exc)
-                    else EXTRA_FORMING_ERROR_INTERVAL)
+                    RATE_LIMIT_RETRY_INTERVAL if hit_limit else
+                    EXTRA_FORMING_ERROR_INTERVAL)
+                if hit_limit:
+                    # Stop new MTF requests in this cycle when the broker
+                    # reports throttling; protect the shared DEMO account.
+                    for other in ("M5","H1"):
+                        self.extra_forming_next_due[other]=max(
+                            self.extra_forming_next_due[other],
+                            moment+RATE_LIMIT_RETRY_INTERVAL)
+                    break
 
     def _recent_extra(self,now):
         """Only genuinely current broker OHLC goes into the last JSON sample."""
@@ -155,8 +164,10 @@ class Quote5sSampler:
                 "source_delay_unknown":True}],
         }
         remote.upsert_live_quote(row)
-        self.last_status=("BROKER_M1_ONLY_UNVERIFIED_QUOTE" if m1 else
-                          "BROKER_M15_ONLY_UNVERIFIED_QUOTE")
+        self.last_status=(
+            "BROKER_M1_ONLY_UNVERIFIED_QUOTE" if m1 else
+            "BROKER_M15_ONLY_UNVERIFIED_QUOTE" if m15 else
+            "BROKER_MTF_ONLY_UNVERIFIED_QUOTE")
         self.next_due=moment+PRICES_FALLBACK_INTERVAL
         return self.last_status
 
@@ -359,7 +370,9 @@ class Quote5sSampler:
                 "LIVE_QUOTE_SAVED" if quote.fresh else
                 ("BROKER_M1_ONLY_UNVERIFIED_QUOTE"
                  if samples[-1].get("forming_m1") else
-                 "BROKER_M15_ONLY_UNVERIFIED_QUOTE")
+                 "BROKER_M15_ONLY_UNVERIFIED_QUOTE"
+                 if samples[-1].get("forming_m15") else
+                 "BROKER_MTF_ONLY_UNVERIFIED_QUOTE")
                 if using_prices_only
                 else "BROKER_NOT_FRESH")
             self.next_due=moment+(LIVE_INTERVAL if quote.status=="TRADEABLE"
