@@ -278,7 +278,10 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         live=moving_chart["bar"]
         live_message=(
             "🕯️ "+choice+" W TRAKCIE — RUCHOME KNOTY (NIE SYGNAŁ) | "
-            + ("MID z próbek REST" if moving_chart["missing_extremes_possible"]
+            + ("TYLKO aktualna M1 /prices (częściowy "+choice+")"
+               if moving_chart.get("broker_m1_only") else
+               "MID z próbek REST"
+               if moving_chart["missing_extremes_possible"]
                else "nieukończona OHLC brokera /prices")
             + f' | O={live["open"]:.2f}, H={live["high"]:.2f}, '
               f'L={live["low"]:.2f}, C={live["close"]:.2f}'
@@ -290,12 +293,12 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
                        "NIE potwierdzenie możliwości handlu.")
         else:
             st.success(live_message)
-        if moving_m15["missing_extremes_possible"]:
+        if moving_chart["missing_extremes_possible"]:
             st.caption(
-                "Uwaga: knoty HIGH/LOW obejmują wyłącznie ZAOBSERWOWANE "
-                "próbki REST od " + str(live.get("first_vendor_utc","BRAK"))+
-                "; nie muszą odzwierciedlać ekstremów całych 15 minut. "
-                "Nie wpływają na SL/TP ani AUTO.")
+                "Uwaga: HIGH/LOW obejmują tylko dostępny fragment "
+                "interwału, od "+str(live.get("first_vendor_utc","BRAK"))+
+                ". Nie muszą odzwierciedlać ekstremów całej "+choice+
+                ". Bez wpływu na SL/TP ani AUTO.")
     else:
         st.warning(
             "🟠 "+choice+" W TRAKCIE NIEAKTYWNA: "+moving_chart["reason"]+
@@ -355,16 +358,16 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         live=moving_chart["bar"]
         explanation=(choice+" — tylko ZAOBSERWOWANE próbki MID; "
                      "może brakować rzeczywistych ekstremów."
-                     if moving_m15["missing_extremes_possible"]
+                     if moving_chart["missing_extremes_possible"]
                      else "M15 w trakcie: niezamknięty OHLC Capital /prices.")
         candles.add_trace(go.Candlestick(
             x=[live["at"]],
             open=[live["open"]],high=[live["high"]],
             low=[live["low"]],close=[live["close"]],
             name=("🕯️ "+choice+" • MID Z PRÓBEK (KNOTY W RUCHU)"
-                  if moving_m15["missing_extremes_possible"]
+                  if moving_chart["missing_extremes_possible"]
                   else "🕯️ M15 /prices • NIEPEŁNA / QUOTE NIEZWERYFIKOWANY"
-                  if moving_m15.get("quote_verified") is False
+                  if moving_chart.get("quote_verified") is False
                   else "🕯️ M15 LIVE /prices • NIEPEŁNA"),
             increasing={"line":{"color":"#34e8f2","width":3},
                         "fillcolor":"rgba(52,232,242,0.48)"},
