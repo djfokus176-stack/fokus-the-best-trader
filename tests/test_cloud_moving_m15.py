@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from trader.market import MarketQuote
+from trader.market import MarketQuote, FeedError
 from trader.cloud_moving_m15 import (
     SAMPLED_KIND, BROKER_KIND, FROM_PRICES,
     update_sampled_m15, broker_forming_m15,assess_moving_m15,
