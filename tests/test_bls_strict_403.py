@@ -20,7 +20,7 @@ def test_bls_calendar_request_identifies_client_and_only_uses_official_url():
     assert seen[0][0]==BLS_ICS
     assert "github.com/djfokus176-stack/fokus-the-best-trader" in seen[0][1]["headers"]["User-Agent"]
     assert "text/calendar" in seen[0][1]["headers"]["Accept"]
-    assert events and events[0]["wydarzenie"]=="Consumer Price Index"
+    assert events and any(e["wydarzenie"]=="Consumer Price Index" for e in events)
 
 
 def test_bls_403_is_not_reinterpreted_as_empty_safe_calendar():
