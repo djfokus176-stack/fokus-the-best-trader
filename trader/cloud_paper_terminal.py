@@ -26,6 +26,7 @@ from .cloud_signal_radar import worker_signal_radar
 from .cloud_paper_audio import cloud_paper_audio_events, advance_cloud_audio
 from .paper_sounds import alert_audio, SOUND_EVENTS
 from .cloud_candle_clock import render_candle_clock
+from .cloud_paper_visibility import cloud_paper_visibility, cloud_chart_gaps
 
 
 def _parse_utc(value):
@@ -127,14 +128,17 @@ def cloud_paper_decision(meta, *, now=None):
     }
 
 
-def cloud_chart_view_range(frame, choice, *, moving=None):
+def cloud_chart_view_range(frame, choice, *, moving=None, visible_count=None):
     """Zoom around *real* recent candles; no synthetic price or candle data."""
     if choice not in ("M1","M2","M5","M15","H1"):
         raise ValueError("Unsupported UI chart timeframe")
     if frame.empty and moving is None:
         return None
     seconds={"M1":60,"M2":120,"M5":300,"M15":900,"H1":3600}[choice]
-    count={"M1":65,"M2":60,"M5":55,"M15":45,"H1":45}[choice]
+    defaults={"M1":65,"M2":60,"M5":55,"M15":45,"H1":45}
+    count=defaults[choice] if visible_count is None else int(visible_count)
+    if not 15<=count<=120:
+        raise ValueError("Invalid CLOUD chart zoom")
     last=(_parse_utc(moving["at"]) if moving is not None
           else frame.index[-1])
     if last is None:
@@ -288,6 +292,10 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         "Interwał WYKRESU CLOUD (nie zmienia strategii AUTO/PAPER)",
         options=choices,index=choices.index(labels.get(default_tf,"M1")),
         key="cloud_price_chart_interval")
+    zoom=st.select_slider(
+        "🔍 ZOOM WYKRESU — ostatnie świece (tylko wygląd)",
+        options=[20,30,45,65,90],value=30,
+        key="cloud_price_chart_zoom_"+choice)
     resolution=source_resolution(choice)
     render_candle_clock(choice)
     st.caption(
@@ -312,7 +320,8 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         if (not isinstance(cache,dict) or cache.get("url")!=url
                 or cache.get("resolution")!=resolution
                 or cache.get("choice")!=choice
-                or m15_cache_due(cache)):
+                or m15_cache_due(
+                    cache,ttl_seconds=35 if choice in ("M1","M2") else 60)):
             version,payload=remote.fetch()
             original=remote.fetch_candles("US500",resolution,limit=180)
             frame=closed_chart_frame(original,choice)
@@ -534,6 +543,45 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
                    "QUEUE=YES i późniejszego faktycznego PAPER OPEN. "
                    "Radar nie wysyła zleceń i nie zmienia strategii.")
     recent_paper,chart_paper=cloud_paper_positions(payload,frame)
+    viewport=cloud_chart_view_range(
+        frame,choice,moving=moving_chart["bar"]
+        if moving_chart["visible"] else None,visible_count=zoom)
+    counts=cloud_paper_visibility(payload,viewport=viewport)
+    st.markdown("##### 📊 ILE NAPRAWDĘ OTWORZYŁ BOT PAPER?")
+    if counts["known"]:
+        ca,cb,cc,cd=st.columns(4)
+        ca.metric("OPEN w całym PAPER",counts["total_open"])
+        cb.metric("CLOSED w całym PAPER",counts["total_closed"])
+        cc.metric("PENDING (to NIE OPEN)",counts["pending"])
+        cd.metric("OPEN w oknie wykresu",counts["visible_open"])
+        st.caption("W widocznym oknie: "+str(counts["visible_open"])+
+                   " otwarć i "+str(counts["visible_closed"])+
+                   " zamknięć. Mniej trójkątów na wykresie NIE oznacza "
+                   "mniejszej liczby transakcji w archiwum. "
+                   "Ostatnie OPEN UTC: "+
+                   str(counts["last_open_utc"] or "BRAK")+
+                   " | CLOSE UTC: "+str(counts["last_close_utc"] or "BRAK")+
+                   ". Wszystkie to symulacje bez zleceń brokera.")
+        if counts["invalid_rows"]:
+            st.warning("Nieprawidłowe wpisy PAPER: "+
+                       str(counts["invalid_rows"])+
+                       ". Nie liczę ich jako transakcji.")
+    else:
+        st.warning("BRAK ZWERYFIKOWANEGO REJESTRU PAPER. "
+                   "Znaczniki na wykresie nie potwierdzają liczby transakcji.")
+    gap=cloud_chart_gaps(frame,choice,visible_count=zoom)
+    if gap["known"]:
+        st.caption("📅 Ostatnie zamknięte "+choice+": "+str(gap["bars"])+
+                   " świec • przerwy dłuższe niż interwał: "+
+                   str(gap["gaps"])+
+                   " • ostatnia świeca UTC: "+str(gap["last_closed_utc"]))
+        if gap["gaps"]:
+            st.warning("LUKI W ARCHIWUM: "+str(gap["gaps"])+
+                       " przerw, około "+str(gap["missing_slots"])+
+                       " brakujących okresów, największa przerwa "+
+                       str(gap["largest_gap_minutes"])+" min. "
+                       "Przyczyną może być pauza rynku — sprawdź godzinę "
+                       "notowań i STATUS/API. Nie tworzę fikcyjnych świec.")
     if recent_paper:
         active=next((p for p in recent_paper
                      if p.get("status") in ("OPEN","PENDING")),None)
@@ -658,11 +706,9 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
     open_row=next((p for p in recent_paper if p.get("status")=="OPEN"),None)
     if open_row is not None:
         annotate_open_paper(candles,open_row)
-    viewport=cloud_chart_view_range(
-        frame,choice,moving=moving_chart["bar"] if moving_chart["visible"] else None)
     candles.update_layout(
-        height=570,xaxis_rangeslider_visible=False,template="plotly_dark",
-        uirevision="fokus_cloud_"+choice+"_readable_v2",
+        height=620,xaxis_rangeslider_visible=False,template="plotly_dark",
+        uirevision="fokus_cloud_"+choice+"_readable_v3_zoom_"+str(zoom),
         paper_bgcolor="#101928",plot_bgcolor="#101928",
         font={"size":13,"color":"#e8eef8"},
         legend={"orientation":"h","y":1.15,"x":0,"font":{"size":11}},
@@ -682,6 +728,12 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
                 f'⚠️ Bieżące ceny są dostępne, ale ostatnia zamknięta '
                 f'{choice} ma {lag:.1f} min. Sprawdź zapis świec '
                 'w Northflank/Supabase; checkpoint nie gwarantuje OHLC.')
+    st.caption("Przybliżenie: "+str(zoom)+
+               " ostatnich świec; zmiana zoomu nie zmienia strategii. "
+               "BIEŻĄCA cena może być odświeżana co ~5 s, "
+               "ZAMKNIĘTE M1/M2 są pobierane z chmury co ~35 s, "
+               "M5/M15/H1 co ~60 s. Nową świecę widać dopiero po "
+               "jej zapisaniu przez Northflank.")
     st.caption("Zielone/czerwone świece: HISTORYCZNE, ZAMKNIĘTE "+choice+". "
                "Dla M2: pary pełnych M1, bez wypełniania braków. "
                "Jasnoniebieska/pomarańczowa OSTATNIA świeca: "
