@@ -358,7 +358,8 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
                 "Setup OHLC":range_exp.action,
                 "Po filtrze MTF":"NIE WYLICZANO (SHADOW)",
                 "RR":range_exp.rr,"Powód":range_exp.reason})
-        candidates=append_candidate(candidates,snapshot,decision,research_votes,blockers)
+        candidates=append_candidate(candidates,snapshot,decision,research_votes,blockers,
+                                    progress=vote_audit["progress"])
         auto_state=review_closed_candle(auto_state,snapshot,decision,votes,views,
                                       blockers,news_context=news_feed,
                                       macro_context=macro_watch)
