@@ -20,6 +20,7 @@ from .cloud_forming_m1 import assess_cloud_forming_m1
 from .cloud_moving_m15 import assess_moving_m15
 from .cloud_chart_timeframes import (
     closed_chart_frame,source_resolution,sampled_chart_bar)
+from .cloud_ws_prices import assess_streaming_candle
 from .cloud_candle_clock import render_candle_clock
 
 
@@ -127,7 +128,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
     browser is open. Closed M15 and checkpoint load about every 60 seconds.
     Worker clocks, AUTO and PAPER remain completely independent.
     """
-    st.markdown("#### ☁️ US500 — RUCHOME ŚWIECE M1 / M2 / M5 / M15 / H1")
+    st.markdown("#### ☁️ US500 — STREAMING WS • M1 / M2 / M5 / M15 / H1")
     labels={"MINUTE":"M1","MINUTE_5":"M5",
             "MINUTE_15":"M15","HOUR":"H1"}
     choices=("M1","M2","M5","M15","H1")
@@ -146,13 +147,12 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
     st.caption(
         "Zamknięte świece wybranego interwału = zielone/czerwone. "
         "M2 powstaje WYŁĄCZNIE z dwóch kompletnych, kolejnych M1. "
-        "OSTATNIA świeca w trakcie = dane MID z rzeczywistych próbek "
-        "BID/ASK workera co ~5s, z ruchomymi knotami, wyraźnie NIEPEŁNA. "
-        "Żółty ślad: osobne odczyty BID/ASK z REST, odświeżane ok. 5 s "
-        "gdy strona jest otwarta. NIE są to ticki ani świece 5S. "
-        "Nieukończona M1 (gdy dostępna) pochodzi wyłącznie od Northflank "
-        "z /prices co ok. 5s; M5/H1 z osobnych GET /prices co ok. "
-        "30–45s (gdy broker odpowiada). Tylko do podglądu, nie PAPER. "
+        "OSTATNIA świeca w trakcie = strumień Capital WebSocket, "
+        "z rzeczywistymi BID/ASK i OHLC, jeśli są dostępne. "
+        "Dla natywnej OHLC BID knoty przedstawiają BID; dla M2 i "
+        "awaryjnych danych z quote — tylko zaobserwowane MID. "
+        "Panel odświeża Supabase co ~5 s, NIE wysyła zapytań REST "
+        "do brokera. Bez fikcyjnych świec, bez wpływu na PAPER. "
         "Streamlit NIE loguje się do brokera, tylko czyta chmurę.")
     url=secret_fn("FOKUS_SUPABASE_URL")
     key=secret_fn("FOKUS_SUPABASE_SECRET_KEY")
@@ -193,14 +193,20 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         quote_now=pd.Timestamp.now(tz="UTC")
         overlay=cloud_quote_overlay(quote_record,now=quote_now)
         forming=assess_cloud_forming_m1(quote_record,now=quote_now)
-        if choice=="M15":
+        last_closed=frame.index[-1] if not frame.empty else None
+        latest_sample=(quote_record or {}).get("samples") or []
+        ws_transport=(bool(latest_sample) and
+            isinstance(latest_sample[-1],dict) and
+            latest_sample[-1].get("transport")=="CAPITAL_WS_V1")
+        if ws_transport:
+            moving_chart=assess_streaming_candle(
+                quote_record,choice,now=quote_now,last_closed_utc=last_closed)
+        elif choice=="M15":
             moving_chart=assess_moving_m15(
-                quote_record,now=quote_now,
-                last_closed_utc=frame.index[-1] if not frame.empty else None)
+                quote_record,now=quote_now,last_closed_utc=last_closed)
         else:
             moving_chart=sampled_chart_bar(
-                quote_record,choice,now=quote_now,
-                last_closed_utc=frame.index[-1] if not frame.empty else None)
+                quote_record,choice,now=quote_now,last_closed_utc=last_closed)
     except (RemoteError,ValueError,TypeError,KeyError,OverflowError,OSError):
         overlay={"visible":False,"broker_status":"UNKNOWN","age_seconds":None,
                  "reason":"Nie udało się odczytać aktualnego BID/ASK.",
@@ -217,7 +223,8 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
     z.metric("Wiek checkpointu",str(audit["age_minutes"])+" min"
              if audit["age_minutes"] is not None else "BRAK")
     pump=payload.get("meta",{}).get("quote_pump")
-    if isinstance(pump,dict) and pump.get("mode")=="BACKGROUND_SAME_CAPITAL_LOGIN":
+    if isinstance(pump,dict) and pump.get("mode") in (
+            "BACKGROUND_SAME_CAPITAL_LOGIN","CAPITAL_WS_STREAMING"):
         last_try=_parse_utc(pump.get("last_attempt_utc"))
         last_write=_parse_utc(pump.get("last_write_utc"))
         last_fresh=_parse_utc(pump.get("last_fresh_utc"))
@@ -226,20 +233,23 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
             return (f"{(now_diag-ts).total_seconds()/60:.1f} min"
                     if ts is not None else "NIGDY")
         health=str(pump.get("status","UNKNOWN"))[:48]
-        message=(f"📡 NIEZALEŻNY KOLEKTOR 5S | stan: {health} | "
+        is_ws=pump.get("mode")=="CAPITAL_WS_STREAMING"
+        message=(f"📡 {'WEBSOCKET' if is_ws else 'KOLEKTOR REST'} | "
+                 f"stan: {health} | "
                  f"próby: {pump.get('attempts',0)} | "
                  f"ostatnia próba: {_minutes(last_try)} | "
                  f"ostatni zapis: {_minutes(last_write)} | "
                  f"ostatnia ŚWIEŻA cena: {_minutes(last_fresh)}. "
                  "Ten sam login DEMO; dane osobne od PAPER.")
-        if (health=="LIVE_QUOTE_SAVED" and last_fresh is not None and
+        if (health in ("LIVE_QUOTE_SAVED","WS_QUOTE_SAVED") and
+                last_fresh is not None and
                 0 <= (now_diag-last_fresh).total_seconds()<=30):
             st.success(message)
         else:
             st.warning(message)
     else:
-        st.warning("📡 KOLEKTOR 5S: BRAK POTWIERDZENIA NOWEGO WORKERA "
-                   "BACKGROUND_SAME_CAPITAL_LOGIN w checkpointcie. "
+        st.warning("📡 BRAK POTWIERDZENIA AKTYWNEGO TRANSPORTU "
+                   "Capital WebSocket / REST w checkpointcie. "
                    "Możliwe, że Northflank nadal korzysta ze starego "
                    "commita, wyłączono FOKUS_SCALP_5S_ENABLED albo "
                    "checkpoint zapisuje inny proces.")
@@ -250,19 +260,23 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         st.warning("Checkpoint nie jest świeży lub jego daty nie potwierdzono. "
                    "Sprawdź Northflank; nie twierdzę, że worker teraz działa.")
     if overlay["visible"]:
-        st.metric("🟡 BIEŻĄCY MID BID/ASK (REST)",f'{overlay["mid"]:.2f} pkt')
+        transport=("WebSocket" if ws_transport else "REST") if (
+            "ws_transport" in locals()) else "REST"
+        st.metric("🟡 BIEŻĄCY MID BID/ASK ("+transport+")",
+                  f'{overlay["mid"]:.2f} pkt')
         st.caption(
             f'BID {overlay["bid"]:.2f} | ASK {overlay["ask"]:.2f} | '
             f'Spread {overlay["spread"]:.2f} pkt | '
             f'Broker {overlay["broker_status"]} | '
             f'Wiek odczytu {overlay["age_seconds"]} s. '
-            "To próbki API, nie ticki ani cena wykonanego zlecenia.")
+            "To obserwacje dostawcy, NIE cena zrealizowanej transakcji.")
     else:
         st.warning("⚪ BRAK AKTUALNEJ CENY 5S: "+overlay["reason"]+
                    " | Broker: "+str(overlay["broker_status"])+
                    " | Wiek: "+str(overlay["age_seconds"])+
                    " s. Ostatnie "+choice+" to wyłącznie historia.")
-    if forming["visible"]:
+    if forming["visible"] and not (ws_transport if
+            "ws_transport" in locals() else False):
         m=forming["preview"]
         st.caption(
             f'🕯️ CLOUD /prices M1 W TRAKCIE — MID: {m["close"]:.2f} | '
@@ -271,7 +285,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
             f'Wiek pobrania: {m["age_seconds"]} s | '
             f'Otwarta: {m["open_utc"]}, koniec minuty: {m["close_utc"]}. '
             'To nieukończony bar, bez wpływu na PAPER.')
-    else:
+    elif not (ws_transport if "ws_transport" in locals() else False):
         st.caption('🕯️ Podgląd M1 /prices: '+forming["reason"]+
                    '. Nie ma drugiego logowania Capital w Streamlit; '
                    'dane wymagają odświeżonego workera Northflank.')
@@ -281,7 +295,11 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
             "🕯️ "+choice+" W TRAKCIE — RUCHOME KNOTY (NIE SYGNAŁ) | "
             + ("TYLKO aktualna M1 /prices (częściowy "+choice+")"
                if moving_chart.get("broker_m1_only") else
-               "MID z próbek REST"
+               "MID z obserwacji WebSocket"
+               if moving_chart.get("basis")=="MID_OBSERVED"
+               else "natywna OHLC BID WebSocket"
+               if moving_chart.get("basis")=="BID"
+               else "MID z próbek REST"
                if moving_chart["missing_extremes_possible"]
                else "nieukończona OHLC brokera /prices")
             + f' | O={live["open"]:.2f}, H={live["high"]:.2f}, '
@@ -289,8 +307,8 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
             + f' | aktualizacja {live["capture_age_seconds"]} s temu.')
         if moving_chart.get("quote_verified") is False:
             st.warning(live_message+
-                       " | UWAGA: /markets nie potwierdził czasu BID/ASK; "
-                       "to wyłącznie aktualny odczyt /prices, "
+                       " | UWAGA: brak zweryfikowanej ceny handlowej; "
+                       "to wyłącznie aktualny podgląd, "
                        "NIE potwierdzenie możliwości handlu.")
         else:
             st.success(live_message)
@@ -306,7 +324,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
             ". Wykres pokazuje wtedy wyłącznie ZAMKNIĘTE świece; "
             "nie tworzę sztucznych knotów. Sprawdź stan "
             "NIEZALEŻNEGO KOLEKTORA 5S powyżej.")
-    st.caption("Wersja podglądu: WICK-M15-v1 / CLOUD-TF-v1 / LEGACY-PRICES-v1 | "
+    st.caption("Wersja podglądu: WICK-M15-v1 / CLOUD-TF-v1 / WS-STREAM-v1 | "
                "odświeżenie przeglądarki ~5s | "
                "nie jest to zlecenie ani świeca dla strategii.")
     st.caption("Ostatni zapis skanera UTC: "+
@@ -368,8 +386,10 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
             x=[live["at"]],
             open=[live["open"]],high=[live["high"]],
             low=[live["low"]],close=[live["close"]],
-            name=("🕯️ "+choice+" • MID Z PRÓBEK (KNOTY W RUCHU)"
+            name=("🕯️ "+choice+" • OBSERWOWANE MID (KNOTY W RUCHU)"
                   if moving_chart["missing_extremes_possible"]
+                  else "🕯️ "+choice+" • OHLC BID WebSocket"
+                  if moving_chart.get("basis")=="BID"
                   else "🕯️ "+choice+" /prices • NIEPEŁNA / QUOTE NIEZWERYFIKOWANY"
                   if moving_chart.get("quote_verified") is False
                   else "🕯️ "+choice+" LIVE /prices • NIEPEŁNA"),
@@ -399,10 +419,10 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
                 x=[p["time"] for p in points],
                 y=[p["mid"] for p in points],
                 mode="lines+markers" if len(points)>1 else "markers",
-                name="🟡 MID BID/ASK ~5S (REST)",
+                name="🟡 MID BID/ASK — "+("WS" if ws_transport else "REST"),
                 line={"color":"#f5c24b","width":2.6},
                 marker={"size":7,"color":"#f5c24b"},
-                hovertemplate="REST %{x}<br>MID: %{y:.2f}<extra></extra>"))
+                hovertemplate="Odczyt %{x}<br>MID: %{y:.2f}<extra></extra>"))
         candles.add_hline(
             y=float(overlay["mid"]),line_color="#f5c24b",
             line_dash="dot",opacity=.65,
@@ -447,8 +467,9 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
     st.caption("Zielone/czerwone świece: HISTORYCZNE, ZAMKNIĘTE "+choice+". "
                "Dla M2: pary pełnych M1, bez wypełniania braków. "
                "Jasnoniebieska/pomarańczowa OSTATNIA świeca: "
-               "ruchoma, NIEPEŁNA "+choice+" z prawdziwego /prices albo "
-               "z próbek MID. W drugim przypadku knoty mogą być niekompletne. "
+               "ruchoma, NIEPEŁNA "+choice+" ze strumienia WS lub "
+               "awaryjnego /prices. BID to BID, MID to MID; "
+               "knoty z próbek mogą być niekompletne. "
                "Niebieski pusty romb: M1 /prices W TRAKCIE, tylko do "
                "podglądu (jeśli świeży). Żółta linia i "
                "punkty: jedynie ŚWIEŻE obserwacje BID/ASK REST (~5 s, "
