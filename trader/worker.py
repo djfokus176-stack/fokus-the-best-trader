@@ -32,7 +32,7 @@ from .shadow_learning import advance_shadow, shadow_scorecard
 from .mtf_veto_forward import advance_mtf_comparison, mtf_comparison_report
 from .momentum_paper_test import advance_momentum_paper_test, momentum_paper_test_report
 from .raw_m1_forward_paper import advance_raw_paper, raw_paper_report
-from .periodic_archive_audit import advance_periodic_archive, automatic_audit_report
+from .periodic_archive_audit import attach_periodic_audit
 from .capital_demo_broker import advance_demo_broker, config as demo_broker_config, DemoExecutionError
 from .paper_daily_risk import paper_daily_risk, DEFAULT_DAILY_STOP_PTS
 from .wave_shadow_archive import advance_wave_shadow, wave_shadow_scorecard
@@ -548,12 +548,9 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
         # manufacture old entries from OHLC. No extra Supabase tables/keys.
         # Keep a previously valid archive intact if optional audit fails.
         try:
-            periodic_archived=advance_periodic_archive(
+            payload=attach_periodic_audit(
                 periodic_archive_before,payload,
                 now=datetime.now(timezone.utc))
-            payload["periodic_audit_archive"]=periodic_archived
-            payload["periodic_audit_report"]=automatic_audit_report(
-                periodic_archived,now=datetime.now(timezone.utc))
         except (ValueError,TypeError,KeyError,OverflowError,RuntimeError,
                 ArithmeticError) as exc:
             if isinstance(periodic_archive_before,dict) and periodic_archive_before.get("schema")==1:
