@@ -24,6 +24,12 @@ import pandas as pd
 
 WS_URL = "wss://api-streaming-capital.backend-capital.com/connect"
 SOURCE = "Capital.com DEMO WS"
+# The existing Supabase table enforces source='Capital.com DEMO REST'.
+# Preserve its canonical instrument/source key WITHOUT a SQL migration.
+# The immutable transport marker in each sample distinguishes WebSocket
+# provenance. UI must never claim the cache was filled through REST.
+CACHE_SOURCE = "Capital.com DEMO REST"
+TRANSPORT = "CAPITAL_WS_V1"
 RESOLUTIONS = {"M1":60,"M2":120,"M5":300,"M15":900,"H1":3600}
 BROKER_RES = {"MINUTE":"M1","MINUTE_5":"M5",
               "MINUTE_15":"M15","HOUR":"H1"}
@@ -173,9 +179,10 @@ class StreamingPrices:
                 previews[choice]=dict(b)
             elif usable(p,QUOTE_MAX_AGE_SECONDS):
                 previews[choice]=dict(p)
-        sample[-1]={**sample[-1],"stream_candles":previews}
+        sample[-1]={**sample[-1],"stream_candles":previews,
+                    "transport":TRANSPORT}
         return {
-            "epic":"US500","source":SOURCE,
+            "epic":"US500","source":CACHE_SOURCE,
             "bid":bid,"ask":ask,"mid":(bid+ask)/2,"spread":ask-bid,
             # Stream protocol has no marketStatus. Do NOT fake TRADEABLE.
             "broker_status":"STREAMING_ACTIVE",
@@ -191,7 +198,7 @@ def assess_streaming_candle(record,choice,*,now=None,last_closed_utc=None):
            "bar":None,"quote_verified":False,
            "trade_permission":"WAIT","missing_extremes_possible":True}
     if choice not in RESOLUTIONS or not isinstance(record,dict) or (
-            record.get("source")!=SOURCE or record.get("epic")!="US500"):
+            record.get("source")!=CACHE_SOURCE or record.get("epic")!="US500"):
         return empty
     from .cloud_scalp_5s_ui import assess_quote_snapshot
     try:
@@ -200,6 +207,8 @@ def assess_streaming_candle(record,choice,*,now=None,last_closed_utc=None):
             return {**empty,"reason":"WS_CENA_NIEAKTUALNA"}
         raw=record.get("samples")
         if not isinstance(raw,list) or not raw or not isinstance(raw[-1],dict):
+            return empty
+        if raw[-1].get("transport")!=TRANSPORT:
             return empty
         item=raw[-1].get("stream_candles",{}).get(choice)
         if not isinstance(item,dict) or item.get("source")!=SOURCE or (
