@@ -103,6 +103,13 @@ def sampled_chart_bar(record,choice,*,now=None,last_closed_utc=None):
     if not isinstance(record,dict) or record.get("epic")!="US500":
         return empty
     at=_utc(now if now is not None else datetime.now(timezone.utc))
+    samples=record.get("samples")
+    if (isinstance(samples,list) and samples and
+            isinstance(samples[-1],dict) and
+            samples[-1].get("transport")=="CAPITAL_WS_V1"):
+        from .cloud_ws_prices import assess_streaming_candle
+        return assess_streaming_candle(
+            record,choice,now=at,last_closed_utc=last_closed_utc)
     # M5/H1 must use the actual provider /prices OPEN/HIGH/LOW/CLOSE
     # when it is current, not just the last 24 MID samples (~2 min).
     # The read-only worker populated it; no new Capital login here.

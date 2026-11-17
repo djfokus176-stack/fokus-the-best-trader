@@ -155,6 +155,19 @@ class CloudQuotePump:
 
 
 def build_quote_pump(scanner, *, epic="US500", sampler=None):
-    """Dedicated Supabase HTTP session; never shares main PAPER session."""
-    return CloudQuotePump(scanner, RemoteCheckpoint.from_env(), epic,
-                          sampler=sampler)
+    """Exactly one CLOUD quote writer. Default WebSocket, REST opt-out.
+
+    Streaming avoids the five independent /prices polling schedules that
+    have triggered Capital.com HTTP 429. If the stream is unavailable it
+    reconnects with backoff and shows WAIT, not an unverified REST storm.
+    To revert without modifying trading: FOKUS_CLOUD_QUOTE_TRANSPORT=rest.
+    """
+    import os
+    transport=os.getenv("FOKUS_CLOUD_QUOTE_TRANSPORT","websocket").strip().lower()
+    if transport in ("websocket","ws"):
+        from .cloud_ws_prices import CloudWSQuotePump
+        return CloudWSQuotePump(scanner,RemoteCheckpoint.from_env(),epic)
+    if transport=="rest":
+        return CloudQuotePump(scanner,RemoteCheckpoint.from_env(),epic,
+                              sampler=sampler)
+    raise ValueError("FOKUS_CLOUD_QUOTE_TRANSPORT must be websocket or rest")
