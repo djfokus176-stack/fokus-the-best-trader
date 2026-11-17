@@ -121,7 +121,8 @@ class CloudQuotePump:
         if status is not None:
             wrote = status in ("LIVE_QUOTE_SAVED", "BROKER_NOT_FRESH",
                                "BROKER_M15_ONLY_UNVERIFIED_QUOTE",
-                               "BROKER_M1_ONLY_UNVERIFIED_QUOTE")
+                               "BROKER_M1_ONLY_UNVERIFIED_QUOTE",
+                               "BROKER_MTF_ONLY_UNVERIFIED_QUOTE")
             self._note(status, attempted=True, written=wrote,
                        fresh=status == "LIVE_QUOTE_SAVED")
         return status
