@@ -29,6 +29,7 @@ from .cloud_candle_clock import render_candle_clock
 from .cloud_paper_visibility import cloud_paper_visibility, cloud_chart_gaps
 from .cloud_paper_test_status import status_for_owner
 from .raw_paper_chart import annotate_raw_forward, rows_for_journal
+from .periodic_archive_ui import render_periodic_archive_ui
 
 
 def _parse_utc(value):
@@ -439,6 +440,10 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
     # the placeholders preserve their visual location in Streamlit.
     live_chart_slot=st.empty()
     raw_journal_slot=st.empty()
+    # Audit is also in the top viewport, after live chart/journal placeholders.
+    # The worker has already computed and stored it in Supabase; the browser
+    # never creates artificial entries or alters a trading decision.
+    render_periodic_archive_ui(payload)
     pump=payload.get("meta",{}).get("quote_pump")
     if isinstance(pump,dict) and pump.get("mode") in (
             "BACKGROUND_SAME_CAPITAL_LOGIN","CAPITAL_WS_STREAMING"):
