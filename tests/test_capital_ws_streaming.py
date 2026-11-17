@@ -250,7 +250,9 @@ def test_ohlc_subscription_rejected_but_real_bid_ask_quote_still_saved():
         pump._one_connection()
     assert db.rows and db.rows[-1]["fresh"] is True
     assert db.rows[-1]["samples"][-1]["transport"]==TRANSPORT
-    assert assess_streaming_candle(db.rows[-1],"M1",now=at)["basis"]=="MID_OBSERVED"
+    checked=assess_streaming_candle(db.rows[-1],"M1",now=pd.Timestamp.now(tz="UTC"))
+    assert checked["visible"] is True
+    assert checked["basis"]=="MID_OBSERVED"
 
 
 @pytest.mark.parametrize("reason",[
