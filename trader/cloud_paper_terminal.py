@@ -536,6 +536,21 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
                    ". Ocena zakończonej świecy UTC: "+radar["candle_utc"]+
                    ". Etapy 0/3–3/3 oznaczają spełnione warunki, "
                    "NIE prawdopodobieństwo zysku.")
+        watch_2of3=[r for r in radar["rows"]
+                    if r["Etap"]=="2/3" and r["Obserwuj"] in ("LONG","SHORT")
+                    and r["Setup OHLC"]=="WAIT"]
+        if watch_2of3:
+            report=", ".join(r["Strategia"]+" "+r["Obserwuj"]
+                             for r in watch_2of3)
+            st.info("🔬 ETAP 2/3 — WCZESNA OBSERWACJA (SHADOW): "+report+
+                    ". To kontekst i wstępny układ, BEZ kompletnego "
+                    "setupu i potwierdzenia MTF/bramek. "
+                    "Nie otwieram PAPER wyłącznie na 2/3. "
+                    "Weryfikacja skuteczności wymaga nowych danych.")
+        else:
+            st.caption("Etap 2/3: brak obecnie wstępnych układów "
+                       "z jednostronnym kierunkiem. "
+                       "Próg PAPER pozostaje 3/3.")
         st.dataframe(pd.DataFrame(radar["rows"]),
                      hide_index=True,use_container_width=True)
         st.caption("Kolumna Brakuje oznacza pierwszy niezrealizowany etap. "
