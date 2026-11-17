@@ -36,7 +36,7 @@ def test_streamlit_uses_guard_and_disables_ui_sources_of_http_401():
     assert "disabled=cloud_owner_display" in code
     assert "disabled=cloud_read_only_mode" in code
     assert "st.session_state.pop(key,None)" in code
-    assert "Stary lokalny MARKET TERMINAL jest wyłączony" in code
+    assert "Lokalne logowanie Capital.com jest wyłączone." in code
     assert "render_cloud_terminal(secret,tf)" in code
     assert "render_cloud_scalp_5s(secret)" in code
 
