@@ -192,6 +192,19 @@ def render_cloud_paper_voice(remote, *, url):
                "CLOSED_TP / CLOSED_SL / TIMEOUT z PAPER v3. "
                "Nie nadaję alarmu otwarcia dla OBSERWUJ LONG/SHORT. "
                "Odczyt rejestru co ~10 s; Chrome może blokować autoplay.")
+    # A PENDING line with SL and TP may look like an open trade on the
+    # chart. Spell out why it has no OPEN voice, rather than playing a
+    # deceptive alert for a pending setup.
+    tables=(cache["payload"].get("tables") or {})
+    positions=tables.get("paper_positions_v3")
+    if isinstance(positions,list) and any(
+            isinstance(pos,dict) and pos.get("status")=="PENDING"
+            and pos.get("epic")=="US500"
+            and pos.get("source")=="Capital.com DEMO REST"
+            for pos in positions):
+        st.info("⏳ PAPER PENDING: poziomy wejścia / SL / TP są wyłącznie "
+                "planem. Głos LONG/SHORT zabrzmi dopiero po nowym "
+                "potwierdzonym zdarzeniu PAPER_OPEN w archiwum.")
     if audio_event is not None:
         st.session_state["_fokus_cloud_voice_last"]=audio_event
         st.success("🔔 "+SOUND_EVENTS[audio_event["kind"]]+
