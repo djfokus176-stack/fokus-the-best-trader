@@ -722,17 +722,22 @@ with market_tab:
             st.info('⚪ TRYB RĘCZNY — nowe świece wymagają ponownego skanowania.')
     with col2:
         if remote_paper_view_enabled():
-            render_cloud_scalp_5s(secret)
-            render_cloud_terminal(secret,tf)
-        if remote_paper_view_enabled():
-            st.caption('☁️ Stary lokalny MARKET TERMINAL jest wyłączony w '
-                       'trybie CLOUD. Aktualny wykres i głosy PAPER są POWYŻEJ.')
+            st.info('☁️ Terminal CLOUD działa niezależnie od tego panelu '
+                    'sterowania. Wykres pełnej szerokości znajduje się PONIŻEJ. '
+                    'Lokalne logowanie Capital.com jest wyłączone.')
         else:
             st.markdown('#### 🎯 FOKU$ MARKET TERMINAL')
             st.caption('Świece MID • EMA9/21/50 • SL/TP PAPER • potwierdzenie '
                        '4 interwałów • analiza bez zleceń')
             st.info('Dane wykresu i silnika są wspólne. GPT czyta dane '
                     'liczbowe, a nie obraz wykresu.')
+    # The older layout drew the complete CLOUD chart INSIDE col2 (2/3 of
+    # available content width). With sidebar, table and y-axis it became
+    # unreadable. Render it outside both columns: FULL page width. This
+    # is UI only, not an additional broker login or second PAPER worker.
+    if remote_paper_view_enabled():
+        render_cloud_scalp_5s(secret)
+        render_cloud_terminal(secret,tf)
     auto_scan = bool(not remote_paper_view_enabled() and has_cap and csv is None and not st.session_state.get('initial_scan_attempted') and st.session_state.get('market_snap') is None)
     if auto_scan:
         st.session_state['initial_scan_attempted'] = True
