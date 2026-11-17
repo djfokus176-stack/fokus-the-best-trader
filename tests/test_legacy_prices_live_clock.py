@@ -155,5 +155,5 @@ def test_runtime_regression_does_not_reference_removed_moving_m15_variable():
     assert "moving_m15" not in used  # PREVIOUS PR88 NameError
     assert "moving_chart" in used
     assert "render_candle_clock(choice)" in src
-    assert "LEGACY-PRICES-v1" in src
+    assert "WS-STREAM-v1" in src
     assert "queue_paper(" not in src
