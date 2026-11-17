@@ -103,6 +103,15 @@ def sampled_chart_bar(record,choice,*,now=None,last_closed_utc=None):
     if not isinstance(record,dict) or record.get("epic")!="US500":
         return empty
     at=_utc(now if now is not None else datetime.now(timezone.utc))
+    # M5/H1 must use the actual provider /prices OPEN/HIGH/LOW/CLOSE
+    # when it is current, not just the last 24 MID samples (~2 min).
+    # The read-only worker populated it; no new Capital login here.
+    if choice in ("M5","H1"):
+        from .cloud_broker_timeframes import assess_broker_forming
+        official_tf=assess_broker_forming(
+            record,choice,now=at,last_closed_utc=last_closed_utc)
+        if official_tf["visible"]:
+            return official_tf
     try:
         status=assess_quote_snapshot(record,now=at)
     except (TypeError,KeyError,ValueError,OverflowError):
