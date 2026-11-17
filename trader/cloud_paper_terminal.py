@@ -23,6 +23,8 @@ from .cloud_chart_timeframes import (
     closed_chart_frame,source_resolution,sampled_chart_bar)
 from .cloud_ws_prices import assess_streaming_candle
 from .cloud_signal_radar import worker_signal_radar
+from .cloud_paper_audio import cloud_paper_audio_events, advance_cloud_audio
+from .paper_sounds import alert_audio, SOUND_EVENTS
 from .cloud_candle_clock import render_candle_clock
 
 
@@ -144,6 +146,76 @@ def cloud_chart_view_range(frame, choice, *, moving=None):
     if left>=last:
         left=last-pd.Timedelta(seconds=seconds*2)
     return [left,last+pd.Timedelta(seconds=seconds*2)]
+
+def render_cloud_paper_voice(remote, *, url):
+    """Owner-browser audio from CLOUD checkpoint, independent of chart cache.
+
+    Works only while the page is open and the owner has opted in via the
+    existing sidebar. No browser broker session and no additional trade scan.
+    """
+    st.markdown("##### 🔊 GŁOSY CLOUD PAPER — OTWARCIA I ZAMKNIĘCIA")
+    enabled=bool(st.session_state.get("paper_audio_enabled",False))
+    if not enabled:
+        st.session_state["_fokus_cloud_voice_was_enabled"]=False
+        st.session_state.pop("_fokus_cloud_voice_pending",None)
+        st.session_state.pop("_fokus_cloud_voice_cursor",None)
+        st.caption("Dźwięki wyłączone. W lewym panelu włącz "
+                   "🔔 DŹWIĘKI PAPER, wybierz Głos ElevenLabs i użyj "
+                   "PRZETESTUJ DŹWIĘK. Historia nie będzie odgrywana.")
+        return
+    if not st.session_state.get("_fokus_cloud_voice_was_enabled"):
+        st.session_state["_fokus_cloud_voice_was_enabled"]=True
+        st.session_state["_fokus_cloud_voice_cursor"]=None
+        st.session_state["_fokus_cloud_voice_pending"]=[]
+        st.session_state.pop("_fokus_cloud_voice_cache",None)
+    now=pd.Timestamp.now(tz="UTC")
+    cache=st.session_state.get("_fokus_cloud_voice_cache")
+    if (not isinstance(cache,dict) or cache.get("url")!=url
+            or _parse_utc(cache.get("read_utc")) is None
+            or (now-_parse_utc(cache["read_utc"])).total_seconds()>=8):
+        try:
+            _,fresh_payload=remote.fetch()
+        except (RemoteError,ValueError,TypeError,KeyError,OverflowError,OSError):
+            st.warning("Głos CLOUD: chwilowo brak odczytu rejestru zdarzeń. "
+                       "Nie odtwarzam niepotwierdzonych alertów.")
+            return
+        cache={"url":url,"read_utc":now.isoformat(),"payload":fresh_payload}
+        st.session_state["_fokus_cloud_voice_cache"]=cache
+    events=cloud_paper_audio_events(cache["payload"],now=now.isoformat())
+    cursor=st.session_state.get("_fokus_cloud_voice_cursor")
+    pending=st.session_state.get("_fokus_cloud_voice_pending") or []
+    cursor,pending,audio_event=advance_cloud_audio(
+        events,cursor,pending,enabled=True)
+    st.session_state["_fokus_cloud_voice_cursor"]=cursor
+    st.session_state["_fokus_cloud_voice_pending"]=pending
+    st.caption("Nasłuch aktywny • wyłącznie nowe zdarzenia OPEN / "
+               "CLOSED_TP / CLOSED_SL / TIMEOUT z PAPER v3. "
+               "Nie nadaję alarmu otwarcia dla OBSERWUJ LONG/SHORT. "
+               "Odczyt rejestru co ~10 s; Chrome może blokować autoplay.")
+    if audio_event is not None:
+        st.session_state["_fokus_cloud_voice_last"]=audio_event
+        st.success("🔔 "+SOUND_EVENTS[audio_event["kind"]]+
+                   " • "+audio_event["side"]+
+                   " • PAPER, nie rzeczywista transakcja.")
+    last=st.session_state.get("_fokus_cloud_voice_last")
+    if last is not None and last.get("kind") in SOUND_EVENTS:
+        voice=st.session_state.get("paper_audio_mode")=="Głos ElevenLabs (nagrania MP3)"
+        content,mime,used=alert_audio(last["kind"],last["side"],
+                                     voice_enabled=voice)
+        st.audio(content,format=mime,autoplay=audio_event is not None)
+        if used!="VOICE" and voice:
+            st.caption("Brak odpowiedniego nagrania MP3: odtwarzam ton zastępczy.")
+        st.caption("Jeśli nic nie słychać, kliknij ▶ w odtwarzaczu powyżej "
+                   "i zezwól Chrome na dźwięk tej witryny. "
+                   "Alert jest jednorazowy; przy kolejnych odświeżeniach "
+                   "można go odtworzyć ręcznie.")
+    elif cursor=="__EMPTY__":
+        st.caption("Nasłuch uzbrojony. Czekam na pierwsze NOWE "
+                   "zdarzenie PAPER (nie odtwarzam historii).")
+    else:
+        st.caption("Nasłuch uzbrojony. Wcześniejsze pozycje celowo pominięte; "
+                   "kolejny nowy OPEN lub CLOSE wywoła dźwięk.")
+
 
 def cloud_paper_positions(payload, frame):
     """Read-only rows from one checkpoint; never infer unrecorded signals.
@@ -412,6 +484,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         st.warning(decision["headline"]+" | "+details)
     st.caption("LONG/SHORT to wynik analizy, a nie zlecenie. OPEN i CLOSED "
                "pokazuję tylko z zapisanego rejestru PAPER.")
+    render_cloud_paper_voice(remote,url=url)
     st.markdown("##### 📡 RADAR 6 STRATEGII — DLACZEGO LONG / SHORT / WAIT?")
     radar=worker_signal_radar(payload)
     if not radar["current"]:
