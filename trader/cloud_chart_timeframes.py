@@ -107,6 +107,43 @@ def sampled_chart_bar(record,choice,*,now=None,last_closed_utc=None):
         status=assess_quote_snapshot(record,now=at)
     except (TypeError,KeyError,ValueError,OverflowError):
         return {**empty,"reason":"NIEPOPRAWNY_BID_ASK"}
+    # Use the exact currently-forming OHLC from Capital /prices as the
+    # old SP500 Master v7.1 did, but fetched ONCE by Northflank rather than
+    # logging into Capital from each browser. Strict UTC validation and
+    # display-only marker are enforced by assess_cloud_forming_m1.
+    from .cloud_forming_m1 import assess_cloud_forming_m1
+    official=assess_cloud_forming_m1(record,now=at)
+    if official["visible"] and (choice=="M1" or not status["fresh"]):
+        m=official["preview"]
+        seconds=CHART_RESOLUTIONS[choice][1]
+        start=at.floor(f"{seconds}s")
+        end=start+pd.Timedelta(seconds=seconds)
+        if last_closed_utc is not None:
+            try:
+                if end<=_utc(last_closed_utc):
+                    return {**empty,"reason":"ZAMKNIETA_SWI_ECA_W_ARCHIWUM"}
+            except (TypeError,ValueError,OverflowError):
+                return {**empty,"reason":"BLEDNY_CZAS_ARCHIWUM"}
+        # For M2/M5/H1 this preview covers ONLY the current M1; never
+        # claim that its highs/lows span the whole larger interval.
+        if _utc(m["open_utc"])>=start and _utc(m["close_utc"])<=end:
+            return {"visible":True,
+                    "reason":"BROKER_M1_W_TRAKCIE_Z_PRICES",
+                    "bar":{
+                        "at":end,"open":float(m["open"]),
+                        "high":float(m["high"]),"low":float(m["low"]),
+                        "close":float(m["close"]),
+                        "bar_open_utc":start.isoformat(),
+                        "bar_close_utc":end.isoformat(),
+                        "collected_utc":m["collected_utc"],
+                        "first_vendor_utc":m["open_utc"],
+                        "capture_age_seconds":m["age_seconds"],
+                        "samples":1,
+                    },
+                    "quote_verified":official["quote_verified"],
+                    "missing_extremes_possible":choice!="M1",
+                    "broker_m1_only":choice!="M1",
+                    "trade_permission":"WAIT","incomplete":True}
     if not status["fresh"]:
         return {**empty,"reason":"QUOTE_NIEAKTUALNY"}
     seconds=CHART_RESOLUTIONS[choice][1]
