@@ -132,6 +132,15 @@ def advance_raw_paper(state, frame, votes, blockers=(), *, spread,
     active=previous.get("active")
     if isinstance(active,dict):
         updated, outcome=_progress_position(active,frame.iloc[-1],stamp)
+        if active.get("status")=="PENDING" and outcome!="INVALID":
+            # The synthetic fill is at the NEXT M1 bar OPEN, whose time
+            # equals previous bar CLOSE. opened_utc is detection at bar CLOSE.
+            # Store both so chart times are never silently mislabelled.
+            entry_open=(stamp-pd.Timedelta(minutes=1)).isoformat()
+            if isinstance(updated,dict):
+                updated["entry_bar_open_utc"]=entry_open
+            if isinstance(outcome,dict):
+                outcome["entry_bar_open_utc"]=entry_open
         if outcome=="INVALID":
             data["invalidated"]=int(data.get("invalidated",0))+1
             data["active"]=None
