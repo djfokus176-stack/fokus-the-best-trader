@@ -28,6 +28,7 @@ from .paper_sounds import alert_audio, SOUND_EVENTS
 from .cloud_candle_clock import render_candle_clock
 from .cloud_paper_visibility import cloud_paper_visibility, cloud_chart_gaps
 from .cloud_paper_test_status import status_for_owner
+from .raw_paper_chart import annotate_raw_forward, rows_for_journal
 
 
 def _parse_utc(value):
@@ -295,7 +296,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         key="cloud_price_chart_interval")
     zoom=st.select_slider(
         "🔍 ZOOM WYKRESU — ostatnie świece (tylko wygląd)",
-        options=[20,30,45,65,90],value=30,
+        options=[20,30,45,65,90,180,300],value=45,
         key="cloud_price_chart_zoom_"+choice)
     resolution=source_resolution(choice)
     render_candle_clock(choice)
@@ -324,7 +325,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
                 or m15_cache_due(
                     cache,ttl_seconds=35 if choice in ("M1","M2") else 60)):
             version,payload=remote.fetch()
-            original=remote.fetch_candles("US500",resolution,limit=180)
+            original=remote.fetch_candles("US500",resolution,limit=350)
             frame=closed_chart_frame(original,choice)
             audit=cloud_terminal_summary(version,payload,frame)
             # Per-BROWSER session cache only; never put credentials in it.
@@ -397,6 +398,47 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
     st.caption("Dlaczego teraz nie ma nowego wejścia: "+owner_test["detail"]+
                ". TEST to wirtualne wejścia zapisane przez worker, "
                "NIE Capital.com DEMO i NIE wczesny znacznik OBSERWUJ.")
+    raw_trial=payload.get("raw_m1_forward_paper_report") or {}
+    st.markdown("##### ⚡ AUTO RAW PAPER — TESTOWE WEJŚCIA LONG/SHORT BEZ KIERUNKOWEGO VETO MTF")
+    if raw_trial.get("status")=="FORWARD_ONLY_RAW_M1_SIMULATION":
+        ra,rb,rc,rd=st.columns(4)
+        ra.metric("RAW: zatwierdzone",raw_trial.get("started",0))
+        rb.metric("RAW: OPEN",raw_trial.get("opened",0))
+        rc.metric("RAW: CLOSED",raw_trial.get("closed",0))
+        rd.metric("RAW: wynik netto",str(raw_trial.get("pnl_pts",0))+" pkt")
+        rp=raw_trial.get("active")
+        if isinstance(rp,dict):
+            direction=str(rp.get("side","?"))
+            state=str(rp.get("status","?"))
+            txt=("🧪 RAW "+state+" "+direction+" | sygnał UTC "+
+                 str(rp.get("setup_utc"))+" | cena planu "+
+                 str(rp.get("entry_signal"))+" | SL "+str(rp.get("stop"))+
+                 " | TP "+str(rp.get("target"))+
+                 " | strategie "+", ".join(rp.get("methods") or [])+
+                 " | OPEN potwierdzony dopiero na kolejnej zamkniętej świecy.")
+            if state=="OPEN":
+                st.success(txt)
+            else:
+                st.info(txt+" PENDING nie oznacza wejścia.")
+        else:
+            st.info("RAW: brak otwartej pozycji | powód: "+
+                    str(raw_trial.get("last_reason","BRAK"))+
+                    " | ostatnia zamknięta M1 UTC "+
+                    str(raw_trial.get("last_candle_utc","BRAK")))
+        st.caption("RAW = prawdziwy surowy sygnał strategii M1, "+
+                   "osobna symulacja forward, bez kierunkowego filtra MTF. "+
+                   "Wymagane globalne GATES, świeże dane, spread i limity. "+
+                   "Nie jest to prawdziwe zlecenie; wyników nie mieszam "+
+                   "z oryginalnym AUTO PAPER.")
+    else:
+        st.warning("RAW PAPER TEST nie ma jeszcze raportu z pracującego "+
+                   "workera M1 AUTO. Dopóki nie zapisze nowego checkpointu, "+
+                   "nie deklaruję otwarcia żadnej transakcji.")
+    # Keep the real candle chart and trade journal ABOVE strategy radar.
+    # They are populated below using the same verified cloud checkpoint;
+    # the placeholders preserve their visual location in Streamlit.
+    live_chart_slot=st.empty()
+    raw_journal_slot=st.empty()
     pump=payload.get("meta",{}).get("quote_pump")
     if isinstance(pump,dict) and pump.get("mode") in (
             "BACKGROUND_SAME_CAPITAL_LOGIN","CAPITAL_WS_STREAMING"):
@@ -866,6 +908,10 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
     # signals inferred from OHLC. M1 PAPER may appear on the M15 time axis.
     annotate_paper_history(candles,chart_paper,
                            "US500","Capital.com DEMO REST",None)
+    # This additional lane NEVER creates entries from chart candles or
+    # OBSERWUJ signals: markers are from the durable worker RAW ledger.
+    annotate_raw_forward(candles,raw_trial,
+                         start=viewport[0],end=viewport[1])
     open_row=next((p for p in recent_paper if p.get("status")=="OPEN"),None)
     if open_row is not None:
         annotate_open_paper(candles,open_row)
@@ -881,8 +927,31 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         yaxis={"showgrid":True,"gridcolor":"#23354a","tickformat":".2f",
                "side":"right","fixedrange":False},
         margin={"l":12,"r":36,"t":66,"b":28})
-    st.plotly_chart(candles,use_container_width=True,
-                    key="cloud_worker_chart_"+choice+"_v1")
+    with live_chart_slot.container():
+        st.markdown("### 🕯️ US500 — PRAWDZIWE ŚWIECE + LONG / SHORT / CLOSE / WYNIK")
+        st.caption("Zielone/czerwone = autentyczne zamknięte OHLC. "+
+                   "Trójkąty 🟢/🔴 = otwarcia z ARCHIWUM PAPER; "+
+                   "romb ✅/❌ = rozliczony wynik RAW po kosztach. "+
+                   "Najedź na marker, aby zobaczyć dokładną godzinę, "+
+                   "strategię, wejście, SL, TP i liczbę punktów. "+
+                   "Dla RAW OPEN są trzy przerywane linie wejście/SL/TP.")
+        st.plotly_chart(candles,use_container_width=True,
+                        key="cloud_worker_chart_"+choice+"_v1")
+    with raw_journal_slot.container():
+        st.markdown("##### 📓 DZIENNIK AUTO RAW PAPER — KIEDY I ILE PUNKTÓW?")
+        history=rows_for_journal(raw_trial,limit=60)
+        if history:
+            st.dataframe(pd.DataFrame(history),hide_index=True,
+                         use_container_width=True)
+            st.caption("Czasy w tabeli: Europe/Warsaw. "+
+                       "OPEN świecy = symulowana cena otwarcia kolejnej M1. "+
+                       "Potwierdzenie OPEN = czas, gdy worker znał "+
+                       "już zamknięcie tej świecy. Wynik po kosztach "+
+                       "jest podany w PUNKTACH US500, nie złotówkach.")
+        else:
+            st.caption("BRAK ZAMKNIĘTYCH ANI OTWARTYCH transakcji RAW "+
+                       "w rejestrze. Nie rysuję fikcyjnych strzałek. "+
+                       "Powód: "+str(raw_trial.get("last_reason","BRAK SKANU")))
     if overlay["visible"]:
         lag=closed_m15_lag(frame)
         limits={"M1":5,"M2":8,"M5":16,"M15":35,"H1":125}
