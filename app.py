@@ -18,6 +18,7 @@ from trader.ema50_wave import STRATEGY_NAME as WAVE_NAME
 from trader.range_rejection import NAME as RANGE_NAME
 from trader.auto_strategy import AUTO_MODE, evaluate_auto, vote_summary
 from trader.strategy_progress import progress_for_votes
+from trader.entry_frequency_audit import summarize_entry_frequency
 from trader.strategy_selector import market_context, PRIORITY, select_approved
 from trader.signal_audit import audit_recent_closed_bars
 from trader.legacy_v71_shadow import (evaluate_v71_shadow, LEGACY_V71_LABEL,
@@ -2495,6 +2496,60 @@ with reports_tab:
                     else:
                         st.info('Nowe próby SHADOW zaczną się zapisywać po '
                                 'kolejnych skanach Northflank w trybie AUTO.')
+                with st.expander('📊 AUDYT LOGIKI — JAK CZĘSTO BOT WYKRYWA SETUP LONG / SHORT?',expanded=True):
+                    frequency=summarize_entry_frequency(candidates)
+                    n=frequency['scans']
+                    st.caption('Prawdziwe odczyty workera z OSTATNICH maksymalnie 120 '
+                               'unikalnych, zakończonych świec M1. '
+                               'To nie są transakcje, prawdopodobieństwo '
+                               'wygranej ani backtest OOS.')
+                    if n:
+                        a,b,c,d=st.columns(4)
+                        a.metric('Zapisane skany M1',n)
+                        b.metric('Jakikolwiek setup (RAW)',
+                                 f"{frequency['raw_scans']}/{n}")
+                        c.metric('Przynajmniej 1 po MTF',
+                                 f"{frequency['approved_scans']}/{n}")
+                        d.metric('Kandydat bez globalnej blokady',
+                                 f"{frequency['unblocked_decision_scans']}/{n}")
+                        st.caption('Okres UTC: '+str(frequency['first_utc'])+
+                                   ' — '+str(frequency['last_utc'])+
+                                   '. Skany z błędami pobierania mogą nie '
+                                   'znaleźć się w archiwum, więc te liczby '
+                                   'NIE są częstością na wszystkich minutach rynku.')
+                        st.caption('W całym oknie: bez surowego LONG/SHORT '+str(
+                                   frequency['raw_wait_scans'])+
+                                   ' skanów; veto MTF dla co najmniej jednego '
+                                   'sygnału w '+str(frequency['vetoed_signal_scans'])+
+                                   ' skanach; konflikt surowych LONG/SHORT w '+str(
+                                   frequency['conflict_scans'])+
+                                   ' skanach; kandydat końcowy z blokadą globalną: '+
+                                   str(frequency['gated_decision_scans'])+
+                                   '. Kandydat bez blokady nie oznacza PAPER OPEN.')
+                        st.dataframe(pd.DataFrame(frequency['by_strategy']),
+                                     hide_index=True,use_container_width=True)
+                        if frequency['global_gate_reasons']:
+                            st.caption('Najczęstsze blokady GLOBALNE (liczba skanów): '+
+                                       ', '.join(f"{k}: {v}" for k,v in
+                                       frequency['global_gate_reasons'][:6]))
+                        if frequency['waiting_reasons']:
+                            st.caption('Najczęstsze przyczyny WAIT strategii '
+                                       '(liczone osobno dla każdej metody): '+
+                                       '; '.join(f"{k} — {v}" for k,v in
+                                       frequency['waiting_reasons'][:6]))
+                        st.caption('Pełne przyczyny WAIT zapisane w '+
+                                   str(frequency['audit_complete_scans'])+
+                                   '/'+str(n)+' skanach, etapy 2/3 i 3/3 '+
+                                   'w '+str(frequency['stage_complete_scans'])+
+                                   '/'+str(n)+'. Wcześniejsze wpisy nie mają '
+                                   'tak szczegółowej diagnostyki. '
+                                   'LIQUIDITY SWEEP jest strategią odwrócenia, '
+                                   'a obecny MTF wymaga zgodnego trendu; '
+                                   'nie poluzowuję go automatycznie.')
+                    else:
+                        st.warning('Brak poprawnego archiwum skanów. Nie podam '
+                                   'zmyślonych częstotliwości. Sprawdź '
+                                   'checkpoint workera w STATUS/API.')
                 with st.expander('🔎 ARCHIWUM RADARU — SUROWE SYGNAŁY I POWODY BLOKAD',expanded=True):
                     st.caption('Nie są to pozycje PAPER ani zweryfikowane typy. Zapis z workera '
                                'na kolejnych zamkniętych świecach, również gdy decyzją jest WAIT.')
