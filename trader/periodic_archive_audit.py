@@ -282,7 +282,14 @@ def period_comparison(archive,lane,kind,*,reference=None,now=None):
         (period_start,period_end,prev_start,period_start))
     is_current=start<=current<end
     through=min(end,current) if is_current else end
-    prev_match=min(old_end,old_start+(through-start)) if is_current else old_end
+    # Historical day selection inside the current week/month means
+    # 'as of that selected date', not silently including later days.
+    if is_current and isinstance(reference,date) and not isinstance(reference,datetime):
+        today=current.astimezone(WARSAW).date()
+        if day<today:
+            through=min(through,_at_midnight(day+timedelta(days=1)))
+    partial=through<end
+    prev_match=min(old_end,old_start+(through-start)) if partial else old_end
     current_stats=_metrics(archive,lane,start,through)
     previous_stats=_metrics(archive,lane,old_start,prev_match)
     previous_full=_metrics(archive,lane,old_start,old_end)
@@ -297,7 +304,7 @@ def period_comparison(archive,lane,kind,*,reference=None,now=None):
     return {
         "lane":lane,"kind":kind,"period":period_start.isoformat(),
         "reference_date":day.isoformat(),
-        "current_partial":is_current,
+        "current_partial":partial,
         "current":current_stats,
         "previous_matched":previous_stats,
         "previous_full":previous_full,
@@ -310,7 +317,7 @@ def period_comparison(archive,lane,kind,*,reference=None,now=None):
         "range_start_utc":start.isoformat(),
         "range_end_utc":through.isoformat(),
         "previous_range_end_utc":prev_match.isoformat(),
-        "matching":("SAME_ELAPSED_UTC_DURATION" if is_current else "FULL_PREVIOUS_PERIOD"),
+        "matching":("SAME_ELAPSED_UTC_DURATION" if partial else "FULL_PREVIOUS_PERIOD"),
     }
 
 
