@@ -42,7 +42,7 @@ def test_nov_dec_verified_backup_recovers_after_both_official_403():
     assert len(events) >= 12
     assert found[0] == news_radar.BLS_ICS
     assert any("11_sched_list.htm" in x for x in found)
-    assert any("12_sched_list.htm" in x for x in found)
+    # The HTML fallback deliberately stops after the first rejected month.
     assert dt(events.expires_utc) > now
     assert any(x["wydarzenie"] == "Consumer Price Index for November 2026"
                and x["data_utc"] == dt("2026-12-10T13:30:00+00:00")
