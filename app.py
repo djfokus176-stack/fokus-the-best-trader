@@ -87,6 +87,7 @@ from trader.cloud_wave_ae_ui import render_cloud_wave_ae_replay
 from trader.cloud_gap_ui import render_cloud_gap_audit
 from trader.cloud_paper_terminal import render_cloud_terminal
 from trader.cloud_scalp_5s_ui import render_cloud_scalp_5s
+from trader.cloud_mode_safety import local_scan_permitted
 from trader.feed_audit import inspect_labels,compare_clock_observations
 
 st.set_page_config(page_title='FOKU$ THE BEST TRADER',page_icon='📈',layout='wide')
@@ -333,14 +334,16 @@ with st.sidebar:
     # are NOT required to display Supabase data.
     cloud_read_only_mode=remote_paper_view_enabled()
     if cloud_read_only_mode:
-        # Clear pre-migration failed browser login only ONCE per session.
-        # Manual subsequent LOCAL scans retain their explicit diagnostics.
-        if not st.session_state.get('_cloud_read_only_initialized',False):
-            for key in ('last_feed_error','_scan_last_result',
-                        '_capital_test','market_snap','source_override',
-                        'initial_scan_attempted'):
-                st.session_state.pop(key,None)
-            st.session_state['_cloud_read_only_initialized']=True
+        # The owner dashboard must NEVER reuse a browser-local broker scan
+        # or failed HTTP 401, including after a previous local-mode session.
+        # Supabase/CLOUD state is stored in independent keys and untouched.
+        for key in ('last_feed_error','_scan_last_result',
+                    '_capital_test','market_snap','source_override',
+                    'initial_scan_attempted','_scan_log',
+                    '_scan_attempt_count','last_scan_utc','_capital_client',
+                    '_scheduled_scan','_live_quote','_live_quote_error'):
+            st.session_state.pop(key,None)
+        st.session_state['_cloud_read_only_initialized']=True
         st.session_state['auto_scan_active']=False
     st.toggle('🔄 AUTO-SKAN — tylko gdy aplikacja otwarta',
         value=(False if cloud_read_only_mode else
@@ -492,7 +495,10 @@ with st.sidebar:
             st.caption('Formularz dostępny dopiero po autoryzacji właściciela. Zalecane ograniczenie dostępu również w ustawieniach Sharing Streamlit Cloud.')
         # This bypasses stale temporary overrides and authenticates from Secrets
         # without asking the owner to type or reveal any credentials.
-        if st.button('🧪 TESTUJ ZAPISANE SECRETS (BEZ WPISYWANIA)', use_container_width=True):
+        if st.button('🧪 TESTUJ ZAPISANE SECRETS (BEZ WPISYWANIA)',
+                     use_container_width=True,disabled=cloud_read_only_mode,
+                     help='W CLOUD tylko Northflank loguje się do Capital.com. '
+                          'Test w przeglądarce może tworzyć drugą sesję.'):
             existing=st.session_state.get('_api_session_overrides',{})
             st.session_state['_api_session_overrides']=drop_capital_session_overrides(existing)
             for key in ('_capital_client','_capital_test','market_snap','ai_context',
@@ -691,11 +697,15 @@ with market_tab:
     col1,col2=st.columns([1,2])
     with col1:
         csv=st.file_uploader('Opcjonalnie własne dane OHLC CSV (wyłącznie do nauki / replay)',type=['csv'])
-        load=st.button('🔄 SKANUJ ŚWIECE',type='primary',use_container_width=True)
-        if remote_paper_view_enabled():
-            st.caption('CLOUD: Northflank skanuje osobno, Streamlit '
-                       'odczytuje prywatny cache BID/ASK i M15 w Supabase. '
-                       'Ten przycisk uruchamia tylko odrębny skan RĘCZNY.')
+        cloud_owner_display=remote_paper_view_enabled()
+        load=st.button('🔄 SKANUJ ŚWIECE (TYLKO LOKALNIE)',type='primary',
+                       use_container_width=True,disabled=cloud_owner_display,
+                       help='W CLOUD skaner Northflank pracuje sam. '
+                            'Ręczny lokalny skan powodował HTTP 401.')
+        if cloud_owner_display:
+            st.caption('☁️ CLOUD: Northflank skanuje osobno, a Streamlit '
+                       'czyta Supabase. Lokalny skan i logowanie Capital.com '
+                       'są zablokowane, żeby nie tworzyć HTTP 401.')
         else:
             st.caption('LOKALNIE: odczyt BID/OFFER w wybranym interwale '
                        'i skan M1 nie częściej niż co 60 s. '
@@ -714,16 +724,24 @@ with market_tab:
         if remote_paper_view_enabled():
             render_cloud_scalp_5s(secret)
             render_cloud_terminal(secret,tf)
-        st.markdown('#### 🎯 FOKU$ MARKET TERMINAL')
-        st.caption('Świece MID • EMA9/21/50 • SL/TP PAPER • potwierdzenie 4 interwałów • analiza bez zleceń')
-        st.info('Dane wykresu i silnika są wspólne. GPT czyta dane liczbowe, a nie obraz wykresu.')
+        if remote_paper_view_enabled():
+            st.caption('☁️ Stary lokalny MARKET TERMINAL jest wyłączony w '
+                       'trybie CLOUD. Aktualny wykres i głosy PAPER są POWYŻEJ.')
+        else:
+            st.markdown('#### 🎯 FOKU$ MARKET TERMINAL')
+            st.caption('Świece MID • EMA9/21/50 • SL/TP PAPER • potwierdzenie '
+                       '4 interwałów • analiza bez zleceń')
+            st.info('Dane wykresu i silnika są wspólne. GPT czyta dane '
+                    'liczbowe, a nie obraz wykresu.')
     auto_scan = bool(not remote_paper_view_enabled() and has_cap and csv is None and not st.session_state.get('initial_scan_attempted') and st.session_state.get('market_snap') is None)
     if auto_scan:
         st.session_state['initial_scan_attempted'] = True
         st.info(f'🔄 Pierwsza próba pobrania świec z Capital.com {capital_env}...')
     scheduled_scan = bool(st.session_state.pop('_scheduled_scan',False)
         and st.session_state.get('auto_scan_active',False) and has_cap and csv is None)
-    actual_scan_this_rerun=bool(load or auto_scan or scheduled_scan)
+    actual_scan_this_rerun=local_scan_permitted(
+        cloud_mode=remote_paper_view_enabled(),manual=load,
+        initial=auto_scan,scheduled=scheduled_scan)
     # Quote snapshots and provisional OHLC now refresh in a dedicated
     # lightweight fragment. No full-app rerun is requested every 5 seconds.
     if actual_scan_this_rerun:
