@@ -361,3 +361,38 @@ def archive_day_trades(archive,day,*,lane=None):
             "Netto pkt":r.get("p"),
         })
     return sorted(entries,key=lambda e:(e["CLOSE (Polska)"],e["ID"]))
+
+
+def attach_periodic_audit(previous,payload,*,now=None,max_checkpoint_bytes=2_500_000):
+    """Best-effort audit sidecar, NEVER exhaust whole worker checkpoint.
+
+    Read-only audit status may be disabled to protect the authoritative
+    PAPER position checkpoint. Trims oldest audit rows (not v3/PAPER data)
+    until under a 100KB safety margin. Does not issue any remote request.
+    """
+    new_archive=advance_periodic_archive(previous,payload,now=now)
+    event_time=_utc(now) if now is not None else datetime.now(timezone.utc)
+    out={**payload,"periodic_audit_archive":new_archive,
+         "periodic_audit_report":automatic_audit_report(new_archive,now=event_time)}
+    def serialized_bytes():
+        return len(json.dumps(out,ensure_ascii=False,separators=(",",":"),
+                              allow_nan=False).encode("utf8"))
+    budget=max(0,int(max_checkpoint_bytes)-100000)
+    records=new_archive["trades"]
+    while records and serialized_bytes()>budget:
+        oldest=min(records,key=lambda key:(records[key]["t"],key))
+        when=_utc(records[oldest].get("t"))
+        floor=_utc(new_archive.get("retention_floor_utc"))
+        if when is not None:
+            new_archive["retention_floor_utc"]=max(
+                filter(None,(floor,when))).isoformat()
+        del records[oldest]
+        new_archive["removed_count"]+=1
+        out["periodic_audit_report"]=automatic_audit_report(
+            new_archive,now=event_time)
+    if serialized_bytes()>budget:
+        # A near-full source checkpoint must not be broken by optional audit.
+        out.pop("periodic_audit_archive",None)
+        out.pop("periodic_audit_report",None)
+        out["periodic_audit_status"]="OMITTED_CHECKPOINT_SIZE_LIMIT"
+    return out
