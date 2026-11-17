@@ -5,7 +5,7 @@ Never count a raw LONG/SHORT as filled or as strategy win-rate evidence.
 from __future__ import annotations
 from .strategies_pro import ALL_STRATEGIES
 
-def append_candidate(history, snapshot, decision, votes, blockers, limit=120, *, progress=None):
+def append_candidate(history, snapshot, decision, votes, blockers, limit=120, *, progress=None, obstacle_ab=None):
     rows=list(history or [])
     stamp=getattr(snapshot,"confirmed_utc",None)
     if stamp is None:
@@ -45,6 +45,8 @@ def append_candidate(history, snapshot, decision, votes, blockers, limit=120, *,
     row={"key":key,"candle_utc":stamp.isoformat(),"epic":snapshot.epic,
          "timeframe":snapshot.resolution,"raw_candidates":raw,
          "strategy_audit":diagnostic[:6],
+         "obstacle_ab":(obstacle_ab if isinstance(obstacle_ab,dict)
+                        and obstacle_ab.get("status")=="OK" else None),
          "decision":str(getattr(decision,"action","WAIT")),
          "blockers":[str(x)[:90] for x in (blockers or [])],
          "note":"RESEARCH ONLY — brak wejścia i brak wyniku"}

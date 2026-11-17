@@ -19,6 +19,7 @@ from trader.range_rejection import NAME as RANGE_NAME
 from trader.auto_strategy import AUTO_MODE, evaluate_auto, vote_summary
 from trader.strategy_progress import progress_for_votes
 from trader.entry_frequency_audit import summarize_entry_frequency
+from trader.obstacle_ab import obstacle_ab_frequencies
 from trader.strategy_selector import market_context, PRIORITY, select_approved
 from trader.signal_audit import audit_recent_closed_bars
 from trader.legacy_v71_shadow import (evaluate_v71_shadow, LEGACY_V71_LABEL,
@@ -2594,6 +2595,35 @@ with reports_tab:
                                    'Minimum 100 rozliczeń na kohortę to dopiero '
                                    'próg eksploracyjny, nie potwierdzenie przewagi. '
                                    'Wyniki nie zmieniają PAPER ani progu 3/3.')
+                with st.expander('🔬 PORÓWNANIE POZIOMÓW — EMA LEGACY vs SWING (SHADOW)',expanded=True):
+                    ab=obstacle_ab_frequencies(candidates)
+                    n=ab['audited_scans']
+                    if not n:
+                        st.info('Brak zapisanych porównań. Po wdrożeniu '
+                                'worker zbierze je na nowych, zamkniętych M1. '
+                                'Nie odtwarzam wcześniejszych sygnałów '
+                                'z niepełnego eksportu transakcji.')
+                    else:
+                        st.caption('Ostatnie '+str(n)+' sprawdzonych skanów M1 '
+                                   '(maksymalnie 120). Dla EMA TREND i '
+                                   'EMA PULLBACK liczę, ile razy obecny '
+                                   'filtr odrzucił setup przez bliski poziom, '
+                                   'a wariant z potwierdzonymi swingami '
+                                   'wskazałby hipotetyczny LONG/SHORT. '
+                                   'To NIE jest historia transakcji.')
+                        st.dataframe(pd.DataFrame(ab['rows']).rename(columns={
+                            'strategy':'Strategia','scans':'Skanów z danymi',
+                            'legacy_room_veto':'Odrzucił stary poziom',
+                            'swing_unlocked_raw':'SWING odblokował surowy',
+                            'swing_after_mtf':'SWING przeszedł MTF',
+                            'swing_with_all_gates':'SWING bez globalnych blokad'}),
+                            hide_index=True,use_container_width=True)
+                        st.warning('Wszystkie te sygnały są tylko BADANIEM. '
+                                   'Sygnał, który przeszedł MTF i globalne '
+                                   'bramki, NIE jest jeszcze dowodem '
+                                   'przewagi, zysku ani OPEN PAPER. '
+                                   'Najpierw rozliczamy wariant SWING na '
+                                   'nowych świecach i po kosztach.')
                 with st.expander('🔎 ARCHIWUM RADARU — SUROWE SYGNAŁY I POWODY BLOKAD',expanded=True):
                     st.caption('Nie są to pozycje PAPER ani zweryfikowane typy. Zapis z workera '
                                'na kolejnych zamkniętych świecach, również gdy decyzją jest WAIT.')
