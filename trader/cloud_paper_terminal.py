@@ -27,6 +27,7 @@ from .cloud_paper_audio import cloud_paper_audio_events, advance_cloud_audio
 from .paper_sounds import alert_audio, SOUND_EVENTS
 from .cloud_candle_clock import render_candle_clock
 from .cloud_paper_visibility import cloud_paper_visibility, cloud_chart_gaps
+from .cloud_paper_test_status import status_for_owner
 
 
 def _parse_utc(value):
@@ -377,6 +378,25 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
     y.metric("Zapisane "+choice,str(audit["bars"]))
     z.metric("Wiek checkpointu",str(audit["age_minutes"])+" min"
              if audit["age_minutes"] is not None else "BRAK")
+    # Show status of the independent PAPER TEST near the very TOP of TERMINAL.
+    # A browser user no longer has to scroll past charts and brokerage DEMO
+    # instructions to learn whether the worker has actually opened anything.
+    owner_test=status_for_owner(payload)
+    st.markdown("##### 🧪 AUTOMATYCZNY PAPER TEST — CZY BOT COŚ OTWORZYŁ?")
+    summary=(owner_test["title"]+" | "+
+             "SETUPY="+str(owner_test["started"] if owner_test["started"] is not None else "BRAK")+
+             " | OPEN="+str(owner_test["opened"] if owner_test["opened"] is not None else "BRAK")+
+             " | CLOSED="+str(owner_test["closed"] if owner_test["closed"] is not None else "BRAK")+
+             " | ostatnia M1 UTC="+str(owner_test["last_candle_utc"] or "BRAK"))
+    if owner_test["kind"]=="OPEN":
+        st.success(summary)
+    elif owner_test["kind"] in ("NO_APPROVAL","STALE","NOT_STARTED"):
+        st.warning(summary)
+    else:
+        st.info(summary)
+    st.caption("Dlaczego teraz nie ma nowego wejścia: "+owner_test["detail"]+
+               ". TEST to wirtualne wejścia zapisane przez worker, "
+               "NIE Capital.com DEMO i NIE wczesny znacznik OBSERWUJ.")
     pump=payload.get("meta",{}).get("quote_pump")
     if isinstance(pump,dict) and pump.get("mode") in (
             "BACKGROUND_SAME_CAPITAL_LOGIN","CAPITAL_WS_STREAMING"):
