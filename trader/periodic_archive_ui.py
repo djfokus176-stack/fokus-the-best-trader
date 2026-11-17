@@ -26,7 +26,7 @@ def _metric_display(value, decimals=2):
     return f"{value:.{decimals}f}" if isinstance(value,float) else str(value)
 
 
-def render_periodic_archive_ui(payload):
+def render_periodic_archive_ui(payload, *, widget_scope="terminal"):
     """Work directly with the worker's saved rows, not old data screenshots."""
     st.markdown("### 📅 AUDYT ARCHIWUM — DZIEŃ / TYDZIEŃ / MIESIĄC")
     report=payload.get("periodic_audit_report") if isinstance(payload,dict) else None
@@ -62,7 +62,7 @@ def render_periodic_archive_ui(payload):
         min_value=today-timedelta(days=400),
         max_value=today,
         format="DD.MM.YYYY",
-        key="fokus_audit_selected_day_v1")
+        key="fokus_audit_selected_day_v1_"+widget_scope)
     if isinstance(selected,tuple):
         selected=selected[0] if selected else today
     if selected is None:
@@ -105,10 +105,10 @@ def render_periodic_archive_ui(payload):
 
     chosen=st.selectbox("Szczegółowa analiza metody",
                         options=list(LANES),
-                        key="fokus_audit_lane_v1")
+                        key="fokus_audit_lane_v1_"+widget_scope)
     scale=st.selectbox("Szczegółowy okres",
                        options=list(POLISH),format_func=lambda x: POLISH[x],
-                       key="fokus_audit_period_v1")
+                       key="fokus_audit_period_v1_"+widget_scope)
     compared=period_comparison(archive,chosen,scale,reference=selected,now=now)
     d=compared["current"]
     x,y,z,w=st.columns(4)
@@ -157,7 +157,7 @@ def render_periodic_archive_ui(payload):
                 data=table.to_csv(index=False).encode("utf-8-sig"),
                 file_name="FOKUS_AUDYT_"+selected.isoformat()+".csv",
                 mime="text/csv",
-                key="fokus_audit_download_v1")
+                key="fokus_audit_download_v1_"+widget_scope)
         else:
             st.caption("W archiwum audytu nie ma rozliczonych pozycji z "+
                        str(selected)+". To może oznaczać brak transakcji "+
