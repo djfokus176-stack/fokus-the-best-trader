@@ -88,6 +88,7 @@ from trader.research_readiness_ui import render_research_readiness
 from trader.cloud_wave_ae_ui import render_cloud_wave_ae_replay
 from trader.cloud_gap_ui import render_cloud_gap_audit
 from trader.cloud_paper_terminal import render_cloud_terminal
+from trader.periodic_archive_ui import render_periodic_archive_ui
 from trader.cloud_scalp_5s_ui import render_cloud_scalp_5s
 from trader.cloud_mode_safety import local_scan_permitted
 from trader.feed_audit import inspect_labels,compare_clock_observations
@@ -257,6 +258,11 @@ def paper_view_db():
         st.session_state['_paper_remote_wave_ae_report']=payload.get('wave_ae_forward_report') or {}
         st.session_state['_paper_remote_wave_report']=payload.get('wave_shadow_report') or {}
         st.session_state['_paper_remote_candle_backfill']=payload.get('candle_backfill') or {}
+        # Owner-side read-only audit from SAME signed remote checkpoint.
+        st.session_state['_paper_remote_periodic_audit']={
+            'periodic_audit_archive':payload.get('periodic_audit_archive'),
+            'periodic_audit_report':payload.get('periodic_audit_report')}
+
         return db
     return connect()
 
@@ -2284,6 +2290,11 @@ with reports_tab:
         try:
             paper_db=paper_view_db()
             ensure_paper_v3(paper_db)
+            if remote_paper_view_enabled():
+                render_periodic_archive_ui(
+                    st.session_state.get('_paper_remote_periodic_audit') or {},
+                    widget_scope="reports")
+
             if remote_paper_view_enabled():
                 st.success(f"☁️ REMOTE PAPER: checkpoint worker version {st.session_state.get('_paper_remote_version','BRAK')}. Statystyki pochodzą z bazy workera, nie z lokalnego SQLite.")
                 meta=st.session_state.get('_paper_remote_meta') or {}
