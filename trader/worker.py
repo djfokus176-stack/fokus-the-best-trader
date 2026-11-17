@@ -31,6 +31,7 @@ from .obstacle_ab import obstacle_ab_snapshot
 from .shadow_learning import advance_shadow, shadow_scorecard
 from .mtf_veto_forward import advance_mtf_comparison, mtf_comparison_report
 from .momentum_paper_test import advance_momentum_paper_test, momentum_paper_test_report
+from .capital_demo_broker import advance_demo_broker, config as demo_broker_config, DemoExecutionError
 from .paper_daily_risk import paper_daily_risk, DEFAULT_DAILY_STOP_PTS
 from .wave_shadow_archive import advance_wave_shadow, wave_shadow_scorecard
 from .wave_ae_forward_auto import advance_wave_ae_forward, wave_ae_forward_scorecard
@@ -570,6 +571,23 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
                 if backfill_enabled else "DISABLED",
             "telegram_remote":"DISABLED"}
         new_version=remote.save(version,payload)
+        # Optional REAL executions on the Capital.com DEMO VIRTUAL account.
+        # They are NOT PAPER v3, and the default is OFF. Only the exact
+        # DEMO_ONLY_CONFIRMED env setting with explicitly verified account ID
+        # and position size allows any order request. NEVER touch LIVE.
+        demo_line=""
+        demo_cfg=demo_broker_config()
+        if demo_cfg["enabled"] and strategy==AUTO_MODE:
+            try:
+                new_version,payload,demo_event=advance_demo_broker(
+                    remote,client,new_version,payload)
+                demo_line=" / CAPITAL_DEMO_BROKER="+str(
+                    demo_event.get("status","UNKNOWN"))[:90]
+            except (DemoExecutionError,RemoteError,FeedError,ValueError,
+                    TypeError,OverflowError,RuntimeError) as exc:
+                # A broker execution failure must not cause a second order.
+                # The broker executor persists ATTEMPTED BEFORE any POST.
+                demo_line=" / CAPITAL_DEMO_BROKER=ERROR_"+type(exc).__name__
         audit_line=""
         if (isinstance(vote_audit,dict) and vote_audit.get("rows")
                 and vote_audit.get("candle_utc")
@@ -611,7 +629,7 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
                 for v in vote_audit.get("mtf",[])],ensure_ascii=False)
         return (status+f" / CLOUD_CHECKPOINT_VERSION={new_version} / TELEGRAM_REMOTE=DISABLED"
                 +" / SHADOW_LEARNING="+str(latest_shadow_report.get("leader") or "INSUFFICIENT_DATA")
-                +audit_line)
+                +demo_line+audit_line)
     finally:
         db.close()
 

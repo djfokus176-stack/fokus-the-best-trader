@@ -507,6 +507,42 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
     st.caption("LONG/SHORT to wynik analizy, a nie zlecenie. OPEN i CLOSED "
                "pokazuję tylko z zapisanego rejestru PAPER.")
     render_cloud_paper_voice(remote,url=url)
+    # Real broker DEMO is a third distinct lane: broker-confirmed virtual
+    # positions, not the existing OHLC PAPER simulation and never LIVE cash.
+    st.markdown("##### 🏦 CAPITAL.COM DEMO — POZYCJE NA KONCIE TESTOWYM")
+    demo=payload.get("capital_demo_broker")
+    if not isinstance(demo,dict):
+        st.caption("Wysyłanie zleceń na Capital.com DEMO jest domyślnie "
+                   "WYŁĄCZONE. Wewnętrzny PAPER TEST działa oddzielnie. "
+                   "Aby uzbroić zlecenia BROKERA DEMO, właściciel musi "
+                   "najpierw ustawić w Northflank trzy wartości: "
+                   "FOKUS_DEMO_BROKER_MODE=DEMO_ONLY_CONFIRMED, "
+                   "FOKUS_DEMO_BROKER_ACCOUNT_ID (identyfikator konta DEMO) "
+                   "oraz FOKUS_DEMO_BROKER_SIZE (wielkość pozycji). "
+                   "Nie wpisuj numeru konta ani kluczy API w czacie.")
+    else:
+        state=str(demo.get("status","UNKNOWN"))
+        if state=="ACCEPTED":
+            st.success("🏦 BROKER DEMO: zlecenie potwierdzone przez "
+                       "Capital.com — pozycja na koncie WIRTUALNYM.")
+        elif state in ("ATTEMPTED","UNRESOLVED","CONFIRM_PENDING"):
+            st.warning("🏦 BROKER DEMO: "+state+
+                       ". Status wymaga rozliczenia po stronie brokera. "
+                       "Nie wolno ponawiać zlecenia automatycznie.")
+        else:
+            st.info("🏦 BROKER DEMO: "+state+
+                    ". Sam setup PAPER/OBSERWUJ nie oznacza zlecenia.")
+        st.caption("Ostatni sygnał DEMO UTC: "+
+                   str(demo.get("last_setup_utc") or "BRAK")+
+                   " | kierunek: "+str(demo.get("side") or "BRAK")+
+                   " | wielkość: "+str(demo.get("size") or "BRAK")+
+                   " | stop: "+str(demo.get("stop") or "BRAK")+
+                   " | target: "+str(demo.get("target") or "BRAK")+
+                   ". U brokerów SL/TP mogą zostać zrealizowane inaczej "
+                   "niż w symulacji świec. Zlecenia LIVE są zabronione.")
+    st.caption("Ważne: CAPITAL.COM DEMO = zlecenia brokera za WIRTUALNE "
+               "środki po zatwierdzeniu, PAPER = lokalna symulacja. "
+               "Nigdy nie interpretuj statusu ATTEMPTED jako OPEN.")
     # Explicit second lane: REAL tracked, but SIMULATED test fills; never
     # mutate the production v3 position ledger or claim broker execution.
     st.markdown("##### 🧪 PAPER TEST — WCZEŚNIEJSZE LONG / SHORT (OSOBNY REJESTR)")
