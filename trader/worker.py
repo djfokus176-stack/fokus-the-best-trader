@@ -27,6 +27,7 @@ from .telegram_alerts import dispatch_alerts,record_stale_event
 from .remote_checkpoint import (RemoteCheckpoint, configured, dump_state,
                                 restore_state, RemoteError)
 from .strategy_progress import progress_for_votes
+from .obstacle_ab import obstacle_ab_snapshot
 from .shadow_learning import advance_shadow, shadow_scorecard
 from .mtf_veto_forward import advance_mtf_comparison, mtf_comparison_report
 from .paper_daily_risk import paper_daily_risk, DEFAULT_DAILY_STOP_PTS
@@ -327,6 +328,18 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             "blockers":list(blockers or [])[:10],
         }
         vote_audit["progress"]=progress_for_votes(snapshot.frame,votes,blockers)
+        if strategy==AUTO_MODE:
+            # Diagnostic A/B, NOT an override of actual AUTO/PAPER. A failure
+            # in optional audit can never stop the production PAPER worker.
+            try:
+                vote_audit["obstacle_ab"]=obstacle_ab_snapshot(
+                    snapshot.frame,snapshot.spread,views,
+                    blockers=blockers,source=snapshot.source,epic=epic)
+            except (ValueError,TypeError,KeyError,OverflowError,
+                    IndexError,RuntimeError,ArithmeticError) as exc:
+                vote_audit["obstacle_ab"]={
+                    "status":"ERROR_"+type(exc).__name__,"rows":[],
+                    "research_only":True}
         # Independent one-slot-per-method SHADOW experiment. Never changes
         # current PAPER verdict or models an immediate broker fill.
         if strategy==AUTO_MODE:
@@ -373,7 +386,8 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
                 "Po filtrze MTF":"NIE WYLICZANO (SHADOW)",
                 "RR":range_exp.rr,"Powód":range_exp.reason})
         candidates=append_candidate(candidates,snapshot,decision,research_votes,blockers,
-                                    progress=vote_audit["progress"])
+                                    progress=vote_audit["progress"],
+                                    obstacle_ab=vote_audit.get("obstacle_ab"))
         auto_state=review_closed_candle(auto_state,snapshot,decision,votes,views,
                                       blockers,news_context=news_feed,
                                       macro_context=macro_watch)
