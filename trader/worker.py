@@ -32,6 +32,7 @@ from .shadow_learning import advance_shadow, shadow_scorecard
 from .mtf_veto_forward import advance_mtf_comparison, mtf_comparison_report
 from .momentum_paper_test import advance_momentum_paper_test, momentum_paper_test_report
 from .raw_m1_forward_paper import advance_raw_paper, raw_paper_report
+from .periodic_archive_audit import advance_periodic_archive, automatic_audit_report
 from .capital_demo_broker import advance_demo_broker, config as demo_broker_config, DemoExecutionError
 from .paper_daily_risk import paper_daily_risk, DEFAULT_DAILY_STOP_PTS
 from .wave_shadow_archive import advance_wave_shadow, wave_shadow_scorecard
@@ -251,6 +252,7 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
     mtf_veto_state=payload.get("mtf_veto_forward") or {}
     momentum_test_state=payload.get("momentum_paper_test") or {}
     raw_test_state=payload.get("raw_m1_forward_paper") or {}
+    periodic_archive_before=payload.get("periodic_audit_archive") or {}
     wave_state=payload.get("wave_shadow") or {}
     ae_state=payload.get("wave_ae_forward") or {}
     threef_state=payload.get("fokus_3f_forward") or {}
@@ -540,6 +542,23 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             payload["fokus_3f_forward_report"]=forward_3f_scorecard(threef_state)
         latest_shadow_report=shadow_scorecard(shadow_state)
         payload["shadow_learning_report"]=latest_shadow_report
+        # Audit each scan from the SAME durable CLOSED v3, Momentum and RAW
+        # histories; deduplicate events across restart and old archive reads.
+        # Never mix lanes, use Poland-local day/week/month boundaries, never
+        # manufacture old entries from OHLC. No extra Supabase tables/keys.
+        # Keep a previously valid archive intact if optional audit fails.
+        try:
+            periodic_archived=advance_periodic_archive(
+                periodic_archive_before,payload,
+                now=datetime.now(timezone.utc))
+            payload["periodic_audit_archive"]=periodic_archived
+            payload["periodic_audit_report"]=automatic_audit_report(
+                periodic_archived,now=datetime.now(timezone.utc))
+        except (ValueError,TypeError,KeyError,OverflowError,RuntimeError,
+                ArithmeticError) as exc:
+            if isinstance(periodic_archive_before,dict) and periodic_archive_before.get("schema")==1:
+                payload["periodic_audit_archive"]=periodic_archive_before
+            payload["periodic_audit_status"]="ERROR_"+type(exc).__name__
         # Sample thread diagnostics immediately before commit, not before
         # potentially long MTF/GPT/Supabase scan. The callback is pure.
         if callable(quote_health):
