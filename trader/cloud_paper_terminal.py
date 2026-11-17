@@ -557,6 +557,44 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
                    "Nawet zatwierdzony setup wymaga GATES=OK, "
                    "QUEUE=YES i późniejszego faktycznego PAPER OPEN. "
                    "Radar nie wysyła zleceń i nie zmienia strategii.")
+        ab=(payload.get("last_vote_audit") or {}).get("obstacle_ab") or {}
+        if (ab.get("status")=="OK" and ab.get("source")=="Capital.com DEMO REST"
+                and ab.get("epic")=="US500"
+                and ab.get("candle_utc")==radar["candle_utc"]):
+            st.markdown("##### 🔬 FILTR OPORU: STARY vs POTWIERDZONE SWINGI (SHADOW)")
+            st.caption("Dwie strategie EMA na TEJ SAMEJ zamkniętej świecy i "
+                       "tym samym spreadzie. Wariant SWING nie wpływa na "
+                       "wejścia PAPER; przejście MTF też nie zastępuje "
+                       "bramek bezpieczeństwa.")
+            records=[]
+            for v in ab.get("rows",[]):
+                if not isinstance(v,dict):
+                    continue
+                records.append({
+                    "Strategia":v.get("strategy"),
+                    "Obecny filtr":v.get("legacy"),
+                    "Powód obecnego":v.get("legacy_reason"),
+                    "Filtr SWING":v.get("swing"),
+                    "SWING po MTF":v.get("swing_after_mtf"),
+                    "Bramki":("OK" if v.get("all_worker_gates_clear")
+                              else "ZABLOKOWANE"),
+                    "RR SWING":v.get("swing_rr"),
+                })
+            if records:
+                st.dataframe(pd.DataFrame(records),hide_index=True,
+                             use_container_width=True)
+            unlocked=[v for v in ab.get("rows",[])
+                      if isinstance(v,dict) and v.get("swing_unlocked") is True]
+            if unlocked:
+                st.info("Alternatywa SWING znalazła "+
+                        str(len(unlocked))+" surowych setupów, "
+                        "które odrzucił obecny filtr poziomów. "
+                        "To NIE znaczy, że byłyby zyskowne. "
+                        "Nie zmieniam PAPER bez ich rozliczenia po kosztach.")
+            else:
+                st.caption("Na tej świecy alternatywa SWING nie odblokowała "
+                           "układu odrzuconego przez bieżący filtr poziomów.")
+
     recent_paper,chart_paper=cloud_paper_positions(payload,frame)
     viewport=cloud_chart_view_range(
         frame,choice,moving=moving_chart["bar"]
