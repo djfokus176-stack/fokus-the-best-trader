@@ -386,17 +386,27 @@ def attach_periodic_audit(previous,payload,*,now=None,max_checkpoint_bytes=2_500
                               allow_nan=False).encode("utf8"))
     budget=max(0,int(max_checkpoint_bytes)-100000)
     records=new_archive["trades"]
-    while records and serialized_bytes()>budget:
-        oldest=min(records,key=lambda key:(records[key]["t"],key))
-        when=_utc(records[oldest].get("t"))
+    current_bytes=serialized_bytes()
+    while records and current_bytes>budget:
+        # Remove in batches: per-row report recalculation would cost O(N²)
+        # and risk starving the 0.1 vCPU Northflank worker.
+        excess=current_bytes-budget
+        approx_per_trade=max(100,
+            len(json.dumps(records,ensure_ascii=False,separators=(",",":")).encode("utf8"))//len(records))
+        remove_count=min(len(records),max(1,excess//approx_per_trade+2))
+        oldest=sorted(records,key=lambda key:(records[key]["t"],key))[:remove_count]
         floor=_utc(new_archive.get("retention_floor_utc"))
-        if when is not None:
-            new_archive["retention_floor_utc"]=max(
-                filter(None,(floor,when))).isoformat()
-        del records[oldest]
-        new_archive["removed_count"]+=1
+        for key in oldest:
+            when=_utc(records[key].get("t"))
+            if when is not None:
+                floor=max(filter(None,(floor,when)))
+            del records[key]
+        if floor is not None:
+            new_archive["retention_floor_utc"]=floor.isoformat()
+        new_archive["removed_count"]+=len(oldest)
         out["periodic_audit_report"]=automatic_audit_report(
             new_archive,now=event_time)
+        current_bytes=serialized_bytes()
     if serialized_bytes()>budget:
         # A near-full source checkpoint must not be broken by optional audit.
         out.pop("periodic_audit_archive",None)
