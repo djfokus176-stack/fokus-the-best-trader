@@ -7,7 +7,7 @@ import pytest
 from trader.periodic_archive_audit import (
     LANES,advance_periodic_archive,automatic_audit_report,
     period_comparison,archive_day_trades,_at_midnight,empty,
-    MAX_ROWS,SCHEMA,
+    MAX_ROWS,SCHEMA,attach_periodic_audit,
 )
 
 
@@ -226,11 +226,25 @@ def test_worker_and_ui_both_use_same_archive_without_extra_db_or_broker_orders()
     terminal=Path("trader/cloud_paper_terminal.py").read_text("utf8")
     engine=Path("trader/periodic_archive_audit.py").read_text("utf8")
     ui=Path("trader/periodic_archive_ui.py").read_text("utf8")
-    assert 'payload["periodic_audit_archive"]' in worker
-    assert 'payload["periodic_audit_report"]' in worker
+    assert "payload=attach_periodic_audit(" in worker
+    assert "periodic_audit_archive" in worker
+    assert "periodic_audit_report" in Path("trader/periodic_archive_audit.py").read_text("utf8")
     assert "render_periodic_archive_ui(payload)" in terminal
     assert "FOKUS_AUDYT_" in ui and "date_input(" in ui
     assert "queue_paper(" not in engine and "session.post(" not in engine
     assert "CapitalReadOnly(" not in engine
     assert "CREATE TABLE" not in engine
     assert "ARCHIVE_AUDIT_PAPER_ONLY" in engine
+
+
+def test_optional_archive_can_shrink_without_blocking_main_checkpoint():
+    a=trade()
+    p=payload(a)
+    full=attach_periodic_audit({},p,now=NOW,max_checkpoint_bytes=4000)
+    assert full["tables"]["paper_positions_v3"][0]["trade_id"]=="a"
+    assert full["periodic_audit_report"]["stored_trades"]==1
+    # Artificially tiny size cap omits optional audit, preserving v3 trade.
+    tiny=attach_periodic_audit({},p,now=NOW,max_checkpoint_bytes=150)
+    assert tiny["tables"]["paper_positions_v3"][0]["trade_id"]=="a"
+    assert "periodic_audit_archive" not in tiny
+    assert tiny["periodic_audit_status"]=="OMITTED_CHECKPOINT_SIZE_LIMIT"
