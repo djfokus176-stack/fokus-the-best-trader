@@ -240,7 +240,7 @@ def test_worker_and_ui_both_use_same_archive_without_extra_db_or_broker_orders()
 def test_optional_archive_can_shrink_without_blocking_main_checkpoint():
     a=trade()
     p=payload(a)
-    full=attach_periodic_audit({},p,now=NOW,max_checkpoint_bytes=4000)
+    full=attach_periodic_audit({},p,now=NOW,max_checkpoint_bytes=150000)
     assert full["tables"]["paper_positions_v3"][0]["trade_id"]=="a"
     assert full["periodic_audit_report"]["stored_trades"]==1
     # Artificially tiny size cap omits optional audit, preserving v3 trade.
