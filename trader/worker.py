@@ -30,6 +30,7 @@ from .strategy_progress import progress_for_votes
 from .obstacle_ab import obstacle_ab_snapshot
 from .shadow_learning import advance_shadow, shadow_scorecard
 from .mtf_veto_forward import advance_mtf_comparison, mtf_comparison_report
+from .momentum_paper_test import advance_momentum_paper_test, momentum_paper_test_report
 from .paper_daily_risk import paper_daily_risk, DEFAULT_DAILY_STOP_PTS
 from .wave_shadow_archive import advance_wave_shadow, wave_shadow_scorecard
 from .wave_ae_forward_auto import advance_wave_ae_forward, wave_ae_forward_scorecard
@@ -246,6 +247,7 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
     vote_audit=payload.get("last_vote_audit") or {}
     shadow_state=payload.get("shadow_per_strategy") or {}
     mtf_veto_state=payload.get("mtf_veto_forward") or {}
+    momentum_test_state=payload.get("momentum_paper_test") or {}
     wave_state=payload.get("wave_shadow") or {}
     ae_state=payload.get("wave_ae_forward") or {}
     threef_state=payload.get("fokus_3f_forward") or {}
@@ -304,7 +306,7 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
                          "events":[],"errors":{"worker":type(exc).__name__},
                          "sources":{}}
     def review_snapshot(snapshot,decision,votes,views,blockers):
-        nonlocal auto_state,candidates,forecast_state,vote_audit,shadow_state,mtf_veto_state
+        nonlocal auto_state,candidates,forecast_state,vote_audit,shadow_state,mtf_veto_state,momentum_test_state
         # Only a read-only audit. These results were ALREADY computed by
         # evaluate_auto / filter_mtf_decision. Never alter trade decisions.
         vote_audit={
@@ -345,6 +347,22 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
         if strategy==AUTO_MODE:
             shadow_state=advance_shadow(shadow_state,snapshot.frame,votes,
                                         blockers,spread=snapshot.spread)
+            # An INDEPENDENT, strictly DEMO research lane requested for early
+            # LONG/SHORT testing. A test candidate is never queued into the
+            # existing PAPER v3 ledger, and cannot execute broker orders.
+            # Default opt-in for PAPER-only testing; owner can disable by ENV.
+            try:
+                momentum_enabled=(os.getenv("FOKUS_MOMENTUM_PAPER_TEST_ENABLED",
+                    "true").strip().lower() in ("true","1","yes","on"))
+                momentum_test_state=advance_momentum_paper_test(
+                    momentum_test_state,snapshot.frame,vote_audit["progress"],
+                    views,blockers,spread=snapshot.spread,
+                    source=snapshot.source,epic=epic,enabled=momentum_enabled)
+            except (ValueError,TypeError,KeyError,OverflowError,
+                    IndexError,RuntimeError,ArithmeticError) as exc:
+                momentum_test_state={**(momentum_test_state if isinstance(
+                    momentum_test_state,dict) else {}),
+                    "last_reason":"ERROR_"+type(exc).__name__}
             # Independent FORWARD counterfactual: what happened to REAL raw
             # setups that MTF passed vs vetoed? Never alters PAPER decisions.
             # A broken research record must not block the actual scanner.
@@ -476,6 +494,10 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
         from .paper_learning import strategy_scorecard
         payload["learning_report"]=strategy_scorecard(db,epic=epic)
         payload["shadow_per_strategy"]=shadow_state
+        if strategy==AUTO_MODE:
+            payload["momentum_paper_test"]=momentum_test_state
+            payload["momentum_paper_test_report"]=momentum_paper_test_report(
+                momentum_test_state)
         if strategy==AUTO_MODE:
             payload["mtf_veto_forward"]=mtf_veto_state
             payload["mtf_veto_forward_report"]=mtf_comparison_report(
