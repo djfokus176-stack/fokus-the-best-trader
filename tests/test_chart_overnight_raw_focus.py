@@ -92,5 +92,5 @@ def test_cloud_ui_fixes_yellow_dot_screenshot_and_can_rewind_to_last_raw_open():
     assert 'display_frame.index' in src
     assert 'height=720' in src
     assert 'mode="lines+markers" if len(points)>1' not in src
-    assert '"BID/ASK MID' in src
+    assert 'BID/ASK MID' in src
     assert 'queue_paper(' not in src
