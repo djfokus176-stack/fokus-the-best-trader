@@ -295,6 +295,48 @@ def advance_manual_test(state,frame,blockers=(),*,spread,source=SOURCE,
     return data
 
 
+def note_worker_cycle(state,scan_status,*,now=None):
+    """Diagnose QUEUED when the worker ran but could not review valid M1.
+
+    This is called after the worker's regular scan, including its early
+    returns on stale/closed/no-feed. Never creates an entry or alters
+    underlying strategy decisions; statuses come from executed code.
+    """
+    data={**_existing(state)}
+    current=_now_utc(now)
+    data["last_worker_attempt_utc"]=current.isoformat()
+    line=str(scan_status or "")[:240]
+    if line.startswith("WAIT / DATA_STALE"):
+        diagnosis="WORKER_DATA_STALE"
+    elif line.startswith("WAIT / NO_FEED"):
+        diagnosis="WORKER_NO_M1_FEED"
+    elif line.startswith("WAIT / MARKET_CLOSED"):
+        diagnosis="WORKER_MARKET_CLOSED"
+    elif line.startswith("WAIT / PAPER v3 is DEMO-only"):
+        diagnosis="WORKER_NOT_DEMO"
+    elif " / GATES=" in line:
+        diagnosis="WORKER_SCAN_DONE"
+    else:
+        diagnosis="WORKER_SCAN_OTHER"
+    data["last_worker_diagnosis"]=diagnosis
+    request=data.get("request")
+    if (isinstance(request,dict) and request.get("status") in
+            ("QUEUED","WAIT_DATA") and
+            str(data.get("last_reason","")).startswith("QUEUED_")):
+        if diagnosis in ("WORKER_DATA_STALE","WORKER_NO_M1_FEED",
+                         "WORKER_MARKET_CLOSED","WORKER_NOT_DEMO"):
+            data["last_reason"]=diagnosis
+            data["request"]={**request,"status":"WAIT_DATA",
+                             "waiting_reason":diagnosis}
+        else:
+            # The worker itself is alive, but there may be no NEW verified
+            # minute, e.g. provider supplied the same closed bar again.
+            data["last_reason"]="WAIT_WORKER_NO_NEW_M1"
+            data["request"]={**request,"status":"WAIT_DATA",
+                             "waiting_reason":"WAIT_NEXT_NEW_M1"}
+    return data
+
+
 def manual_report(state):
     data=_existing(state)
     active=data.get("active") if isinstance(data.get("active"),dict) else None
@@ -312,6 +354,8 @@ def manual_report(state):
                              for p in closed),2),
         "last_candle_utc":data.get("last_candle_utc"),
         "last_reason":data.get("last_reason"),
+        "last_worker_attempt_utc":data.get("last_worker_attempt_utc"),
+        "last_worker_diagnosis":data.get("last_worker_diagnosis"),
         "recent":list(reversed(closed[-30:])),
         "invalidated_recent":list(reversed((data.get("invalidated_rows") or [])[-30:])),
         "no_broker_orders":True,
