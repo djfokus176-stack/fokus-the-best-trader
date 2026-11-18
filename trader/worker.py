@@ -32,7 +32,7 @@ from .shadow_learning import advance_shadow, shadow_scorecard
 from .mtf_veto_forward import advance_mtf_comparison, mtf_comparison_report
 from .momentum_paper_test import advance_momentum_paper_test, momentum_paper_test_report
 from .raw_m1_forward_paper import advance_raw_paper, raw_paper_report
-from .manual_paper_test import advance_manual_test, expire_request_only, manual_report
+from .manual_paper_test import advance_manual_test, expire_request_only, manual_report, note_worker_cycle
 from .periodic_archive_audit import attach_periodic_audit
 from .capital_demo_broker import advance_demo_broker, config as demo_broker_config, DemoExecutionError
 from .paper_daily_risk import paper_daily_risk, DEFAULT_DAILY_STOP_PTS
@@ -524,6 +524,12 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
                     backfill_state={**backfill_state,
                                     "last_attempt_utc":datetime.now(timezone.utc).isoformat(),
                                     "status":"ERROR_"+type(exc).__name__}
+        # This runs even if scan_once returned before its M1 reviewer.
+        # E.g. a stale/missing M1 must be diagnosed as such, rather than
+        # silently leaving the UI at QUEUED with no worker heartbeat.
+        if tf=="MINUTE":
+            manual_test_state=note_worker_cycle(
+                manual_test_state,status,now=datetime.now(timezone.utc))
         payload=dump_state(db)
         # Preserve the owner's CAS-saved TEST request across the original
         # SQLite checkpoint dump. Expire it even when a stale data scan
