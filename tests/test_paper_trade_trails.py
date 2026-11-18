@@ -154,11 +154,14 @@ def test_gap_breaks_line_no_interpolation_over_unknown_m1_candle():
     assert status["gaps"]>=1
     traces=[x for x in fig.data if "RUCH RAW M1" in x.name]
     for t in traces:
-        pairs=[(x,y) for x,y in zip(t.x,t.y) if x is not None]
-        assert not(any((a[0]==pd.Timestamp(ts(4)) and
+        # Plotly uses None as a deliberate break. Removing it would
+        # falsely make distinct, disconnected segments look contiguous.
+        pairs=list(zip(t.x,t.y))
+        assert not any((a[0]==pd.Timestamp(ts(4)) and
                         b[0]==pd.Timestamp(ts(6)))
-                       for a,b in zip(pairs,pairs[1:])))
+                       for a,b in zip(pairs,pairs[1:]))
         assert t.connectgaps is False
+        assert None in t.x
 
 
 def test_invalidated_open_shows_only_earlier_real_bars_no_fake_close_pnl():
