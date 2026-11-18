@@ -258,6 +258,15 @@ def raw_paper_report(state):
     # including any positions silently invalidated by earlier builds.
     legacy_unreconciled=max(0,all_opened-closed_total-
                             invalidated_after_open-active_open)
+    # Last verifiably recorded OPEN, not the most recent unverified setup.
+    opened_rows=list(closed)+list(data.get("invalidated_rows") or [])
+    if active is not None and active.get("status")=="OPEN":
+        opened_rows.append(active)
+    documented=[p for p in opened_rows
+                if isinstance(p,dict) and _time(p.get("opened_utc")) is not None
+                and p.get("side") in ("LONG","SHORT")]
+    last_open=max(documented,
+                  key=lambda p:_time(p["opened_utc"])) if documented else None
     return {
         "status":"FORWARD_ONLY_RAW_M1_SIMULATION",
         "started":int(data.get("started",0)),
@@ -267,6 +276,9 @@ def raw_paper_report(state):
         "invalidated_after_open":invalidated_after_open,
         "invalidated_before_open":int(data.get("invalidated_before_open_total",0)),
         "unreconciled_historical_open":legacy_unreconciled,
+        "active_open_now":active_open,
+        "last_documented_open_utc":last_open.get("opened_utc") if last_open else None,
+        "last_documented_open_side":last_open.get("side") if last_open else None,
         "invalidated_recent":list(data.get("invalidated_rows") or [])[-40:],
         "pnl_pts":round(pnl,2),
         "win_rate_pct":round(100*wins/len(closed),1) if closed else None,
