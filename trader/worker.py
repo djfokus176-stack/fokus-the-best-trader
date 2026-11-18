@@ -32,6 +32,7 @@ from .shadow_learning import advance_shadow, shadow_scorecard
 from .mtf_veto_forward import advance_mtf_comparison, mtf_comparison_report
 from .momentum_paper_test import advance_momentum_paper_test, momentum_paper_test_report
 from .raw_m1_forward_paper import advance_raw_paper, raw_paper_report
+from .manual_paper_test import advance_manual_test, expire_request_only, manual_report
 from .periodic_archive_audit import attach_periodic_audit
 from .capital_demo_broker import advance_demo_broker, config as demo_broker_config, DemoExecutionError
 from .paper_daily_risk import paper_daily_risk, DEFAULT_DAILY_STOP_PTS
@@ -252,6 +253,7 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
     mtf_veto_state=payload.get("mtf_veto_forward") or {}
     momentum_test_state=payload.get("momentum_paper_test") or {}
     raw_test_state=payload.get("raw_m1_forward_paper") or {}
+    manual_test_state=payload.get("manual_paper_test") or {}
     periodic_archive_before=payload.get("periodic_audit_archive") or {}
     wave_state=payload.get("wave_shadow") or {}
     ae_state=payload.get("wave_ae_forward") or {}
@@ -311,7 +313,7 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
                          "events":[],"errors":{"worker":type(exc).__name__},
                          "sources":{}}
     def review_snapshot(snapshot,decision,votes,views,blockers):
-        nonlocal auto_state,candidates,forecast_state,vote_audit,shadow_state,mtf_veto_state,momentum_test_state,raw_test_state
+        nonlocal auto_state,candidates,forecast_state,vote_audit,shadow_state,mtf_veto_state,momentum_test_state,raw_test_state,manual_test_state
         # Only a read-only audit. These results were ALREADY computed by
         # evaluate_auto / filter_mtf_decision. Never alter trade decisions.
         vote_audit={
@@ -335,6 +337,27 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             "blockers":list(blockers or [])[:10],
         }
         vote_audit["progress"]=progress_for_votes(snapshot.frame,votes,blockers)
+        # Explicit owner-requested virtual LONG/SHORT is a SEPARATE lane.
+        # It never changes strategy votes, AUTO PAPER, RAW, broker DEMO or
+        # global market protections. Only next VERIFIED closed M1 advances.
+        if tf=="MINUTE":
+            try:
+                # A forced VIRTUAL diagnostic should test entry/exit
+                # without inheriting AUTO's MTF/macro signal restrictions.
+                # Fail CLOSED for stale/closed data and disabled setups.
+                essential=tuple(b for b in blockers if b in (
+                    "SETUPS_DISABLED","MARKET_NOT_TRADEABLE","DATA_STALE"))
+                manual_test_state=advance_manual_test(
+                    manual_test_state,snapshot.frame,essential,
+                    spread=snapshot.spread,source=snapshot.source,
+                    epic=epic,market_status=(
+                        "NOT_TRADEABLE" if "MARKET_NOT_TRADEABLE" in blockers
+                        else "TRADEABLE"))
+            except (ValueError,TypeError,KeyError,OverflowError,
+                    IndexError,RuntimeError,ArithmeticError) as exc:
+                manual_test_state={**(manual_test_state if isinstance(
+                    manual_test_state,dict) else {}),
+                    "last_reason":"ERROR_"+type(exc).__name__}
         if strategy==AUTO_MODE:
             # Diagnostic A/B, NOT an override of actual AUTO/PAPER. A failure
             # in optional audit can never stop the production PAPER worker.
@@ -502,6 +525,13 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
                                     "last_attempt_utc":datetime.now(timezone.utc).isoformat(),
                                     "status":"ERROR_"+type(exc).__name__}
         payload=dump_state(db)
+        # Preserve the owner's CAS-saved TEST request across the original
+        # SQLite checkpoint dump. Expire it even when a stale data scan
+        # returned before reviewer could advance to a new M1.
+        if tf=="MINUTE":
+            manual_test_state=expire_request_only(manual_test_state)
+        payload["manual_paper_test"]=manual_test_state
+        payload["manual_paper_test_report"]=manual_report(manual_test_state)
         if backfill_state:
             payload["candle_backfill"]=backfill_state
         if isinstance(auto_state,dict):
