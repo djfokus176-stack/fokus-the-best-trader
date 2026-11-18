@@ -135,6 +135,8 @@ def test_chart_improvement_does_not_change_strategies_or_expose_fake_signals():
     assert "for period,color in ((9," in src
     assert 'min_periods=period' in src
     assert 'cloud_paper_decision(payload.get("meta") or {})' in src
-    assert "height=720" in src
+    assert 'candle_plot_style(choice,zoom,price_range,' in src
+    style=Path("trader/cloud_chart_visual.py").read_text("utf8")
+    assert '"height":690' in style
     assert "queue_paper(" not in src
     assert "CapitalReadOnly(" not in src

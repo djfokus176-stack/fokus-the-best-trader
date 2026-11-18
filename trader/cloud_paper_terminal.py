@@ -29,6 +29,7 @@ from .cloud_candle_clock import render_candle_clock
 from .cloud_paper_visibility import cloud_paper_visibility, cloud_chart_gaps
 from .cloud_paper_test_status import status_for_owner
 from .raw_paper_chart import annotate_raw_forward, rows_for_journal
+from .cloud_chart_visual import candle_price_window, candle_plot_style
 from .periodic_archive_ui import render_periodic_archive_ui
 
 
@@ -310,7 +311,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         key="cloud_price_chart_interval")
     zoom=st.select_slider(
         "🔍 ZOOM WYKRESU — ostatnie świece (tylko wygląd)",
-        options=[20,30,45,65,90,180,300],value=45,
+        options=[20,30,45,65,90,180,300],value=30,
         key="cloud_price_chart_zoom_"+choice)
     chart_mode=st.selectbox(
         "🎯 CO POKAZAĆ NA WYKRESIE? (zapisane wejścia z historii)",
@@ -319,6 +320,13 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         key="cloud_price_chart_focus_"+choice,
         help="Wybierz historyczną transakcję, żeby wykres przesunął się na "
              "prawdziwą świecę otwarcia/zamknięcia. To nie tworzy zleceń.")
+    # Strictly visual: candle-based autoscale is the default. Expanded
+    # stop/target scale is opt-in because distant risk levels visually
+    # flatten candles, as in the owner's screenshot.
+    with st.expander("⚙️ WYGLĄD WYKRESU",expanded=False):
+        wide_risk_scale=st.checkbox(
+            "Uwzględnij pełne aktywne SL/TP w skali ceny (mniejsze świece)",
+            value=False,key="cloud_chart_wide_risk_scale_"+choice)
     resolution=source_resolution(choice)
     render_candle_clock(choice)
     st.caption(
@@ -576,7 +584,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         st.caption('🕯️ Podgląd M1 /prices: '+forming["reason"]+
                    '. Nie ma drugiego logowania Capital w Streamlit; '
                    'dane wymagają odświeżonego workera Northflank.')
-    if moving_chart["visible"]:
+    if moving_chart["visible"] and chart_mode=="BIEŻĄCE ŚWIECE":
         live=moving_chart["bar"]
         live_message=(
             "🕯️ "+choice+" W TRAKCIE — RUCHOME KNOTY (NIE SYGNAŁ) | "
@@ -933,14 +941,14 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         candles=go.Figure(go.Candlestick(
             x=display_frame.index,open=display_frame.Open,high=display_frame.High,
             low=display_frame.Low,close=display_frame.Close,
-            increasing={"line":{"color":"#27cf94","width":1.5},
-                        "fillcolor":"#27cf94"},
-            decreasing={"line":{"color":"#ff5b6d","width":1.5},
-                        "fillcolor":"#ff5b6d"},
+            increasing={"line":{"color":"#11cf9d","width":1.5},
+                        "fillcolor":"#11cf9d"},
+            decreasing={"line":{"color":"#f04458","width":1.5},
+                        "fillcolor":"#f04458"},
             name="US500 "+choice+" — ZAMKNIĘTE"))
         # Read-only visual indicators from CLOSED candles only. They are
         # NOT read by any strategy and never create an entry signal.
-        for period,color in ((9,"#ffd447"),(21,"#57b4ff"),(50,"#bd82f7")):
+        for period,color in ((9,"#eabf2f"),(21,"#38bdf8"),(50,"#9e7be8")):
             ema=frame["Close"].ewm(span=period,adjust=False,
                                      min_periods=period).mean()
             candles.add_trace(go.Scatter(
@@ -982,7 +990,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         # A visible 45-65 candle window replaces the former fixed
         # eight-hour range (which made M1 candles nearly invisible).
     # Only validated fresh DEMO quote points, never synthetic candles.
-    if overlay["visible"]:
+    if overlay["visible"] and chart_mode=="BIEŻĄCE ŚWIECE":
         # The former cloud of 5-second yellow sample dots obscured candles
         # (especially the M1 currently forming bar). Show ONE price line.
         # The points remain available in quote diagnostics, not mistaken
@@ -993,7 +1001,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
             annotation_text=f'BID/ASK MID {overlay["mid"]:.2f}',
             annotation_position="top left")
     # Separate broker /prices M1 PREVIEW marker; not a closed M15 candle.
-    if forming["visible"] and choice=="M15":
+    if forming["visible"] and choice=="M15" and chart_mode=="BIEŻĄCE ŚWIECE":
         m=forming["preview"]
         candles.add_trace(go.Scatter(
             x=[m["captured_time"]],y=[m["close"]],
@@ -1017,20 +1025,32 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
     open_row=next((p for p in recent_paper if p.get("status")=="OPEN"),None)
     if open_row is not None:
         annotate_open_paper(candles,open_row)
-    candles.update_layout(
-        height=720,xaxis_rangeslider_visible=False,template="plotly_dark",
-        uirevision="fokus_cloud_"+choice+"_view_"+chart_mode+"_zoom_"+str(zoom),
-        paper_bgcolor="#101928",plot_bgcolor="#101928",
-        font={"size":13,"color":"#e8eef8"},
-        legend={"orientation":"h","y":1.15,"x":0,"font":{"size":11}},
-        hovermode="x unified",
-        xaxis={"showgrid":True,"gridcolor":"#23354a","showspikes":True,
-               "spikecolor":"#e8eef8","range":viewport},
-        yaxis={"showgrid":True,"gridcolor":"#23354a","tickformat":".2f",
-               "side":"right","fixedrange":False},
-        margin={"l":12,"r":36,"t":66,"b":28})
+    # The screenshot showed a 90-point Y axis around ~12 points
+    # of M1 price action. Explicitly fit ONLY real visible OHLC, not old
+    # stop/target lines or markers outside the visible candle viewport.
+    visible_levels=[]
+    if wide_risk_scale:
+        if isinstance(active_raw,dict) and active_raw.get("status")=="OPEN":
+            visible_levels.extend(active_raw.get(k) for k in ("entry_mid","stop","target"))
+        if isinstance(open_row,dict):
+            visible_levels.extend(open_row.get(k) for k in ("entry_mid","stop_mid","target_mid"))
+    price_range=candle_price_window(
+        display_frame,viewport,
+        moving=(moving_chart.get("bar") if
+                chart_mode=="BIEŻĄCE ŚWIECE" and moving_chart.get("visible") else None),
+        mid=(overlay.get("mid") if
+             chart_mode=="BIEŻĄCE ŚWIECE" and overlay.get("visible") else None),
+        extra_levels=visible_levels)
+    layout=candle_plot_style(choice,zoom,price_range,
+                            mode=chart_mode+"_risk_"+str(wide_risk_scale))
+    layout["xaxis"]["range"]=viewport
+    candles.update_layout(**layout)
     with live_chart_slot.container():
-        st.markdown("### 🕯️ US500 — PRAWDZIWE ŚWIECE + LONG / SHORT / CLOSE / WYNIK")
+        st.markdown("### 📈 FOKU$ CHART — US500 / "+choice)
+        st.caption("Wykres ceny: rzeczywiste OHLC z archiwum • EMA9 / EMA21 / EMA50 • "
+                   "świece zielone = wzrost, czerwone = spadek. "
+                   "🟢 LONG / 🔴 SHORT / ◆ zamknięcie z wynikiem to wyłącznie "
+                   "zapisane transakcje PAPER, nie obserwacje.")
         if focus_utc is not None and viewport is not None and (
                 viewport[0]<=_parse_utc(focus_utc)<=viewport[1]):
             when=_parse_utc(focus_utc).tz_convert("Europe/Warsaw").strftime(
@@ -1038,13 +1058,15 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
             st.success("🎯 Wykres przesunięty na zapisaną transakcję: "+when+
                        " (czas polski). Najedź na zielony/czerwony trójkąt "
                        "lub romb, aby sprawdzić cenę i wynik.")
-        st.caption("Zielone/czerwone = autentyczne zamknięte OHLC. "+
-                   "Trójkąty 🟢/🔴 = otwarcia z ARCHIWUM PAPER; "+
-                   "romb ✅/❌ = rozliczony wynik RAW po kosztach. "+
-                   "Najedź na marker, aby zobaczyć dokładną godzinę, "+
-                   "strategię, wejście, SL, TP i liczbę punktów. "+
-                   "Dla RAW OPEN są trzy przerywane linie wejście/SL/TP.")
+        st.caption("🔍 Rolka myszy = przybliż/oddal • przeciągnięcie = przesuń historię • "
+                   "dwuklik = reset widoku • najedź na transakcję = godzina, "
+                   "cena wejścia, SL, TP i wynik w punktach. "
+                   "Domyślnie skala ceny obejmuje widoczne świece, a odległe "
+                   "SL/TP możesz uwzględnić w ustawieniach wyglądu.")
         st.plotly_chart(candles,use_container_width=True,
+                        config={"scrollZoom":True,"displayModeBar":True,
+                                "modeBarButtonsToRemove":["lasso2d","select2d"],
+                                "displaylogo":False},
                         key="cloud_worker_chart_"+choice+"_v1")
     with raw_journal_slot.container():
         st.markdown("##### 📓 DZIENNIK AUTO RAW PAPER — OPEN / CLOSED / UNIEWAŻNIONE")

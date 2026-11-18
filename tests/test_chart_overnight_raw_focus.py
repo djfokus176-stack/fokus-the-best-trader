@@ -90,7 +90,9 @@ def test_cloud_ui_fixes_yellow_dot_screenshot_and_can_rewind_to_last_raw_open():
     assert 'visible_count=zoom,focus_utc=focus_utc' in src
     assert 'candle_limit=1500 if resolution=="MINUTE" else 520' in src
     assert 'display_frame.index' in src
-    assert 'height=720' in src
+    assert 'candle_plot_style(choice,zoom,price_range,' in src
+    style=Path("trader/cloud_chart_visual.py").read_text("utf8")
+    assert '"height":690' in style
     assert 'mode="lines+markers" if len(points)>1' not in src
     assert 'BID/ASK MID' in src
     assert 'queue_paper(' not in src
