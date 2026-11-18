@@ -32,6 +32,7 @@ from .raw_paper_chart import annotate_raw_forward, rows_for_journal
 from .paper_trade_trails import annotate_position_trails
 from .manual_paper_test import queue_manual_request
 from .manual_paper_chart import annotate_manual_test
+from .manual_paper_status_ui import manual_status_panel
 from .cloud_chart_visual import candle_price_window, candle_plot_style
 from .periodic_archive_ui import render_periodic_archive_ui
 
@@ -481,55 +482,14 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
                        ". Sprawdź, czy Northflank pracuje na M1 AUTO, "
                        "czy poprzedni test się zakończył oraz czy "
                        "ostatni checkpoint jest świeży.")
-    if manual_trial.get("status")=="OWNER_MANUAL_PAPER_ONLY":
-        ma,mb,mc,md=st.columns(4)
-        ma.metric("TEST: żądania",manual_trial.get("requested",0))
-        mb.metric("TEST: OPEN łącznie",manual_trial.get("opened",0))
-        mc.metric("TEST: CLOSED",manual_trial.get("closed",0))
-        md.metric("TEST: netto",str(manual_trial.get("pnl_pts",0))+" pkt")
-        request=manual_trial.get("request") or {}
-        active=manual_trial.get("active")
-        if isinstance(active,dict):
-            details=("🧪 RĘCZNY "+str(active.get("status"))+" "+
-                     str(active.get("side"))+
-                     " | setup UTC "+str(active.get("setup_utc"))+
-                     " | ENTRY sygnał "+str(active.get("entry_signal"))+
-                     " | SL "+str(active.get("stop"))+
-                     " | TP "+str(active.get("target")))
-            if active.get("status")=="OPEN":
-                st.success("🟢 TERAZ AKTYWNA! "+details)
-            else:
-                st.info(details+" — oczekiwanie na potwierdzone OPEN.")
-        elif request.get("status") in ("QUEUED","WAIT_DATA"):
-            st.info("⏳ RĘCZNY TEST "+str(request.get("side"))+
-                    " oczekuje na przyszłą, sprawdzoną świecę M1. "
-                    "Status: "+str(request.get("status"))+
-                    " | powód: "+str(manual_trial.get("last_reason")))
-        else:
-            st.caption("RĘCZNY TEST: brak aktywnej pozycji. "+
-                       "Ostatni status: "+str(manual_trial.get("last_reason")))
-        recent=manual_trial.get("recent") or []
-        if recent:
-            st.markdown("**Ostatnie zamknięcia testów ręcznych**")
-            st.dataframe(pd.DataFrame([{
-                "Kierunek":p.get("side"),
-                "OPEN (UTC)":p.get("opened_utc"),
-                "CLOSE (UTC)":p.get("closed_utc"),
-                "Powód":p.get("status"),
-                "Wejście pkt":p.get("entry_mid"),
-                "Wyjście pkt":p.get("exit_mid"),
-                "Netto pkt":p.get("pnl_pts"),
-            } for p in recent[:10]]),hide_index=True,
-            use_container_width=True)
-        invalid=manual_trial.get("invalidated_recent") or []
-        if invalid:
-            st.warning("Testy bez wiarygodnego rozliczenia: "+
-                       str(len(invalid))+
-                       ". W takich przypadkach nie wpisuję fikcyjnego P&L.")
-    else:
-        st.caption("Pierwsze żądanie ręczne pojawi się po "
-                   "zaakceptowaniu zapisu Supabase. "
-                   "Testy ręczne nie mieszają się z wynikami AUTO.")
+    # Independent read-only 12s status refresh; only actual state
+    # transitions refresh the original full-screen candle chart.
+    manual_status_panel(remote)
+    if st.button("🔄 ODŚWIEŻ CAŁY WYKRES I STATUS TESTU",
+                 key="manual_paper_refresh_full_chart_v1",
+                 use_container_width=True):
+        st.session_state.pop("_fokus_cloud_chart_cache_v3",None)
+        st.rerun()
     raw_trial=payload.get("raw_m1_forward_paper_report") or {}
     st.markdown("##### ⚡ AUTO RAW PAPER — TESTOWE WEJŚCIA LONG/SHORT BEZ KIERUNKOWEGO VETO MTF")
     if raw_trial.get("status")=="FORWARD_ONLY_RAW_M1_SIMULATION":
