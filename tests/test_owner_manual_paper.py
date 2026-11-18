@@ -110,7 +110,7 @@ def test_manual_long_opens_after_two_real_closed_bars_then_timeout():
     opened=future(setup,97)
     assert opened["opened"]==1
     assert opened["active"]["status"]=="OPEN"
-    assert opened["active"]["entry_bar_open_utc"]==stamp(96)
+    assert opened["active"]["entry_bar_open_utc"]==stamp(95)
     assert opened["active"]["opened_utc"]==stamp(96)
     # TIMEOUT after at most 5 consecutive correctly completed M1.
     result=opened
