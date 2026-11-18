@@ -94,7 +94,8 @@ def test_owner_chart_has_independent_quote_poll_and_close_only_candles():
     code=Path("trader/cloud_paper_terminal.py").read_text(encoding="utf-8")
     assert '@st.fragment(run_every="5s")' in code
     assert 'remote.fetch_live_quote("US500")' in code
-    assert 'remote.fetch_candles("US500",resolution,limit=350)' in code
+    assert 'original=remote.fetch_candles("US500",resolution,limit=candle_limit)' in code
+    assert 'candle_limit=1500 if resolution=="MINUTE" else 520' in code
     assert 'frame=closed_chart_frame(original,choice)' in code
     assert 'cache.get("choice")!=choice' in code
     # Quote fetched ONCE then shared by both the 5s MID overlay and the

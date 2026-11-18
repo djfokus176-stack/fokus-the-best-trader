@@ -135,6 +135,6 @@ def test_chart_improvement_does_not_change_strategies_or_expose_fake_signals():
     assert "for period,color in ((9," in src
     assert 'min_periods=period' in src
     assert 'cloud_paper_decision(payload.get("meta") or {})' in src
-    assert "height=620" in src
+    assert "height=720" in src
     assert "queue_paper(" not in src
     assert "CapitalReadOnly(" not in src

@@ -50,7 +50,7 @@ def annotate_raw_forward(fig, report, *, start=None, end=None):
         "LOSS":dict(name="❌ RAW TEST CLOSE − pkt",
                     symbol="diamond",color="#ff7a7a"),
     }
-    entries={k:{"x":[],"y":[],"text":[]} for k in groups}
+    entries={k:{"x":[],"y":[],"text":[],"labels":[]} for k in groups}
     for pos in positions[-90:]:
         if not isinstance(pos,dict) or pos.get("side") not in ("LONG","SHORT"):
             continue
@@ -64,6 +64,7 @@ def annotate_raw_forward(fig, report, *, start=None, end=None):
             item=entries[side]
             item["x"].append(when)
             item["y"].append(entry)
+            item["labels"].append("LONG" if side=="LONG" else "SHORT")
             item["text"].append(
                 "PAPER TEST / RAW "+side+
                 "<br>Strategie M1: "+methods+
@@ -85,6 +86,7 @@ def annotate_raw_forward(fig, report, *, start=None, end=None):
         group=entries["GAIN" if pnl>0 else "LOSS"]
         group["x"].append(exit_time)
         group["y"].append(exit_value)
+        group["labels"].append(f"CLOSE {pnl:+.2f} pkt")
         group["text"].append(
             "PAPER TEST RAW — "+escape(str(status))+
             "<br>Kierunek: "+side+
@@ -98,12 +100,17 @@ def annotate_raw_forward(fig, report, *, start=None, end=None):
         if not group["x"]:
             continue
         fig.add_trace(go.Scatter(
-            x=group["x"],y=group["y"],text=group["text"],
-            mode="markers",name=style["name"],
-            marker={"symbol":style["symbol"],"size":18,
+            x=group["x"],y=group["y"],text=group["labels"],
+            customdata=group["text"],
+            mode="markers+text",name=style["name"],
+            textposition="top center" if key in ("LONG","GAIN","LOSS")
+                         else "bottom center",
+            textfont={"size":13,"color":style["color"]},
+            cliponaxis=False,
+            marker={"symbol":style["symbol"],"size":20,
                     "color":style["color"],
                     "line":{"width":2,"color":"#111827"}},
-            hovertemplate="%{text}<extra></extra>",
+            hovertemplate="%{customdata}<extra></extra>",
         ))
     if isinstance(active,dict) and active.get("status")=="OPEN":
         for label,key,color in (
@@ -126,7 +133,8 @@ def rows_for_journal(report, limit=60):
     if (not isinstance(report,dict) or
             report.get("status")!="FORWARD_ONLY_RAW_M1_SIMULATION"):
         return []
-    positions=list(report.get("recent") or [])
+    positions=(list(report.get("recent") or [])+
+               list(report.get("invalidated_recent") or []))
     active=report.get("active")
     if isinstance(active,dict):
         positions.append(active)
@@ -134,14 +142,19 @@ def rows_for_journal(report, limit=60):
         x=_stamp(t)
         return x.tz_convert("Europe/Warsaw").strftime("%d.%m.%Y %H:%M") if x is not None else "—"
     out=[]
-    for p in reversed(positions[-limit:]):
+    positions.sort(key=lambda p:str(
+        p.get("invalidated_utc") or p.get("closed_utc") or
+        p.get("opened_utc") or p.get("setup_utc") or ""),
+        reverse=True)
+    for p in positions[:limit]:
         if not isinstance(p,dict):
             continue
         side=p.get("side")
         if side not in ("LONG","SHORT"):
             continue
         status=p.get("status")
-        is_open=status=="OPEN" or str(status).startswith("CLOSED_")
+        is_open=(status=="OPEN" or str(status).startswith("CLOSED_") or
+                 (status=="INVALIDATED" and p.get("previous_status")=="OPEN"))
         pnl=_num(p.get("pnl_pts"))
         out.append({
             "Kierunek":side,
@@ -151,6 +164,8 @@ def rows_for_journal(report, limit=60):
             "OPEN świecy (Polska)":local(p.get("entry_bar_open_utc")) if is_open else "—",
             "Potwierdzenie OPEN (Polska)":local(p.get("opened_utc")) if is_open else "—",
             "CLOSE (Polska)":local(p.get("closed_utc")),
+            "Unieważniono (Polska)":local(p.get("invalidated_utc")),
+            "Powód":p.get("invalidation_reason") or str(status),
             "Wejście (pkt)":_num(p.get("entry_mid")) if is_open else None,
             "SL":_num(p.get("stop")),
             "TP":_num(p.get("target")),
