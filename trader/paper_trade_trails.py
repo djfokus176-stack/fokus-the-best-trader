@@ -124,6 +124,16 @@ def recorded_positions(payload):
             all_rows.extend(("RAW M1",p) for p in invalid)
         if isinstance(raw.get("active"),dict):
             all_rows.append(("RAW M1",raw["active"]))
+    manual=payload.get("manual_paper_test_report")
+    if isinstance(manual,dict) and manual.get("status")=="OWNER_MANUAL_PAPER_ONLY":
+        history=manual.get("recent")
+        invalid=manual.get("invalidated_recent")
+        if isinstance(history,list):
+            all_rows.extend(("MANUAL TEST",p) for p in history)
+        if isinstance(invalid,list):
+            all_rows.extend(("MANUAL TEST",p) for p in invalid)
+        if isinstance(manual.get("active"),dict):
+            all_rows.append(("MANUAL TEST",manual["active"]))
     momentum=payload.get("momentum_paper_test")
     if isinstance(momentum,dict) and momentum.get("schema")==1:
         rows=momentum.get("closed")
