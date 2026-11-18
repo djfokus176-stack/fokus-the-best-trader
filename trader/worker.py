@@ -342,8 +342,13 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
         # global market protections. Only next VERIFIED closed M1 advances.
         if tf=="MINUTE":
             try:
+                # A forced VIRTUAL diagnostic should test entry/exit
+                # without inheriting AUTO's MTF/macro signal restrictions.
+                # Fail CLOSED for stale/closed data and disabled setups.
+                essential=tuple(b for b in blockers if b in (
+                    "SETUPS_DISABLED","MARKET_NOT_TRADEABLE","DATA_STALE"))
                 manual_test_state=advance_manual_test(
-                    manual_test_state,snapshot.frame,blockers,
+                    manual_test_state,snapshot.frame,essential,
                     spread=snapshot.spread,source=snapshot.source,
                     epic=epic,market_status=(
                         "NOT_TRADEABLE" if "MARKET_NOT_TRADEABLE" in blockers
