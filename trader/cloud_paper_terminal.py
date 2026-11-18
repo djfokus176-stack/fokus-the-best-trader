@@ -407,6 +407,20 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         rb.metric("RAW: OPEN",raw_trial.get("opened",0))
         rc.metric("RAW: CLOSED",raw_trial.get("closed",0))
         rd.metric("RAW: wynik netto",str(raw_trial.get("pnl_pts",0))+" pkt")
+        gaps_open=int(raw_trial.get("invalidated_after_open",0) or 0)
+        gaps_pending=int(raw_trial.get("invalidated_before_open",0) or 0)
+        unknown=int(raw_trial.get("unreconciled_historical_open",0) or 0)
+        if gaps_open or gaps_pending:
+            st.warning("⚠️ RAW: unieważnione po OPEN: "+str(gaps_open)+
+                       " | unieważnione przed OPEN: "+str(gaps_pending)+
+                       ". Przyczyny i godziny są w dzienniku niżej. "+
+                       "Brak wiarygodnego wyjścia = brak P&L, nigdy zero.")
+        if unknown:
+            st.error("⚠️ RAW: "+str(unknown)+
+                     " wcześniejszych otwarć nie ma udokumentowanego "+
+                     "zamknięcia ani historii unieważnienia. Mogły zniknąć "+
+                     "przez luki M1 w starszym kodzie. Nie wliczam ich "+
+                     "do wyniku, nie udaję, że zakończyły się TP/SL.")
         rp=raw_trial.get("active")
         if isinstance(rp,dict):
             direction=str(rp.get("side","?"))
@@ -943,12 +957,14 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         st.plotly_chart(candles,use_container_width=True,
                         key="cloud_worker_chart_"+choice+"_v1")
     with raw_journal_slot.container():
-        st.markdown("##### 📓 DZIENNIK AUTO RAW PAPER — KIEDY I ILE PUNKTÓW?")
+        st.markdown("##### 📓 DZIENNIK AUTO RAW PAPER — OPEN / CLOSED / UNIEWAŻNIONE")
         history=rows_for_journal(raw_trial,limit=60)
         if history:
             st.dataframe(pd.DataFrame(history),hide_index=True,
                          use_container_width=True)
             st.caption("Czasy w tabeli: Europe/Warsaw. "+
+                       "Unieważnienie po OPEN oznacza przerwę w zweryfikowanych "+
+                       "świecach, a nie wynik 0 pkt. "+
                        "OPEN świecy = symulowana cena otwarcia kolejnej M1. "+
                        "Potwierdzenie OPEN = czas, gdy worker znał "+
                        "już zamknięcie tej świecy. Wynik po kosztach "+
