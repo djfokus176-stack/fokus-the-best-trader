@@ -407,6 +407,21 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         rb.metric("RAW: OPEN",raw_trial.get("opened",0))
         rc.metric("RAW: CLOSED",raw_trial.get("closed",0))
         rd.metric("RAW: wynik netto",str(raw_trial.get("pnl_pts",0))+" pkt")
+        # Historical total OPEN is NOT the number of simultaneous positions.
+        in_market=int(raw_trial.get("active_open_now",0) or 0)
+        last_at=_parse_utc(raw_trial.get("last_documented_open_utc"))
+        last_side=str(raw_trial.get("last_documented_open_side") or "BRAK")
+        last_local=(last_at.tz_convert("Europe/Warsaw").strftime(
+            "%d.%m.%Y %H:%M") if last_at is not None else "BRAK")
+        if in_market:
+            st.success("🟢 AKTYWNA TERAZ: "+str(in_market)+
+                       " wirtualna pozycja RAW. Ostatnie potwierdzone OPEN: "+
+                       last_side+" o "+last_local+" (Polska).")
+        else:
+            st.warning("⚪ AKTYWNE TERAZ: 0 | ostatnie UDOKUMENTOWANE OPEN: "+
+                       last_side+" o "+last_local+" (Polska). "+
+                       "Historyczny licznik OPEN="+str(raw_trial.get("opened",0))+
+                       " nie oznacza aktywnego handlu w tej chwili.")
         gaps_open=int(raw_trial.get("invalidated_after_open",0) or 0)
         gaps_pending=int(raw_trial.get("invalidated_before_open",0) or 0)
         unknown=int(raw_trial.get("unreconciled_historical_open",0) or 0)
@@ -436,8 +451,20 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
             else:
                 st.info(txt+" PENDING nie oznacza wejścia.")
         else:
-            st.info("RAW: brak otwartej pozycji | powód: "+
-                    str(raw_trial.get("last_reason","BRAK"))+
+            why=str(raw_trial.get("last_reason","BRAK"))
+            explanation=(
+                "Przerwa w kolejności świec M1 — nie wolno "
+                "odtwarzać wejścia ani wyniku z niepełnych danych."
+                if why=="LUKA_SWIEC_RAW_BEZ_FILL" else
+                "Nie ma nowego surowego sygnału LONG/SHORT."
+                if why=="BRAK_SUROWEGO_LONG_SHORT" else
+                "Limit dzienny: maksymalnie 12 testowych setupów RAW."
+                if why=="MAX_12_RAW_DZIENNIE" else
+                "Oczekiwanie 2 min po ostatnim zamknięciu/utracie danych."
+                if why=="COOLDOWN_RAW_2_MIN" else why
+            )
+            st.info("RAW: obecnie BRAK otwartej pozycji. "+
+                    "Dlaczego nie ma wejścia: "+explanation+
                     " | ostatnia zamknięta M1 UTC "+
                     str(raw_trial.get("last_candle_utc","BRAK")))
         st.caption("RAW = prawdziwy surowy sygnał strategii M1, "+
