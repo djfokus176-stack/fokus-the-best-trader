@@ -34,7 +34,7 @@ def test_price_axis_not_flattened_by_remote_history_sl_tp():
     # Explicit owner opt-in may include remote stop/target.
     risk=candle_price_window(frame,view,extra_levels=(7320.,7420.))
     assert risk[0]<7320 and risk[1]>7420
-    assert risk[1]-risk[0]>current[1]-current[0]*0  # risk wider
+    assert risk[1]-risk[0]>current[1]-current[0]  # risk wider
 
 
 def test_live_quote_far_above_candles_is_not_used_to_autoscale():
