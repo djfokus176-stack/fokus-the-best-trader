@@ -131,7 +131,8 @@ def cloud_paper_decision(meta, *, now=None):
     }
 
 
-def cloud_chart_view_range(frame, choice, *, moving=None, visible_count=None):
+def cloud_chart_view_range(frame, choice, *, moving=None, visible_count=None,
+                           focus_utc=None):
     """Zoom around *real* recent candles; no synthetic price or candle data."""
     if choice not in ("M1","M2","M5","M15","H1"):
         raise ValueError("Unsupported UI chart timeframe")
@@ -140,12 +141,24 @@ def cloud_chart_view_range(frame, choice, *, moving=None, visible_count=None):
     seconds={"M1":60,"M2":120,"M5":300,"M15":900,"H1":3600}[choice]
     defaults={"M1":65,"M2":60,"M5":55,"M15":45,"H1":45}
     count=defaults[choice] if visible_count is None else int(visible_count)
-    if not 15<=count<=120:
+    if not 15<=count<=300:
         raise ValueError("Invalid CLOUD chart zoom")
     last=(_parse_utc(moving["at"]) if moving is not None
           else frame.index[-1])
     if last is None:
         return None
+    if len(frame) and focus_utc is not None:
+        focus=_parse_utc(focus_utc)
+        if focus is not None and frame.index[0]<=focus<=frame.index[-1]:
+            # Center the selected *recorded* trade using available real OHLC
+            # index labels. No historical candles are invented to fill gaps.
+            index=frame.index
+            center=max(0,min(len(index)-1,int(index.searchsorted(focus))-1))
+            left_idx=max(0,center-count//2)
+            right_idx=min(len(index)-1,left_idx+count-1)
+            left_idx=max(0,right_idx-count+1)
+            return [index[left_idx]-pd.Timedelta(seconds=seconds*.5),
+                    index[right_idx]+pd.Timedelta(seconds=seconds*1.5)]
     if len(frame):
         left=frame.index[max(0,len(frame)-count)]
     else:
@@ -299,6 +312,13 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         "🔍 ZOOM WYKRESU — ostatnie świece (tylko wygląd)",
         options=[20,30,45,65,90,180,300],value=45,
         key="cloud_price_chart_zoom_"+choice)
+    chart_mode=st.selectbox(
+        "🎯 CO POKAZAĆ NA WYKRESIE? (zapisane wejścia z historii)",
+        options=["BIEŻĄCE ŚWIECE","OSTATNIE OPEN RAW","OSTATNIE CLOSE RAW",
+                 "OSTATNIE OPEN PAPER v3"],
+        key="cloud_price_chart_focus_"+choice,
+        help="Wybierz historyczną transakcję, żeby wykres przesunął się na "
+             "prawdziwą świecę otwarcia/zamknięcia. To nie tworzy zleceń.")
     resolution=source_resolution(choice)
     render_candle_clock(choice)
     st.caption(
@@ -326,7 +346,11 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
                 or m15_cache_due(
                     cache,ttl_seconds=35 if choice in ("M1","M2") else 60)):
             version,payload=remote.fetch()
-            original=remote.fetch_candles("US500",resolution,limit=350)
+            # 1500 closed M1 bars give context for overnight positions,
+            # without requesting tick history or changing the worker.
+            # More-than-300 chart zoom must have >300 REAL archived candles.
+            candle_limit=1500 if resolution=="MINUTE" else 520
+            original=remote.fetch_candles("US500",resolution,limit=candle_limit)
             frame=closed_chart_frame(original,choice)
             audit=cloud_terminal_summary(version,payload,frame)
             # Per-BROWSER session cache only; never put credentials in it.
@@ -794,9 +818,40 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
                            "układu odrzuconego przez bieżący filtr poziomów.")
 
     recent_paper,chart_paper=cloud_paper_positions(payload,frame)
+    focus_utc=None
+    raw_rows=list(raw_trial.get("recent") or []) if isinstance(raw_trial,dict) else []
+    active_raw=raw_trial.get("active") if isinstance(raw_trial,dict) else None
+    if isinstance(active_raw,dict):
+        raw_rows.append(active_raw)
+    if chart_mode=="OSTATNIE OPEN RAW":
+        known=[r for r in raw_rows if isinstance(r,dict)
+               and _parse_utc(r.get("entry_bar_open_utc")) is not None]
+        if known:
+            latest=max(known,key=lambda r:_parse_utc(r["entry_bar_open_utc"]))
+            focus_utc=latest["entry_bar_open_utc"]
+    elif chart_mode=="OSTATNIE CLOSE RAW":
+        known=[r for r in raw_rows if isinstance(r,dict)
+               and _parse_utc(r.get("closed_utc")) is not None]
+        if known:
+            latest=max(known,key=lambda r:_parse_utc(r["closed_utc"]))
+            focus_utc=latest["closed_utc"]
+    elif chart_mode=="OSTATNIE OPEN PAPER v3":
+        known=[r for r in recent_paper if _parse_utc(r.get("opened_utc")) is not None]
+        if known:
+            latest=max(known,key=lambda r:_parse_utc(r["opened_utc"]))
+            focus_utc=latest["opened_utc"]
+    if chart_mode!="BIEŻĄCE ŚWIECE":
+        if focus_utc is None:
+            st.warning("W tym rejestrze nie ma jeszcze udokumentowanej "
+                       "transakcji do pokazania na wykresie.")
+        elif frame.empty or not(frame.index[0]<=_parse_utc(focus_utc)<=frame.index[-1]):
+            st.warning("Ostatnia transakcja jest starsza niż dostępny "
+                       "zakres świec "+choice+". Czas: "+str(focus_utc)+
+                       ". Nie przesuwam znacznika na fikcyjne świece.")
     viewport=cloud_chart_view_range(
         frame,choice,moving=moving_chart["bar"]
-        if moving_chart["visible"] else None,visible_count=zoom)
+        if moving_chart["visible"] and chart_mode=="BIEŻĄCE ŚWIECE"
+        else None,visible_count=zoom,focus_utc=focus_utc)
     counts=cloud_paper_visibility(payload,viewport=viewport)
     st.markdown("##### 📊 ILE NAPRAWDĘ OTWORZYŁ BOT PAPER?")
     if counts["known"]:
@@ -861,6 +916,13 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
     else:
         st.caption("W checkpointcie brak zarejestrowanych pozycji PAPER US500; "
                    "nie wyświetlam wymyślonych LONG/SHORT.")
+    # Render only the requested x-range (up to 300 real candles), not the
+    # entire 1500-record cache. EMA is still warmed up on FULL history.
+    timepad={"M1":60,"M2":120,"M5":300,"M15":900,"H1":3600}[choice]
+    display_frame=(frame.loc[
+        (frame.index>=viewport[0]-pd.Timedelta(seconds=timepad*4))&
+        (frame.index<=viewport[1]+pd.Timedelta(seconds=timepad*2))]
+        if not frame.empty and viewport is not None else frame)
     if frame.empty:
         st.info("Brak zamkniętych świec "+choice+" w archiwum. "
                 "Bieżąca OHLC może być pokazana osobno, bez fikcyjnej historii.")
@@ -869,8 +931,8 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         candles=go.Figure()
     else:
         candles=go.Figure(go.Candlestick(
-            x=frame.index,open=frame.Open,high=frame.High,
-            low=frame.Low,close=frame.Close,
+            x=display_frame.index,open=display_frame.Open,high=display_frame.High,
+            low=display_frame.Low,close=display_frame.Close,
             increasing={"line":{"color":"#27cf94","width":1.5},
                         "fillcolor":"#27cf94"},
             decreasing={"line":{"color":"#ff5b6d","width":1.5},
@@ -882,7 +944,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
             ema=frame["Close"].ewm(span=period,adjust=False,
                                      min_periods=period).mean()
             candles.add_trace(go.Scatter(
-                x=frame.index,y=ema,mode="lines",
+                x=display_frame.index,y=ema.reindex(display_frame.index),mode="lines",
                 name=f"EMA {period} • tylko podgląd",
                 line={"color":color,"width":1.5},
                 hovertemplate=f"EMA {period}: %{{y:.2f}}<extra></extra>"))
@@ -921,16 +983,10 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         # eight-hour range (which made M1 candles nearly invisible).
     # Only validated fresh DEMO quote points, never synthetic candles.
     if overlay["visible"]:
-        points=overlay["points"]
-        if points:
-            candles.add_trace(go.Scatter(
-                x=[p["time"] for p in points],
-                y=[p["mid"] for p in points],
-                mode="lines+markers" if len(points)>1 else "markers",
-                name="🟡 MID BID/ASK — "+("WS" if ws_transport else "REST"),
-                line={"color":"#f5c24b","width":2.6},
-                marker={"size":7,"color":"#f5c24b"},
-                hovertemplate="Odczyt %{x}<br>MID: %{y:.2f}<extra></extra>"))
+        # The former cloud of 5-second yellow sample dots obscured candles
+        # (especially the M1 currently forming bar). Show ONE price line.
+        # The points remain available in quote diagnostics, not mistaken
+        # for LONG/SHORT entries or 5-second candles.
         candles.add_hline(
             y=float(overlay["mid"]),line_color="#f5c24b",
             line_dash="dot",opacity=.65,
@@ -962,8 +1018,8 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
     if open_row is not None:
         annotate_open_paper(candles,open_row)
     candles.update_layout(
-        height=620,xaxis_rangeslider_visible=False,template="plotly_dark",
-        uirevision="fokus_cloud_"+choice+"_readable_v3_zoom_"+str(zoom),
+        height=720,xaxis_rangeslider_visible=False,template="plotly_dark",
+        uirevision="fokus_cloud_"+choice+"_view_"+chart_mode+"_zoom_"+str(zoom),
         paper_bgcolor="#101928",plot_bgcolor="#101928",
         font={"size":13,"color":"#e8eef8"},
         legend={"orientation":"h","y":1.15,"x":0,"font":{"size":11}},
@@ -975,6 +1031,13 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         margin={"l":12,"r":36,"t":66,"b":28})
     with live_chart_slot.container():
         st.markdown("### 🕯️ US500 — PRAWDZIWE ŚWIECE + LONG / SHORT / CLOSE / WYNIK")
+        if focus_utc is not None and viewport is not None and (
+                viewport[0]<=_parse_utc(focus_utc)<=viewport[1]):
+            when=_parse_utc(focus_utc).tz_convert("Europe/Warsaw").strftime(
+                "%d.%m.%Y %H:%M")
+            st.success("🎯 Wykres przesunięty na zapisaną transakcję: "+when+
+                       " (czas polski). Najedź na zielony/czerwony trójkąt "
+                       "lub romb, aby sprawdzić cenę i wynik.")
         st.caption("Zielone/czerwone = autentyczne zamknięte OHLC. "+
                    "Trójkąty 🟢/🔴 = otwarcia z ARCHIWUM PAPER; "+
                    "romb ✅/❌ = rozliczony wynik RAW po kosztach. "+
