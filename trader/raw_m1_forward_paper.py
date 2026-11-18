@@ -35,7 +35,10 @@ def blank():
             "gaps": 0, "last_reason": "BRAK NOWEGO SKANU",
             "last_side": "BRAK", "last_setup_utc": None,
             "last_close_utc": None, "attempted_per_utc_day": {},
-            "reasons": {}}
+            "reasons": {}, "invalidated_rows": [],
+            "invalidated_after_open_total": 0,
+            "invalidated_before_open_total": 0,
+            "closed_total": 0}
 
 
 def _reason(data, message):
@@ -44,6 +47,34 @@ def _reason(data, message):
     counts = Counter(data.get("reasons") or {})
     counts[key] += 1
     data["reasons"] = dict(counts.most_common(15))
+
+
+def _invalidate(data, active, stamp, reason):
+    """Close one UNVERIFIABLE path without inventing an exit or a P&L.
+
+    OPEN is a real simulated fill recorded earlier; lack of a valid future
+    price does NOT mean an economic zero or a completed trade.
+    """
+    if not isinstance(active,dict) or active.get("status") not in ("PENDING","OPEN"):
+        return
+    prior_status=active["status"]
+    event={
+        "status":"INVALIDATED","previous_status":prior_status,
+        "side":active.get("side"),"methods":list(active.get("methods") or []),
+        "after_mtf":list(active.get("after_mtf") or []),
+        "setup_utc":active.get("setup_utc"),
+        "opened_utc":active.get("opened_utc"),
+        "entry_bar_open_utc":active.get("entry_bar_open_utc"),
+        "entry_mid":active.get("entry_mid"),
+        "stop":active.get("stop"),"target":active.get("target"),
+        "invalidated_utc":stamp.isoformat(),"invalidation_reason":reason,
+        "pnl_pts":None,"exit_mid":None,"closed_utc":None,
+    }
+    rows=list(data.get("invalidated_rows") or [])
+    data["invalidated_rows"]=(rows+[event])[-120:]
+    key=("invalidated_after_open_total" if prior_status=="OPEN"
+         else "invalidated_before_open_total")
+    data[key]=int(data.get(key) or 0)+1
 
 
 def _candidate(frame, votes, spread):
@@ -105,7 +136,8 @@ def advance_raw_paper(state, frame, votes, blockers=(), *, spread,
     """Advance exactly one new closed M1. No historical replay or broker POST."""
     previous=(state if isinstance(state,dict) and
               state.get("schema")==SCHEMA else blank())
-    data={**previous, "closed":list(previous.get("closed") or [])}
+    data={**previous, "closed":list(previous.get("closed") or []),
+          "invalidated_rows":list(previous.get("invalidated_rows") or [])}
     if not enabled:
         data["last_reason"]="RAW_TEST_WYLACZONY"
         return data
@@ -124,7 +156,9 @@ def advance_raw_paper(state, frame, votes, blockers=(), *, spread,
     if prior is not None and stamp-prior!=pd.Timedelta(minutes=1):
         data["gaps"]=int(data.get("gaps",0))+1
         if data.get("active"):
+            _invalidate(data,data["active"],stamp,"MISSING_M1_BAR")
             data["invalidated"]=int(data.get("invalidated",0))+1
+            data["last_close_utc"]=stamp.isoformat()
         data["active"]=None
         _reason(data,"LUKA_SWIEC_RAW_BEZ_FILL")
         return data
@@ -142,6 +176,7 @@ def advance_raw_paper(state, frame, votes, blockers=(), *, spread,
             if isinstance(outcome,dict):
                 outcome["entry_bar_open_utc"]=entry_open
         if outcome=="INVALID":
+            _invalidate(data,active,stamp,"INVALID_FILL_OR_CANDLE")
             data["invalidated"]=int(data.get("invalidated",0))+1
             data["active"]=None
             data["last_close_utc"]=stamp.isoformat()
@@ -151,6 +186,8 @@ def advance_raw_paper(state, frame, votes, blockers=(), *, spread,
                 data["opened"]=int(data.get("opened",0))+1
             data["active"]=None
             data["closed"]=(data["closed"]+[outcome])[-MAX_HISTORY:]
+            data["closed_total"]=int(data.get("closed_total",len(
+                previous.get("closed") or [])))+1
             data["last_close_utc"]=stamp.isoformat()
             _reason(data,outcome["status"]+"_RAW")
         else:
@@ -213,11 +250,24 @@ def raw_paper_report(state):
             "opened_utc","entry_bar_open_utc","entry_signal","entry_mid",
             "entry_exec","stop","target","closed_utc","exit_mid",
             "exit_exec","pnl_pts","r","rr_net_est","bars_held")
+    all_opened=int(data.get("opened",0))
+    closed_total=int(data.get("closed_total",len(closed)))
+    invalidated_after_open=int(data.get("invalidated_after_open_total",0))
+    active_open=int(active is not None and active.get("status")=="OPEN")
+    # Historical counts before this upgrade cannot be reconstructed,
+    # including any positions silently invalidated by earlier builds.
+    legacy_unreconciled=max(0,all_opened-closed_total-
+                            invalidated_after_open-active_open)
     return {
         "status":"FORWARD_ONLY_RAW_M1_SIMULATION",
         "started":int(data.get("started",0)),
         "opened":int(data.get("opened",0)),
         "closed":len(closed),
+        "closed_total":closed_total,
+        "invalidated_after_open":invalidated_after_open,
+        "invalidated_before_open":int(data.get("invalidated_before_open_total",0)),
+        "unreconciled_historical_open":legacy_unreconciled,
+        "invalidated_recent":list(data.get("invalidated_rows") or [])[-40:],
         "pnl_pts":round(pnl,2),
         "win_rate_pct":round(100*wins/len(closed),1) if closed else None,
         "last_candle_utc":data.get("last_candle_utc"),
