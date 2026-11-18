@@ -229,8 +229,9 @@ def _events(fig, pos, frame, lo, hi, step, *, live_quotes=None):
             gap_count+=1
         last_time,last_price=stamp,px
 
-    if observed==0:
-        return False,gap_count,0
+    if observed==0 or not any(e["x"] for e in segments.values()):
+        # A single isolated close after a gap is NOT a traversed route.
+        return False,gap_count,observed
 
     for key,entry in segments.items():
         if not entry["x"]:
