@@ -186,8 +186,9 @@ def _events(fig, pos, frame, lo, hi, step, *, live_quotes=None):
     # Exact source candle closes during trade lifespan. On the exit candle
     # the bar CLOSE is not necessarily the price where SL/TP was hit.
     # Therefore it is excluded and replaced by a distinct model endpoint.
+    terminal=pos["status"] in DONE or pos["status"]=="INVALIDATED"
     available=frame.loc[(frame.index>start)&
-                        (frame.index<end if final else frame.index<=end)]
+                        (frame.index<end if terminal else frame.index<=end)]
     if available.empty and not final:
         return False,0,0
     if available.empty and final:
