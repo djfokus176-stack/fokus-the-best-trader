@@ -452,13 +452,13 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
                "Nie omija kontroli danych i statusu rynku. "
                "Przy nieświeżym BID/ASK nie obiecuję wejścia od razu.")
     one,two=st.columns(2)
-    clicked_side=("LONG" if one.button(
+    click_long=one.button(
         "🟢 TESTUJ LONG — OTWÓRZ WIRTUALNIE",type="primary",
         key="owner_force_paper_long_v1",use_container_width=True)
-        else "SHORT" if two.button(
+    click_short=two.button(
         "🔴 TESTUJ SHORT — OTWÓRZ WIRTUALNIE",
         key="owner_force_paper_short_v1",use_container_width=True)
-        else None)
+    clicked_side="LONG" if click_long else "SHORT" if click_short else None
     if clicked_side:
         try:
             outcome=queue_manual_request(remote,clicked_side)
