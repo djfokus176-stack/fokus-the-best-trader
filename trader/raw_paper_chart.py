@@ -50,7 +50,7 @@ def annotate_raw_forward(fig, report, *, start=None, end=None):
         "LOSS":dict(name="❌ RAW TEST CLOSE − pkt",
                     symbol="diamond",color="#ff7a7a"),
     }
-    entries={k:{"x":[],"y":[],"text":[]} for k in groups}
+    entries={k:{"x":[],"y":[],"text":[],"labels":[]} for k in groups}
     for pos in positions[-90:]:
         if not isinstance(pos,dict) or pos.get("side") not in ("LONG","SHORT"):
             continue
@@ -64,6 +64,7 @@ def annotate_raw_forward(fig, report, *, start=None, end=None):
             item=entries[side]
             item["x"].append(when)
             item["y"].append(entry)
+            item["labels"].append("LONG" if side=="LONG" else "SHORT")
             item["text"].append(
                 "PAPER TEST / RAW "+side+
                 "<br>Strategie M1: "+methods+
@@ -85,6 +86,7 @@ def annotate_raw_forward(fig, report, *, start=None, end=None):
         group=entries["GAIN" if pnl>0 else "LOSS"]
         group["x"].append(exit_time)
         group["y"].append(exit_value)
+        group["labels"].append(f"CLOSE {pnl:+.2f} pkt")
         group["text"].append(
             "PAPER TEST RAW — "+escape(str(status))+
             "<br>Kierunek: "+side+
@@ -98,12 +100,17 @@ def annotate_raw_forward(fig, report, *, start=None, end=None):
         if not group["x"]:
             continue
         fig.add_trace(go.Scatter(
-            x=group["x"],y=group["y"],text=group["text"],
-            mode="markers",name=style["name"],
-            marker={"symbol":style["symbol"],"size":18,
+            x=group["x"],y=group["y"],text=group["labels"],
+            customdata=group["text"],
+            mode="markers+text",name=style["name"],
+            textposition="top center" if key in ("LONG","GAIN","LOSS")
+                         else "bottom center",
+            textfont={"size":13,"color":style["color"]},
+            cliponaxis=False,
+            marker={"symbol":style["symbol"],"size":20,
                     "color":style["color"],
                     "line":{"width":2,"color":"#111827"}},
-            hovertemplate="%{text}<extra></extra>",
+            hovertemplate="%{customdata}<extra></extra>",
         ))
     if isinstance(active,dict) and active.get("status")=="OPEN":
         for label,key,color in (
