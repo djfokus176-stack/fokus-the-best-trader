@@ -218,8 +218,9 @@ def advance_manual_test(state,frame,blockers=(),*,spread,source=SOURCE,
     data=expire_request_only(state,now=current)
     request=data.get("request")
     if (source!=SOURCE or epic!="US500" or market_status!="TRADEABLE"):
-        data["last_reason"]="WAIT_MARKET_DEMO_TRA..."+
-                           "DEABLE" if market_status!="TRADEABLE" else "WAIT_DEMO_SOURCE"
+        data["last_reason"]=(
+            "WAIT_MARKET_NOT_TRADEABLE" if market_status!="TRADEABLE"
+            else "WAIT_DEMO_SOURCE")
         return data
     if not _valid_frame(frame):
         data["last_reason"]="WAIT_VERIFIED_M1"
