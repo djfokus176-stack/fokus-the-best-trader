@@ -55,7 +55,9 @@ def closed_chart_frame(raw,choice):
             or not set(required).issubset(raw.columns)):
         raise ValueError("Invalid closed-candle archive")
     if choice!="M2":
-        return raw.tail(120).copy()
+        # Keep real, closed history long enough to locate verified overnight
+        # trades on the M1 chart. Rendering itself slices only the viewport.
+        return raw.tail(1500 if choice=="M1" else 520).copy()
     # Each M2 is exactly two fully CLOSED, consecutive M1 periods
     # with UTC CLOSE labels (...:01, ...:02) and :02 as M2 CLOSE.
     # Resampling silently drops holes; explicitly check all groups.
@@ -84,7 +86,7 @@ def closed_chart_frame(raw,choice):
                             index=pd.DatetimeIndex([],tz="UTC"))
     result=pd.DataFrame(rows,columns=["Time",*required]).set_index("Time")
     result.index=pd.DatetimeIndex(result.index).tz_convert("UTC")
-    return result.tail(120)
+    return result.tail(750)
 
 
 def sampled_chart_bar(record,choice,*,now=None,last_closed_utc=None):
