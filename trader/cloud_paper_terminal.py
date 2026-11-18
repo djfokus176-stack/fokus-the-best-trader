@@ -29,6 +29,7 @@ from .cloud_candle_clock import render_candle_clock
 from .cloud_paper_visibility import cloud_paper_visibility, cloud_chart_gaps
 from .cloud_paper_test_status import status_for_owner
 from .raw_paper_chart import annotate_raw_forward, rows_for_journal
+from .paper_trade_trails import annotate_position_trails
 from .cloud_chart_visual import candle_price_window, candle_plot_style
 from .periodic_archive_ui import render_periodic_archive_ui
 
@@ -327,6 +328,11 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         wide_risk_scale=st.checkbox(
             "Uwzględnij pełne aktywne SL/TP w skali ceny (mniejsze świece)",
             value=False,key="cloud_chart_wide_risk_scale_"+choice)
+        show_trade_trails=st.checkbox(
+            "Rysuj przebieg zapisanych pozycji LONG/SHORT na świecach",
+            value=True,key="cloud_chart_trade_trails_"+choice,
+            help="Ścieżka z zamknięć rzeczywistych świec OHLC. "
+                 "Luki danych przerywają linię, nie odtwarzam ticków.")
     resolution=source_resolution(choice)
     render_candle_clock(choice)
     st.caption(
@@ -1014,6 +1020,19 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
                 f'<br>L: {m["low"]:.2f} C: {m["close"]:.2f}'
                 f'<br>Odczyt: {m["age_seconds"]} s'
                 '<extra></extra>')))
+    # Long/short position trails are read-only DISPLAY overlays backed by
+    # existing CLOSED candles and real v3/RAW/MOMENTUM PAPER journal rows.
+    # Render BELOW preserved OPEN/CLOSE markers (so markers stay clickable).
+    # Active quote overlay is verified from the existing 5-second Supabase
+    # quote source; it never becomes a completed bar or a paper fill.
+    trail_status={"drawn":0,"gaps":0,"samples":0,"available":0}
+    if show_trade_trails:
+        trail_status=annotate_position_trails(
+            candles,frame,payload,choice=choice,viewport=viewport,
+            max_positions=3,
+            live_quotes=(overlay.get("points",[]) if
+                         chart_mode=="BIEŻĄCE ŚWIECE" and overlay.get("visible")
+                         else None))
     # Exact OPEN/CLOSE PAPER from the checkpoint, NEVER watch markers or
     # signals inferred from OHLC. M1 PAPER may appear on the M15 time axis.
     annotate_paper_history(candles,chart_paper,
@@ -1063,6 +1082,28 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
                    "cena wejścia, SL, TP i wynik w punktach. "
                    "Domyślnie skala ceny obejmuje widoczne świece, a odległe "
                    "SL/TP możesz uwzględnić w ustawieniach wyglądu.")
+        if show_trade_trails:
+            if trail_status["drawn"]:
+                st.caption("🧵 ŚLAD POZYCJI: "+str(trail_status["drawn"])+
+                           " faktycznie zapisanych LONG/SHORT na tym wykresie. "
+                           "Zielone odcinki = dodatni ruch ceny od wejścia; "
+                           "czerwone = ujemny. Drobne linie ENTRY / SL / TP "
+                           "dotyczą tylko czasu danej pozycji. "
+                           "Przerywana końcówka CLOSE oznacza modelowany "
+                           "wyjściowy TP/SL, a żółta kropkowana końcówka "
+                           "to świeży MID z podglądu. "
+                           "Ślad to obserwowane zamknięcia świec "+choice+
+                           ", nie przebieg tick po ticku ani zlecenia brokera. "
+                           "Ostateczny wynik NETTO jest przy znaczniku CLOSE.")
+            elif trail_status["available"]:
+                st.caption("🧵 Pozycja jest w rejestrze, ale brak wystarczających "
+                           "zweryfikowanych, kolejnych zamkniętych świec "+choice+
+                           " do narysowania przebiegu. Nie dopowiadam ceny "
+                           "ani nie łączę luk sztuczną linią.")
+            else:
+                st.caption("🧵 W tym oknie czasowym nie ma zapisanej pozycji "
+                           "do prześledzenia. Wybierz „OSTATNIE OPEN RAW” "
+                           "lub „OSTATNIE CLOSE RAW”, aby obejrzeć historię.")
         st.plotly_chart(candles,use_container_width=True,
                         config={"scrollZoom":True,"displayModeBar":True,
                                 "modeBarButtonsToRemove":["lasso2d","select2d"],
