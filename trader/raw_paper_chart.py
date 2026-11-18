@@ -126,7 +126,8 @@ def rows_for_journal(report, limit=60):
     if (not isinstance(report,dict) or
             report.get("status")!="FORWARD_ONLY_RAW_M1_SIMULATION"):
         return []
-    positions=list(report.get("recent") or [])
+    positions=(list(report.get("recent") or [])+
+               list(report.get("invalidated_recent") or []))
     active=report.get("active")
     if isinstance(active,dict):
         positions.append(active)
@@ -134,14 +135,19 @@ def rows_for_journal(report, limit=60):
         x=_stamp(t)
         return x.tz_convert("Europe/Warsaw").strftime("%d.%m.%Y %H:%M") if x is not None else "—"
     out=[]
-    for p in reversed(positions[-limit:]):
+    positions.sort(key=lambda p:str(
+        p.get("invalidated_utc") or p.get("closed_utc") or
+        p.get("opened_utc") or p.get("setup_utc") or ""),
+        reverse=True)
+    for p in positions[:limit]:
         if not isinstance(p,dict):
             continue
         side=p.get("side")
         if side not in ("LONG","SHORT"):
             continue
         status=p.get("status")
-        is_open=status=="OPEN" or str(status).startswith("CLOSED_")
+        is_open=(status=="OPEN" or str(status).startswith("CLOSED_") or
+                 (status=="INVALIDATED" and p.get("previous_status")=="OPEN"))
         pnl=_num(p.get("pnl_pts"))
         out.append({
             "Kierunek":side,
@@ -151,6 +157,8 @@ def rows_for_journal(report, limit=60):
             "OPEN świecy (Polska)":local(p.get("entry_bar_open_utc")) if is_open else "—",
             "Potwierdzenie OPEN (Polska)":local(p.get("opened_utc")) if is_open else "—",
             "CLOSE (Polska)":local(p.get("closed_utc")),
+            "Unieważniono (Polska)":local(p.get("invalidated_utc")),
+            "Powód":p.get("invalidation_reason") or str(status),
             "Wejście (pkt)":_num(p.get("entry_mid")) if is_open else None,
             "SL":_num(p.get("stop")),
             "TP":_num(p.get("target")),
