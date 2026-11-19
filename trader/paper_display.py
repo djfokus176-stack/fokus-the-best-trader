@@ -37,15 +37,15 @@ def annotate_paper_history(fig, positions, epic, source, timeframe, max_rows=80)
     import plotly.graph_objects as go
 
     groups = {
-        "OPEN_LONG": {"name":"OTWARCIE LONG · symulacja",
+        "OPEN_LONG": {"name":"PAPER: otwarcie LONG",
                       "symbol":"triangle-up","color":"#3de59a"},
-        "OPEN_SHORT":{"name":"OTWARCIE SHORT · symulacja",
+        "OPEN_SHORT":{"name":"PAPER: otwarcie SHORT",
                       "symbol":"triangle-down","color":"#ff425d"},
-        "CLOSED_GAIN":{"name":"ZAMKNIĘCIE + · symulacja",
+        "CLOSED_GAIN":{"name":"PAPER: zamknięcie +",
                        "symbol":"square","color":"#3de59a"},
-        "CLOSED_LOSS":{"name":"ZAMKNIĘCIE − · symulacja",
+        "CLOSED_LOSS":{"name":"PAPER: zamknięcie −",
                        "symbol":"square","color":"#ff6575"},
-        "CLOSED_FLAT":{"name":"ZAMKNIĘCIE 0 · symulacja",
+        "CLOSED_FLAT":{"name":"PAPER: zamknięcie 0 / brak wyniku",
                        "symbol":"square","color":"#a8b3c6"},
     }
     events={key:{"x":[],"y":[],"text":[]} for key in groups}
