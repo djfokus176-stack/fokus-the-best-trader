@@ -142,3 +142,16 @@ def test_ui_is_read_only_and_preserves_existing_live_voice_mechanism():
         assert "CapitalReadOnly(" not in s
         assert "remote.save(" not in s
         assert "session.post(" not in s
+
+
+def test_newest_event_still_visible_with_large_newest_first_checkpoint():
+    # dump_state() reads recent_events newest-first; the UI must not use
+    # events[-80:], which would pick the oldest and hide new alerts.
+    latest=event(unique="latest",created="2026-11-19T13:00:00+00:00")
+    historical=[
+        event(unique=f"old-{i}",created="2026-11-19T11:49:01+00:00")
+        for i in range(120)
+    ]
+    signals=verified_signal_rows(payload(events=[latest]+historical),limit=10)
+    assert signals[0]["event_id"]==latest["event_id"]
+    assert len(signals)==10
