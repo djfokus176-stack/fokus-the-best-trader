@@ -16,6 +16,8 @@ from .remote_checkpoint import RemoteCheckpoint, RemoteError
 from .paper_method_labels import method_attribution
 from .paper_display import annotate_open_paper, annotate_paper_history
 from .trade_time_labels import in_poland, open_time_details
+from .verified_signal_journal import playback_attempt_record, recent_playback_attempts
+from .verified_signal_journal_ui import render_signal_journal
 from .cloud_m15_live_overlay import (cloud_quote_overlay,m15_cache_due,
                                      closed_m15_lag)
 from .cloud_forming_m1 import assess_cloud_forming_m1
@@ -248,6 +250,13 @@ def render_cloud_paper_voice(remote, *, url):
         voice=st.session_state.get("paper_audio_mode")=="Głos ElevenLabs (nagrania MP3)"
         content,mime,used=alert_audio(last["kind"],last["side"],
                                      voice_enabled=voice)
+        # Browser-side attempt log ONLY: Streamlit cannot know whether
+        # Chrome actually played audio or a person heard it. Never claim
+        # delivery; do not replay historical events on arming listener.
+        if audio_event is not None:
+            attempt=playback_attempt_record(audio_event,used)
+            st.session_state["_fokus_voice_attempts_v1"]=recent_playback_attempts(
+                st.session_state.get("_fokus_voice_attempts_v1") or [],attempt)
         st.audio(content,format=mime,autoplay=audio_event is not None)
         if used!="VOICE" and voice:
             st.caption("Brak odpowiedniego nagrania MP3: odtwarzam ton zastępczy.")
@@ -714,6 +723,21 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
     st.caption("LONG/SHORT to wynik analizy, a nie zlecenie. OPEN i CLOSED "
                "pokazuję tylko z zapisanego rejestru PAPER.")
     render_cloud_paper_voice(remote,url=url)
+    # Durable verified worker events are displayed even when voice is OFF.
+    # Prefer the newer audio-poll checkpoint when available (max 8 sec);
+    # this does not create a position, signal or broker order.
+    journal_payload=payload
+    journal_cache=st.session_state.get("_fokus_cloud_voice_cache")
+    if (isinstance(journal_cache,dict)
+            and journal_cache.get("url")==url
+            and isinstance(journal_cache.get("payload"),dict)
+            and _parse_utc(journal_cache.get("read_utc")) is not None
+            and (pd.Timestamp.now(tz="UTC")-_parse_utc(
+                journal_cache["read_utc"])).total_seconds()<=12):
+        journal_payload=journal_cache["payload"]
+    render_signal_journal(
+        journal_payload,
+        attempts=st.session_state.get("_fokus_voice_attempts_v1") or [])
     # Real broker DEMO is a third distinct lane: broker-confirmed virtual
     # positions, not the existing OHLC PAPER simulation and never LIVE cash.
     st.markdown("##### 🏦 CAPITAL.COM DEMO — POZYCJE NA KONCIE TESTOWYM")
