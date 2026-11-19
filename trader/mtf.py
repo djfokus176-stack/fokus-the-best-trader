@@ -135,12 +135,45 @@ def timeframe_refresh_needed(snapshot, timeframe: str, *, elapsed: float,
 
 
 def fetch_all_timeframes(client, epic: str, max_spread: float=2.0, count: int=250):
-    """Four read-only candle queries; explicit per-timeframe error reporting."""
+    """Fetch four broker TFs; re-check old corrupt history without bypassing QC.
+
+    Capital /prices can return a long history containing crossed bid/ask bars.
+    A single bounded SHORTER REST re-read may recover an independently valid,
+    recent >=70-closed-candle tail. We never repair, interpolate, merge, or
+    synthesize candles. If the shorter snapshot fails ANY normal validator,
+    retain the original bad snapshot and let the worker block PAPER.
+    """
     from .market import FeedError
     snapshots, failures = {}, {}
     for tf in TIMEFRAMES:
         try:
-            snapshots[tf] = client.candles(epic, tf, count=count, max_spread=max_spread)
+            snapshot = client.candles(epic, tf, count=count,
+                                      max_spread=max_spread)
         except (FeedError, ValueError, TypeError) as exc:
             failures[tf] = str(exc)[:250]
+            continue
+        reason = str(getattr(snapshot, "reason", ""))
+        corrupt_history = ("DANE_WADLIWE" in reason
+                           or "odrzucono wadliwych rekordów" in reason)
+        if (count >= 100 and not snapshot.good and corrupt_history):
+            # Exactly one additional read; don't hammer the provider on
+            # spreads, stale prices, normal WAIT, network failures or 429s.
+            try:
+                clean = client.candles(epic, tf, count=96,
+                                       max_spread=max_spread)
+            except (FeedError, ValueError, TypeError):
+                clean = None
+            if (clean is not None and clean.good
+                    and clean.epic == snapshot.epic == epic
+                    and clean.source == snapshot.source
+                    and clean.resolution == snapshot.resolution == tf
+                    and clean.confirmed_utc is not None
+                    and (snapshot.confirmed_utc is None
+                         or clean.confirmed_utc >= snapshot.confirmed_utc)
+                    and len(clean.frame) >= 70):
+                # Preserve an explicit diagnostic: the longer vendor history
+                # was corrupt, even though a fresh short re-read passed QC.
+                clean.reason += " RECHECK_CLEAN_TAIL=96_AFTER_CORRUPT_HISTORY"
+                snapshot = clean
+        snapshots[tf] = snapshot
     return snapshots, failures
