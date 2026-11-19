@@ -55,13 +55,36 @@ def check_checkpoint_freshness(version,payload,*,now=None,max_age_minutes=DEFAUL
         status="STALE_CHECKPOINT"
     else:
         status="RECENT_CHECKPOINT"
-    # Not a claim that broker is operational or a candle is valid.
+    # A fresh heartbeat alone is NOT success when the worker has spent many
+    # consecutive scans failing its own market-data or configuration gates.
+    # New metadata is optional, so historical checkpoints remain readable.
+    quality=meta.get("scan_quality")
+    quality=quality if isinstance(quality,dict) else {}
+    scan_state=quality.get("state")
+    scan_state=(scan_state if scan_state in (
+        "OK","FAULT","MARKET_CLOSED","PAUSED_CONFIG","PAUSED_RISK",
+        "PAUSED_MACRO","PAUSED_OTHER") else "UNAVAILABLE")
+    scan_code=str(quality.get("code","UNKNOWN"))
+    if not (scan_code.isascii() and scan_code.replace("_","").isalnum()
+            and scan_code.isupper() and len(scan_code)<=48):
+        scan_code="UNKNOWN"
+    streak=quality.get("consecutive_fault_scans",0)
+    if type(streak) is not int or not 0<=streak<=1_000_000:
+        streak=0
+    if (status=="RECENT_CHECKPOINT" and scan_state=="FAULT"
+            and streak>=8):
+        status="PERSISTENT_SCAN_BLOCKER"
+    # Health means the checkpoint is recent and no prolonged system fault
+    # is observed; it NEVER authorizes a trade, spread or candle.
     return {
         "status":status,
         "healthy":status=="RECENT_CHECKPOINT",
         "checkpoint_version":version,
         "last_scan_utc":last.isoformat(),
         "age_seconds":round(age_s,1),
+        "scan_state":scan_state,
+        "scan_code":scan_code,
+        "consecutive_fault_scans":streak,
         "market_data_validated":False,
         "paper_entries_authorized":False,
     }
@@ -86,6 +109,9 @@ def main(argv=None):
           " / VERSION="+str(result["checkpoint_version"])+
           " / AGE_SECONDS="+str(result["age_seconds"])+
           " / LAST_SCAN_UTC="+result["last_scan_utc"]+
+          " / SCAN_STATE="+result["scan_state"]+
+          " / SCAN_CODE="+result["scan_code"]+
+          " / FAULT_STREAK="+str(result["consecutive_fault_scans"])+
           " / MARKET_DATA_VALIDATED=false / PAPER_ENTRIES_AUTHORIZED=false",
           flush=True)
     return 0 if result["healthy"] else 1
