@@ -15,6 +15,7 @@ import streamlit as st
 from .remote_checkpoint import RemoteCheckpoint, RemoteError
 from .paper_method_labels import method_attribution
 from .paper_display import annotate_open_paper, annotate_paper_history
+from .trade_time_labels import in_poland, open_time_details
 from .cloud_m15_live_overlay import (cloud_quote_overlay,m15_cache_due,
                                      closed_m15_lag)
 from .cloud_forming_m1 import assess_cloud_forming_m1
@@ -178,7 +179,10 @@ def render_cloud_paper_voice(remote, *, url):
     Works only while the page is open and the owner has opted in via the
     existing sidebar. No browser broker session and no additional trade scan.
     """
-    st.markdown("##### 🔊 GŁOSY CLOUD PAPER — OTWARCIA I ZAMKNIĘCIA")
+    st.markdown("##### 🔊 KOMUNIKATY: OTWARCIE LONG / OTWARCIE SHORT / ZAMKNIĘCIE")
+    st.caption("Głos działa po włączeniu dźwięków w panelu po lewej, "
+               "przy otwartej karcie przeglądarki i zgodzie na odtwarzanie. "
+               "Są to tylko zweryfikowane zdarzenia symulowanego AUTO PAPER v3.")
     enabled=bool(st.session_state.get("paper_audio_enabled",False))
     if not enabled:
         st.session_state["_fokus_cloud_voice_was_enabled"]=False
@@ -232,9 +236,13 @@ def render_cloud_paper_voice(remote, *, url):
                 "potwierdzonym zdarzeniu PAPER_OPEN w archiwum.")
     if audio_event is not None:
         st.session_state["_fokus_cloud_voice_last"]=audio_event
-        st.success("🔔 "+SOUND_EVENTS[audio_event["kind"]]+
-                   " • "+audio_event["side"]+
-                   " • PAPER, nie rzeczywista transakcja.")
+        spoken_label=(
+            "OTWARCIE "+audio_event["side"]
+            if audio_event["kind"]=="PAPER_OPEN"
+            else SOUND_EVENTS[audio_event["kind"]]+
+                 " "+audio_event["side"])
+        st.success("🔔 "+spoken_label+
+                   " • WYŁĄCZNIE SYMULACJA, nie zlecenie brokera.")
     last=st.session_state.get("_fokus_cloud_voice_last")
     if last is not None and last.get("kind") in SOUND_EVENTS:
         voice=st.session_state.get("paper_audio_mode")=="Głos ElevenLabs (nagrania MP3)"
@@ -972,17 +980,26 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         if active:
             origin=method_attribution(active)
             st.info(
-                "🧪 POZYCJA PAPER "+str(active["status"])+" | "+
-                str(active["side"])+" | "+origin["label"]+
+                "🧪 "+("OTWARCIE " if active["status"]=="OPEN" else "OCZEKIWANIE ")+
+                str(active["side"])+
+                " ("+str(active["status"])+") | "+origin["label"]+
+                " | POTWIERDZENIE (Polska): "+
+                open_time_details(active)["confirmed_pl"]+
+                " | WEJŚCIE MODELOWE (Polska): "+
+                open_time_details(active)["model_pl"]+
                 " | TF="+str(active.get("timeframe","BRAK"))+
                 " | ID="+str(active.get("trade_id","BRAK"))[:10]+
-                " — symulacja odtwarzana ze świec, bez zlecenia Capital.com.")
+                " — wyłącznie symulacja, bez zlecenia Capital.com.")
         st.markdown("##### 📋 OSTATNIE POZYCJE PAPER — TRYB I METODA")
         st.dataframe(pd.DataFrame([{
             "Kierunek":p["side"],"Status":p["status"],
             "Tryb":method_attribution(p)["mode"],
             "Metoda":method_attribution(p)["method"],
             "Interwał":str(p.get("timeframe","BRAK")),
+            "OPEN modelowe (Polska)":open_time_details(p)["model_pl"],
+            "OPEN potwierdzone (Polska)":open_time_details(p)["confirmed_pl"],
+            "Wykrycie przez worker (Polska)":open_time_details(p)["detected_pl"],
+            "CLOSE (Polska)":in_poland(p.get("closed_utc")),
             "Czas OPEN UTC":str(p.get("opened_utc") or "BRAK"),
             "Wynik pkt":p.get("pnl_pts"),
             "ID":str(p.get("trade_id","BRAK"))[:12],

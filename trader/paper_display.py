@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .paper_method_labels import method_attribution
+from .trade_time_labels import in_poland, open_time_details
 
 def annotate_open_paper(fig, position):
     """OPEN only: draw separate MID reference and modeled executable fill."""
@@ -72,12 +73,18 @@ def annotate_paper_history(fig, positions, epic, source, timeframe, max_rows=80)
                 group=events["OPEN_"+side]
                 group["x"].append(when)
                 group["y"].append(price)
+                times=open_time_details(pos)
                 group["text"].append(
-                    f"OTWARCIE PAPER {side}<br>Wybrana strategia: {strategy}"
+                    f"OTWARCIE {side} — SYMULACJA"
+                    f"<br>Strategia: {strategy}"
                     f"<br>Interwał pozycji: {pos_tf}"
-                    f"<br>ID: {trade_id}<br>Świeca UTC: {when}"
-                    f"<br>Wejście MID: {price:.2f}<br>"
-                    "Odtworzone z zamkniętej świecy, nie zlecenie brokera")
+                    f"<br>Godzina modelowanego wejścia (Polska): {times['model_pl']}"
+                    f"<br>Godzina potwierdzenia M1 (Polska): {times['confirmed_pl']}"
+                    f"<br>Godzina zapisu przez worker (Polska): {times['detected_pl']}"
+                    f"<br>Świeca UTC: {when}"
+                    f"<br>Wejście MID: {price:.2f} pkt"
+                    f"<br>ID: {trade_id}"
+                    "<br>Wirtualne wejście z OHLC; nie zlecenie brokera.")
         status=str(pos.get("status",""))
         if (status not in ("CLOSED_TP","CLOSED_SL","CLOSED_TIMEOUT")
                 or not pos.get("closed_utc") or pos.get("exit_mid") is None):
@@ -98,11 +105,14 @@ def annotate_paper_history(fig, positions, epic, source, timeframe, max_rows=80)
         group["y"].append(price)
         result=(f"{pnl:+.2f} pkt" if pnl is not None else "BRAK P&L")
         group["text"].append(
-            f"ZAMKNIĘCIE PAPER {side}<br>Wybrana strategia: {strategy}"
+            f"ZAMKNIĘCIE {side} — SYMULACJA"
+            f"<br>Strategia: {strategy}"
             f"<br>Interwał pozycji: {pos_tf}"
+            f"<br>Godzina zamknięcia (Polska): {in_poland(pos.get('closed_utc'))}"
             f"<br>ID: {trade_id}<br>Status: {escape(status)}"
-            f"<br>Wynik po kosztach: {result}<br>"
-            f"Świeca UTC: {when}<br>Wyjście MID: {price:.2f}")
+            f"<br>Wynik netto po kosztach: {result}"
+            f"<br>Świeca UTC: {when}<br>Wyjście MID: {price:.2f} pkt"
+            "<br>Rozliczenie modelowe; nie broker.")
     for name,style in groups.items():
         e=events[name]
         if not e["x"]:

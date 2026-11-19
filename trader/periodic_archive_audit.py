@@ -58,23 +58,38 @@ def _valid_trade(row,lane,now):
     if (not close or not opened or not setup or pnl is None
             or setup>opened or opened>close or close>now+timedelta(seconds=60)):
         return None
+    mode=None
     if lane=="PAPER v3":
         if (row.get("epic")!="US500" or row.get("source")!=SOURCE
                 or not isinstance(row.get("trade_id"),str)
                 or not row["trade_id"]):
             return None
         unique=row["trade_id"]
+        # Per-position strategy provenance, never a current UI selection.
+        from .paper_method_labels import method_attribution
+        attribution=method_attribution(row)
         method=str(row.get("strategy") or "BRAK METODY")
+        mode=("AUTO ZWERYFIKOWANE" if
+              str(attribution.get("label","")).startswith("AUTO → ")
+              else "TRYB NIEPOTWIERDZONY")
     else:
         unique=setup.isoformat()+"|"+row["side"]
         if lane=="RAW M1 TEST":
             methods=row.get("methods")
             method=(" + ".join(str(x) for x in methods[:4])
                     if isinstance(methods,list) and methods else "RAW M1")
+            mode="KOMBINACJA / RAW" if len(methods or [])>1 else "RAW"
         else:
             method=str(row.get("strategy") or "MOMENTUM_M1_TEST")
+            mode="MOMENTUM"
+    # A modelled first-bar open can precede the closed-candle OPEN label.
+    # Only store it when explicitly documented by this trade's ledger.
+    modeled=_utc(row.get("entry_assumed_utc") or row.get("entry_bar_open_utc"))
+    detected=_utc(row.get("entry_detected_utc"))
+    if modeled is not None and modeled>opened:
+        modeled=None
     digest=sha256((lane+"|"+unique).encode("utf8")).hexdigest()[:22]
-    return digest,{
+    entry={
         "l":lane,
         "t":close.isoformat(timespec="seconds"),
         "o":opened.isoformat(timespec="seconds"),
@@ -83,6 +98,16 @@ def _valid_trade(row,lane,now):
         "m":method[:MAX_METHOD_LENGTH],
         "e":str(row["status"])[7:],  # TP/SL/TIMEOUT
     }
+    # Most legacy rows have NO extra timestamps/provenance. Do not write
+    # thousands of null values: bounded Supabase audit must retain the same
+    # 3500-trade capacity and must never crowd out authoritative PAPER.
+    if modeled is not None:
+        entry["v"]=modeled.isoformat(timespec="seconds")
+    if detected is not None:
+        entry["d"]=detected.isoformat(timespec="seconds")
+    if mode and mode!="TRYB NIEPOTWIERDZONY":
+        entry["a"]=mode
+    return digest,entry
 
 
 def _extract(payload,now):
@@ -136,6 +161,14 @@ def advance_periodic_archive(previous,payload,*,now=None):
             continue
         if key not in rows:
             rows[key]=record
+        else:
+            # Enrich older compact archive records with VERIFIED provenance
+            # present in the original position, without rewriting P&L,
+            # direction, method, id or chronology.
+            prior=rows[key]
+            for attr in ("v","d","a"):
+                if record.get(attr) and not prior.get(attr):
+                    prior[attr]=record[attr]
 
     earliest=current-timedelta(days=MAX_DAYS)
     too_old=[(key,record) for key,record in rows.items()
@@ -328,7 +361,19 @@ def automatic_audit_report(archive,*,now=None):
     periods={kind:{
         lane:period_comparison(archive,lane,kind,now=current)
         for lane in LANES} for kind in ("day","week","month")}
+    from .strategy_archive_ranking import strategy_ranking
+    snapshot={
+        kind:{
+            lane:[{
+                "strategia":r["strategy"],"n":r["count"],
+                "netto_pkt":r["net_pts"],"srednio_pkt":r["avg_pts"],
+                "proba_wystarczajaca":r["sample_sufficient"],
+            } for r in strategy_ranking(archive,lane,kind,now=current)["rows"][:3]]
+            for lane in LANES
+        } for kind in ("day","week","month")
+    }
     return {
+        "strategy_rankings_top3":snapshot,
         "status":"ARCHIVE_AUDIT_PAPER_ONLY",
         "asof_utc":current.isoformat(timespec="seconds"),
         "timezone":"Europe/Warsaw",
@@ -362,6 +407,16 @@ def archive_day_trades(archive,day,*,lane=None):
             "ID":key[:10],
             "Tryb":r["l"],"Kierunek":r.get("s"),
             "Strategia":r.get("m"),
+            "Pochodzenie sygnału":r.get("a") or "BRAK UDOKUMENTOWANIA",
+            "OPEN modelowe (Polska)":(
+                _utc(r.get("v")).astimezone(WARSAW).strftime("%d.%m.%Y %H:%M:%S")
+                if _utc(r.get("v")) is not None else "BRAK ZAPISU"),
+            "Potwierdzenie OPEN (Polska)":(
+                op.astimezone(WARSAW).strftime("%d.%m.%Y %H:%M:%S")
+                if op is not None else "BRAK ZAPISU"),
+            "Wykrycie przez worker (Polska)":(
+                _utc(r.get("d")).astimezone(WARSAW).strftime("%d.%m.%Y %H:%M:%S")
+                if _utc(r.get("d")) is not None else "BRAK ZAPISU"),
             "OPEN (Polska)":op.astimezone(WARSAW).strftime("%d.%m %H:%M") if op else "—",
             "CLOSE (Polska)":ts.astimezone(WARSAW).strftime("%d.%m %H:%M"),
             "Powód zamknięcia":r.get("e"),

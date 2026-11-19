@@ -398,12 +398,12 @@ with st.sidebar:
                    'bieżącą świecę /prices, ale nie wykorzystuje jej do sygnałów. '
                    'Licznik udanych odczytów pod wykresem pozwala odróżnić '
                    'brak aktualizacji od nieruchomej ceny brokera.')
-    st.toggle('🔔 DŹWIĘKI PAPER: otwarcie / TP / SL / timeout',
+    st.toggle('🔔 MÓW: OTWARCIE LONG / OTWARCIE SHORT / ZAMKNIĘCIE',
         value=False,key='paper_audio_enabled',
-        help='Wymaga interakcji z przeglądarką. Dźwięk dotyczy tylko nowych '
+        help='Wymaga otwartej karty i interakcji z przeglądarką. Dźwięk dotyczy tylko nowych '
              'zdarzeń potwierdzonych w archiwum PAPER; przeglądarka może go zablokować. '
              'Nie oznacza rzeczywistych transakcji.')
-    st.radio('🎙️ Rodzaj alertów PAPER',('Głos ElevenLabs (nagrania MP3)','Tony'),
+    st.radio('🎙️ Rodzaj komunikatów',('Głos ElevenLabs (nagrania MP3)','Tony'),
         horizontal=True,key='paper_audio_mode',
         help='Własne krótkie pliki MP3 z assets/voices w repozytorium. '
              'Bez dodatkowych zapytań do ElevenLabs; brakujący klip zastępuje ton.')
