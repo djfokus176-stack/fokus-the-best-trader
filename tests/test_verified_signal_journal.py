@@ -40,7 +40,7 @@ def payload(status="CLOSED_TP",side="LONG",events=None):
         "meta":{"source":SOURCE,"epic":"US500"},
         "tables":{
             "paper_positions_v3":positions(status,side),
-            "paper_events_v3":list(events or []),
+            "paper_events_v3":[dict(e) for e in (events or [])],
         },
     }
 
