@@ -82,5 +82,5 @@ def advance_scan_quality(message: str, previous=None, *, now=None) -> dict:
         "persistent_fault": bool(streak >= PERSISTENT_FAULT_SCANS),
         "fault_since_utc": start or at if is_fault else None,
         "checked_utc": at,
-        "market_data_validated": bool(state == "OK"),
+        "scan_gates_clear": bool(state == "OK"),
     }
