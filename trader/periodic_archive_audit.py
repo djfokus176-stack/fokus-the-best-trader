@@ -89,7 +89,7 @@ def _valid_trade(row,lane,now):
     if modeled is not None and modeled>opened:
         modeled=None
     digest=sha256((lane+"|"+unique).encode("utf8")).hexdigest()[:22]
-    return digest,{
+    entry={
         "l":lane,
         "t":close.isoformat(timespec="seconds"),
         "o":opened.isoformat(timespec="seconds"),
@@ -97,10 +97,17 @@ def _valid_trade(row,lane,now):
         "s":row["side"],
         "m":method[:MAX_METHOD_LENGTH],
         "e":str(row["status"])[7:],  # TP/SL/TIMEOUT
-        "v":modeled.isoformat(timespec="seconds") if modeled else None,
-        "d":detected.isoformat(timespec="seconds") if detected else None,
-        "a":mode,
     }
+    # Most legacy rows have NO extra timestamps/provenance. Do not write
+    # thousands of null values: bounded Supabase audit must retain the same
+    # 3500-trade capacity and must never crowd out authoritative PAPER.
+    if modeled is not None:
+        entry["v"]=modeled.isoformat(timespec="seconds")
+    if detected is not None:
+        entry["d"]=detected.isoformat(timespec="seconds")
+    if mode and mode!="TRYB NIEPOTWIERDZONY":
+        entry["a"]=mode
+    return digest,entry
 
 
 def _extract(payload,now):
