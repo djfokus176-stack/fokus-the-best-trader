@@ -38,6 +38,7 @@ from .manual_paper_chart import annotate_manual_test
 from .manual_paper_status_ui import manual_status_panel
 from .cloud_chart_visual import candle_price_window, candle_plot_style
 from .periodic_archive_ui import render_periodic_archive_ui
+from .auto_sim_journal_ui import render_auto_sim_journal
 
 
 def _parse_utc(value):
@@ -439,151 +440,155 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
     y.metric("Zapisane "+choice,str(audit["bars"]))
     z.metric("Wiek checkpointu",str(audit["age_minutes"])+" min"
              if audit["age_minutes"] is not None else "BRAK")
-    # Show status of the independent PAPER TEST near the very TOP of TERMINAL.
-    # A browser user no longer has to scroll past charts and brokerage DEMO
-    # instructions to learn whether the worker has actually opened anything.
-    owner_test=status_for_owner(payload)
-    st.markdown("##### 🧪 AUTOMATYCZNY PAPER TEST — CZY BOT COŚ OTWORZYŁ?")
-    summary=(owner_test["title"]+" | "+
-             "SETUPY="+str(owner_test["started"] if owner_test["started"] is not None else "BRAK")+
-             " | OPEN="+str(owner_test["opened"] if owner_test["opened"] is not None else "BRAK")+
-             " | CLOSED="+str(owner_test["closed"] if owner_test["closed"] is not None else "BRAK")+
-             " | ostatnia M1 UTC="+str(owner_test["last_candle_utc"] or "BRAK"))
-    if owner_test["kind"]=="OPEN":
-        st.success(summary)
-    elif owner_test["kind"] in ("NO_APPROVAL","STALE","NOT_STARTED"):
-        st.warning(summary)
-    else:
-        st.info(summary)
-    st.caption("Dlaczego teraz nie ma nowego wejścia: "+owner_test["detail"]+
-               ". TEST to wirtualne wejścia zapisane przez worker, "
-               "NIE Capital.com DEMO i NIE wczesny znacznik OBSERWUJ.")
-    # OWNER ONLY: buttons write exactly one VIRTUAL intent to Supabase
-    # with optimistic CAS, never send orders to Capital (DEMO or LIVE).
-    manual_trial=payload.get("manual_paper_test_report") or {}
-    st.markdown("##### 🎮 RĘCZNY TEST BOTa — LONG / SHORT (TYLKO PAPER)")
-    st.caption("Wybierasz kierunek, worker Northflank czeka na ŚWIEŻĄ "
-               "zweryfikowaną zamkniętą M1, a następna M1 potwierdza "
-               "wirtualne wejście. Potem automatycznie SL / TP lub "
-               "TIMEOUT po maks. 5 poprawnie odebranych świecach M1. "
-               "Nie wysyła zleceń na Capital.com. "
-               "Nie omija kontroli danych i statusu rynku. "
-               "Przy nieświeżym BID/ASK nie obiecuję wejścia od razu.")
-    one,two=st.columns(2)
-    click_long=one.button(
-        "🟢 TESTUJ LONG — OTWÓRZ WIRTUALNIE",type="primary",
-        key="owner_force_paper_long_v1",use_container_width=True)
-    click_short=two.button(
-        "🔴 TESTUJ SHORT — OTWÓRZ WIRTUALNIE",
-        key="owner_force_paper_short_v1",use_container_width=True)
-    clicked_side="LONG" if click_long else "SHORT" if click_short else None
-    if clicked_side:
-        try:
-            outcome=queue_manual_request(remote,clicked_side)
-            st.session_state["_manual_paper_owner_feedback"]=outcome
-            if outcome.get("status")=="QUEUED":
-                st.session_state.pop("_fokus_cloud_chart_cache_v3",None)
-                st.rerun()
-        except (RemoteError,ValueError,TypeError,KeyError,OverflowError,OSError):
-            st.session_state["_manual_paper_owner_feedback"]={
-                "status":"SUPABASE_WRITE_FAILED"}
-    feedback=st.session_state.get("_manual_paper_owner_feedback")
-    if isinstance(feedback,dict):
-        if feedback.get("status")=="QUEUED":
-            st.success("✅ Zlecono test "+str(feedback.get("side"))+
-                       ". PENDING to jeszcze NIE OPEN. Worker sam "
-                       "zweryfikuje następne świece i rozliczy wynik.")
+    # Main owner view: actual durable AUTO simulated OPEN/CLOSE, before
+    # the separate optional research test lanes and technical diagnostics.
+    render_auto_sim_journal(payload)
+    with st.expander("🧪 Eksperymenty, ręczny test i diagnostyka (opcjonalnie)", expanded=False):
+        # Show status of the independent PAPER TEST near the very TOP of TERMINAL.
+        # A browser user no longer has to scroll past charts and brokerage DEMO
+        # instructions to learn whether the worker has actually opened anything.
+        owner_test=status_for_owner(payload)
+        st.markdown("##### 🧪 AUTOMATYCZNY PAPER TEST — CZY BOT COŚ OTWORZYŁ?")
+        summary=(owner_test["title"]+" | "+
+                 "SETUPY="+str(owner_test["started"] if owner_test["started"] is not None else "BRAK")+
+                 " | OPEN="+str(owner_test["opened"] if owner_test["opened"] is not None else "BRAK")+
+                 " | CLOSED="+str(owner_test["closed"] if owner_test["closed"] is not None else "BRAK")+
+                 " | ostatnia M1 UTC="+str(owner_test["last_candle_utc"] or "BRAK"))
+        if owner_test["kind"]=="OPEN":
+            st.success(summary)
+        elif owner_test["kind"] in ("NO_APPROVAL","STALE","NOT_STARTED"):
+            st.warning(summary)
         else:
-            st.warning("Nie uruchomiono nowej pozycji testowej: "+
-                       str(feedback.get("status","UNKNOWN"))+
-                       ". Sprawdź, czy Northflank pracuje na M1 AUTO, "
-                       "czy poprzedni test się zakończył oraz czy "
-                       "ostatni checkpoint jest świeży.")
-    # Independent read-only 12s status refresh; only actual state
-    # transitions refresh the original full-screen candle chart.
-    manual_status_panel(remote)
-    if st.button("🔄 ODŚWIEŻ CAŁY WYKRES I STATUS TESTU",
-                 key="manual_paper_refresh_full_chart_v1",
-                 use_container_width=True):
-        st.session_state.pop("_fokus_cloud_chart_cache_v3",None)
-        st.rerun()
-    raw_trial=payload.get("raw_m1_forward_paper_report") or {}
-    st.markdown("##### ⚡ AUTO RAW PAPER — TESTOWE WEJŚCIA LONG/SHORT BEZ KIERUNKOWEGO VETO MTF")
-    if raw_trial.get("status")=="FORWARD_ONLY_RAW_M1_SIMULATION":
-        ra,rb,rc,rd=st.columns(4)
-        ra.metric("RAW: zatwierdzone",raw_trial.get("started",0))
-        rb.metric("RAW: OPEN",raw_trial.get("opened",0))
-        rc.metric("RAW: CLOSED",raw_trial.get("closed",0))
-        rd.metric("RAW: wynik netto",str(raw_trial.get("pnl_pts",0))+" pkt")
-        # Historical total OPEN is NOT the number of simultaneous positions.
-        in_market=int(raw_trial.get("active_open_now",0) or 0)
-        last_at=_parse_utc(raw_trial.get("last_documented_open_utc"))
-        last_side=str(raw_trial.get("last_documented_open_side") or "BRAK")
-        last_local=(last_at.tz_convert("Europe/Warsaw").strftime(
-            "%d.%m.%Y %H:%M") if last_at is not None else "BRAK")
-        if in_market:
-            st.success("🟢 AKTYWNA TERAZ: "+str(in_market)+
-                       " wirtualna pozycja RAW. Ostatnie potwierdzone OPEN: "+
-                       last_side+" o "+last_local+" (Polska).")
-        else:
-            st.warning("⚪ AKTYWNE TERAZ: 0 | ostatnie UDOKUMENTOWANE OPEN: "+
-                       last_side+" o "+last_local+" (Polska). "+
-                       "Historyczny licznik OPEN="+str(raw_trial.get("opened",0))+
-                       " nie oznacza aktywnego handlu w tej chwili.")
-        gaps_open=int(raw_trial.get("invalidated_after_open",0) or 0)
-        gaps_pending=int(raw_trial.get("invalidated_before_open",0) or 0)
-        unknown=int(raw_trial.get("unreconciled_historical_open",0) or 0)
-        if gaps_open or gaps_pending:
-            st.warning("⚠️ RAW: unieważnione po OPEN: "+str(gaps_open)+
-                       " | unieważnione przed OPEN: "+str(gaps_pending)+
-                       ". Przyczyny i godziny są w dzienniku niżej. "+
-                       "Brak wiarygodnego wyjścia = brak P&L, nigdy zero.")
-        if unknown:
-            st.error("⚠️ RAW: "+str(unknown)+
-                     " wcześniejszych otwarć nie ma udokumentowanego "+
-                     "zamknięcia ani historii unieważnienia. Mogły zniknąć "+
-                     "przez luki M1 w starszym kodzie. Nie wliczam ich "+
-                     "do wyniku, nie udaję, że zakończyły się TP/SL.")
-        rp=raw_trial.get("active")
-        if isinstance(rp,dict):
-            direction=str(rp.get("side","?"))
-            state=str(rp.get("status","?"))
-            txt=("🧪 RAW "+state+" "+direction+" | sygnał UTC "+
-                 str(rp.get("setup_utc"))+" | cena planu "+
-                 str(rp.get("entry_signal"))+" | SL "+str(rp.get("stop"))+
-                 " | TP "+str(rp.get("target"))+
-                 " | strategie "+", ".join(rp.get("methods") or [])+
-                 " | OPEN potwierdzony dopiero na kolejnej zamkniętej świecy.")
-            if state=="OPEN":
-                st.success(txt)
+            st.info(summary)
+        st.caption("Dlaczego teraz nie ma nowego wejścia: "+owner_test["detail"]+
+                   ". TEST to wirtualne wejścia zapisane przez worker, "
+                   "NIE Capital.com DEMO i NIE wczesny znacznik OBSERWUJ.")
+        # OWNER ONLY: buttons write exactly one VIRTUAL intent to Supabase
+        # with optimistic CAS, never send orders to Capital (DEMO or LIVE).
+        manual_trial=payload.get("manual_paper_test_report") or {}
+        st.markdown("##### 🎮 RĘCZNY TEST BOTa — LONG / SHORT (TYLKO PAPER)")
+        st.caption("Wybierasz kierunek, worker Northflank czeka na ŚWIEŻĄ "
+                   "zweryfikowaną zamkniętą M1, a następna M1 potwierdza "
+                   "wirtualne wejście. Potem automatycznie SL / TP lub "
+                   "TIMEOUT po maks. 5 poprawnie odebranych świecach M1. "
+                   "Nie wysyła zleceń na Capital.com. "
+                   "Nie omija kontroli danych i statusu rynku. "
+                   "Przy nieświeżym BID/ASK nie obiecuję wejścia od razu.")
+        one,two=st.columns(2)
+        click_long=one.button(
+            "🟢 TESTUJ LONG — OTWÓRZ WIRTUALNIE",type="primary",
+            key="owner_force_paper_long_v1",use_container_width=True)
+        click_short=two.button(
+            "🔴 TESTUJ SHORT — OTWÓRZ WIRTUALNIE",
+            key="owner_force_paper_short_v1",use_container_width=True)
+        clicked_side="LONG" if click_long else "SHORT" if click_short else None
+        if clicked_side:
+            try:
+                outcome=queue_manual_request(remote,clicked_side)
+                st.session_state["_manual_paper_owner_feedback"]=outcome
+                if outcome.get("status")=="QUEUED":
+                    st.session_state.pop("_fokus_cloud_chart_cache_v3",None)
+                    st.rerun()
+            except (RemoteError,ValueError,TypeError,KeyError,OverflowError,OSError):
+                st.session_state["_manual_paper_owner_feedback"]={
+                    "status":"SUPABASE_WRITE_FAILED"}
+        feedback=st.session_state.get("_manual_paper_owner_feedback")
+        if isinstance(feedback,dict):
+            if feedback.get("status")=="QUEUED":
+                st.success("✅ Zlecono test "+str(feedback.get("side"))+
+                           ". PENDING to jeszcze NIE OPEN. Worker sam "
+                           "zweryfikuje następne świece i rozliczy wynik.")
             else:
-                st.info(txt+" PENDING nie oznacza wejścia.")
+                st.warning("Nie uruchomiono nowej pozycji testowej: "+
+                           str(feedback.get("status","UNKNOWN"))+
+                           ". Sprawdź, czy Northflank pracuje na M1 AUTO, "
+                           "czy poprzedni test się zakończył oraz czy "
+                           "ostatni checkpoint jest świeży.")
+        # Independent read-only 12s status refresh; only actual state
+        # transitions refresh the original full-screen candle chart.
+        manual_status_panel(remote)
+        if st.button("🔄 ODŚWIEŻ CAŁY WYKRES I STATUS TESTU",
+                     key="manual_paper_refresh_full_chart_v1",
+                     use_container_width=True):
+            st.session_state.pop("_fokus_cloud_chart_cache_v3",None)
+            st.rerun()
+        raw_trial=payload.get("raw_m1_forward_paper_report") or {}
+        st.markdown("##### ⚡ AUTO RAW PAPER — TESTOWE WEJŚCIA LONG/SHORT BEZ KIERUNKOWEGO VETO MTF")
+        if raw_trial.get("status")=="FORWARD_ONLY_RAW_M1_SIMULATION":
+            ra,rb,rc,rd=st.columns(4)
+            ra.metric("RAW: zatwierdzone",raw_trial.get("started",0))
+            rb.metric("RAW: OPEN",raw_trial.get("opened",0))
+            rc.metric("RAW: CLOSED",raw_trial.get("closed",0))
+            rd.metric("RAW: wynik netto",str(raw_trial.get("pnl_pts",0))+" pkt")
+            # Historical total OPEN is NOT the number of simultaneous positions.
+            in_market=int(raw_trial.get("active_open_now",0) or 0)
+            last_at=_parse_utc(raw_trial.get("last_documented_open_utc"))
+            last_side=str(raw_trial.get("last_documented_open_side") or "BRAK")
+            last_local=(last_at.tz_convert("Europe/Warsaw").strftime(
+                "%d.%m.%Y %H:%M") if last_at is not None else "BRAK")
+            if in_market:
+                st.success("🟢 AKTYWNA TERAZ: "+str(in_market)+
+                           " wirtualna pozycja RAW. Ostatnie potwierdzone OPEN: "+
+                           last_side+" o "+last_local+" (Polska).")
+            else:
+                st.warning("⚪ AKTYWNE TERAZ: 0 | ostatnie UDOKUMENTOWANE OPEN: "+
+                           last_side+" o "+last_local+" (Polska). "+
+                           "Historyczny licznik OPEN="+str(raw_trial.get("opened",0))+
+                           " nie oznacza aktywnego handlu w tej chwili.")
+            gaps_open=int(raw_trial.get("invalidated_after_open",0) or 0)
+            gaps_pending=int(raw_trial.get("invalidated_before_open",0) or 0)
+            unknown=int(raw_trial.get("unreconciled_historical_open",0) or 0)
+            if gaps_open or gaps_pending:
+                st.warning("⚠️ RAW: unieważnione po OPEN: "+str(gaps_open)+
+                           " | unieważnione przed OPEN: "+str(gaps_pending)+
+                           ". Przyczyny i godziny są w dzienniku niżej. "+
+                           "Brak wiarygodnego wyjścia = brak P&L, nigdy zero.")
+            if unknown:
+                st.error("⚠️ RAW: "+str(unknown)+
+                         " wcześniejszych otwarć nie ma udokumentowanego "+
+                         "zamknięcia ani historii unieważnienia. Mogły zniknąć "+
+                         "przez luki M1 w starszym kodzie. Nie wliczam ich "+
+                         "do wyniku, nie udaję, że zakończyły się TP/SL.")
+            rp=raw_trial.get("active")
+            if isinstance(rp,dict):
+                direction=str(rp.get("side","?"))
+                state=str(rp.get("status","?"))
+                txt=("🧪 RAW "+state+" "+direction+" | sygnał UTC "+
+                     str(rp.get("setup_utc"))+" | cena planu "+
+                     str(rp.get("entry_signal"))+" | SL "+str(rp.get("stop"))+
+                     " | TP "+str(rp.get("target"))+
+                     " | strategie "+", ".join(rp.get("methods") or [])+
+                     " | OPEN potwierdzony dopiero na kolejnej zamkniętej świecy.")
+                if state=="OPEN":
+                    st.success(txt)
+                else:
+                    st.info(txt+" PENDING nie oznacza wejścia.")
+            else:
+                why=str(raw_trial.get("last_reason","BRAK"))
+                explanation=(
+                    "Przerwa w kolejności świec M1 — nie wolno "
+                    "odtwarzać wejścia ani wyniku z niepełnych danych."
+                    if why=="LUKA_SWIEC_RAW_BEZ_FILL" else
+                    "Nie ma nowego surowego sygnału LONG/SHORT."
+                    if why=="BRAK_SUROWEGO_LONG_SHORT" else
+                    "Limit dzienny: maksymalnie 12 testowych setupów RAW."
+                    if why=="MAX_12_RAW_DZIENNIE" else
+                    "Oczekiwanie 2 min po ostatnim zamknięciu/utracie danych."
+                    if why=="COOLDOWN_RAW_2_MIN" else why
+                )
+                st.info("RAW: obecnie BRAK otwartej pozycji. "+
+                        "Dlaczego nie ma wejścia: "+explanation+
+                        " | ostatnia zamknięta M1 UTC "+
+                        str(raw_trial.get("last_candle_utc","BRAK")))
+            st.caption("RAW = prawdziwy surowy sygnał strategii M1, "+
+                       "osobna symulacja forward, bez kierunkowego filtra MTF. "+
+                       "Wymagane globalne GATES, świeże dane, spread i limity. "+
+                       "Nie jest to prawdziwe zlecenie; wyników nie mieszam "+
+                       "z oryginalnym AUTO PAPER.")
         else:
-            why=str(raw_trial.get("last_reason","BRAK"))
-            explanation=(
-                "Przerwa w kolejności świec M1 — nie wolno "
-                "odtwarzać wejścia ani wyniku z niepełnych danych."
-                if why=="LUKA_SWIEC_RAW_BEZ_FILL" else
-                "Nie ma nowego surowego sygnału LONG/SHORT."
-                if why=="BRAK_SUROWEGO_LONG_SHORT" else
-                "Limit dzienny: maksymalnie 12 testowych setupów RAW."
-                if why=="MAX_12_RAW_DZIENNIE" else
-                "Oczekiwanie 2 min po ostatnim zamknięciu/utracie danych."
-                if why=="COOLDOWN_RAW_2_MIN" else why
-            )
-            st.info("RAW: obecnie BRAK otwartej pozycji. "+
-                    "Dlaczego nie ma wejścia: "+explanation+
-                    " | ostatnia zamknięta M1 UTC "+
-                    str(raw_trial.get("last_candle_utc","BRAK")))
-        st.caption("RAW = prawdziwy surowy sygnał strategii M1, "+
-                   "osobna symulacja forward, bez kierunkowego filtra MTF. "+
-                   "Wymagane globalne GATES, świeże dane, spread i limity. "+
-                   "Nie jest to prawdziwe zlecenie; wyników nie mieszam "+
-                   "z oryginalnym AUTO PAPER.")
-    else:
-        st.warning("RAW PAPER TEST nie ma jeszcze raportu z pracującego "+
-                   "workera M1 AUTO. Dopóki nie zapisze nowego checkpointu, "+
-                   "nie deklaruję otwarcia żadnej transakcji.")
+            st.warning("RAW PAPER TEST nie ma jeszcze raportu z pracującego "+
+                       "workera M1 AUTO. Dopóki nie zapisze nowego checkpointu, "+
+                       "nie deklaruję otwarcia żadnej transakcji.")
     # Keep the real candle chart and trade journal ABOVE strategy radar.
     # They are populated below using the same verified cloud checkpoint;
     # the placeholders preserve their visual location in Streamlit.
@@ -738,96 +743,97 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
     render_signal_journal(
         journal_payload,
         attempts=st.session_state.get("_fokus_voice_attempts_v1") or [])
-    # Real broker DEMO is a third distinct lane: broker-confirmed virtual
-    # positions, not the existing OHLC PAPER simulation and never LIVE cash.
-    st.markdown("##### 🏦 CAPITAL.COM DEMO — POZYCJE NA KONCIE TESTOWYM")
-    demo=payload.get("capital_demo_broker")
-    if not isinstance(demo,dict):
-        st.caption("Wysyłanie zleceń na Capital.com DEMO jest domyślnie "
-                   "WYŁĄCZONE. Wewnętrzny PAPER TEST działa oddzielnie. "
-                   "Aby uzbroić zlecenia BROKERA DEMO, właściciel musi "
-                   "najpierw ustawić w Northflank trzy wartości: "
-                   "FOKUS_DEMO_BROKER_MODE=DEMO_ONLY_CONFIRMED, "
-                   "FOKUS_DEMO_BROKER_ACCOUNT_ID (identyfikator konta DEMO) "
-                   "oraz FOKUS_DEMO_BROKER_SIZE (wielkość pozycji). "
-                   "Nie wpisuj numeru konta ani kluczy API w czacie.")
-    else:
-        state=str(demo.get("status","UNKNOWN"))
-        if state=="ACCEPTED":
-            st.success("🏦 BROKER DEMO: zlecenie potwierdzone przez "
-                       "Capital.com — pozycja na koncie WIRTUALNYM.")
-        elif state in ("ATTEMPTED","UNRESOLVED","CONFIRM_PENDING"):
-            st.warning("🏦 BROKER DEMO: "+state+
-                       ". Status wymaga rozliczenia po stronie brokera. "
-                       "Nie wolno ponawiać zlecenia automatycznie.")
+    with st.expander("🔧 Inne tryby testowe i Capital.com DEMO (opcjonalnie)", expanded=False):
+        # Real broker DEMO is a third distinct lane: broker-confirmed virtual
+        # positions, not the existing OHLC PAPER simulation and never LIVE cash.
+        st.markdown("##### 🏦 CAPITAL.COM DEMO — POZYCJE NA KONCIE TESTOWYM")
+        demo=payload.get("capital_demo_broker")
+        if not isinstance(demo,dict):
+            st.caption("Wysyłanie zleceń na Capital.com DEMO jest domyślnie "
+                       "WYŁĄCZONE. Wewnętrzny PAPER TEST działa oddzielnie. "
+                       "Aby uzbroić zlecenia BROKERA DEMO, właściciel musi "
+                       "najpierw ustawić w Northflank trzy wartości: "
+                       "FOKUS_DEMO_BROKER_MODE=DEMO_ONLY_CONFIRMED, "
+                       "FOKUS_DEMO_BROKER_ACCOUNT_ID (identyfikator konta DEMO) "
+                       "oraz FOKUS_DEMO_BROKER_SIZE (wielkość pozycji). "
+                       "Nie wpisuj numeru konta ani kluczy API w czacie.")
         else:
-            st.info("🏦 BROKER DEMO: "+state+
-                    ". Sam setup PAPER/OBSERWUJ nie oznacza zlecenia.")
-        st.caption("Ostatni sygnał DEMO UTC: "+
-                   str(demo.get("last_setup_utc") or "BRAK")+
-                   " | kierunek: "+str(demo.get("side") or "BRAK")+
-                   " | wielkość: "+str(demo.get("size") or "BRAK")+
-                   " | stop: "+str(demo.get("stop") or "BRAK")+
-                   " | target: "+str(demo.get("target") or "BRAK")+
-                   ". U brokerów SL/TP mogą zostać zrealizowane inaczej "
-                   "niż w symulacji świec. Zlecenia LIVE są zabronione.")
-    st.caption("Ważne: CAPITAL.COM DEMO = zlecenia brokera za WIRTUALNE "
-               "środki po zatwierdzeniu, PAPER = lokalna symulacja. "
-               "Nigdy nie interpretuj statusu ATTEMPTED jako OPEN.")
-    # Explicit second lane: REAL tracked, but SIMULATED test fills; never
-    # mutate the production v3 position ledger or claim broker execution.
-    st.markdown("##### 🧪 PAPER TEST — WCZEŚNIEJSZE LONG / SHORT (OSOBNY REJESTR)")
-    trial=payload.get("momentum_paper_test_report") or {}
-    if trial.get("status")!="FORWARD_PAPER_TEST_NOT_LIVE":
-        st.warning("Nowy test LONG/SHORT jeszcze nie rozpoczął skanowania "
-                   "na Northflank. Sprawdź aktualny commit i checkpoint workera. "
-                   "Nie wyświetlam fikcyjnych wejść.")
-    else:
-        ca,cb,cc,cd=st.columns(4)
-        ca.metric("TEST: zatwierdzone setupy",trial.get("started",0))
-        cb.metric("TEST: otwarcia OPEN",trial.get("opened",0))
-        cc.metric("TEST: zamknięte",trial.get("closed",0))
-        cd.metric("TEST: wynik po kosztach",
-                  str(trial.get("pnl_pts",0))+" pkt")
-        pos=trial.get("active")
-        if isinstance(pos,dict) and pos.get("status") in ("PENDING","OPEN"):
-            status=pos.get("status")
-            title=("TEST "+status+" "+str(pos.get("side","WAIT")))
-            details=(" • sygnał UTC "+str(pos.get("setup_utc"))+
-                     " • STOP "+str(pos.get("stop"))+
-                     " • CEL "+str(pos.get("target"))+
-                     " • M1 momentum "+str(pos.get("score"))+"/6"+
-                     " • EMA: "+str(pos.get("confirmation")))
-            if status=="OPEN":
-                st.success("🧪 "+title+details)
+            state=str(demo.get("status","UNKNOWN"))
+            if state=="ACCEPTED":
+                st.success("🏦 BROKER DEMO: zlecenie potwierdzone przez "
+                           "Capital.com — pozycja na koncie WIRTUALNYM.")
+            elif state in ("ATTEMPTED","UNRESOLVED","CONFIRM_PENDING"):
+                st.warning("🏦 BROKER DEMO: "+state+
+                           ". Status wymaga rozliczenia po stronie brokera. "
+                           "Nie wolno ponawiać zlecenia automatycznie.")
             else:
-                st.info("🧪 "+title+details+
-                        ". PENDING = jeszcze nie otwarta pozycja TEST.")
+                st.info("🏦 BROKER DEMO: "+state+
+                        ". Sam setup PAPER/OBSERWUJ nie oznacza zlecenia.")
+            st.caption("Ostatni sygnał DEMO UTC: "+
+                       str(demo.get("last_setup_utc") or "BRAK")+
+                       " | kierunek: "+str(demo.get("side") or "BRAK")+
+                       " | wielkość: "+str(demo.get("size") or "BRAK")+
+                       " | stop: "+str(demo.get("stop") or "BRAK")+
+                       " | target: "+str(demo.get("target") or "BRAK")+
+                       ". U brokerów SL/TP mogą zostać zrealizowane inaczej "
+                       "niż w symulacji świec. Zlecenia LIVE są zabronione.")
+        st.caption("Ważne: CAPITAL.COM DEMO = zlecenia brokera za WIRTUALNE "
+                   "środki po zatwierdzeniu, PAPER = lokalna symulacja. "
+                   "Nigdy nie interpretuj statusu ATTEMPTED jako OPEN.")
+        # Explicit second lane: REAL tracked, but SIMULATED test fills; never
+        # mutate the production v3 position ledger or claim broker execution.
+        st.markdown("##### 🧪 PAPER TEST — WCZEŚNIEJSZE LONG / SHORT (OSOBNY REJESTR)")
+        trial=payload.get("momentum_paper_test_report") or {}
+        if trial.get("status")!="FORWARD_PAPER_TEST_NOT_LIVE":
+            st.warning("Nowy test LONG/SHORT jeszcze nie rozpoczął skanowania "
+                       "na Northflank. Sprawdź aktualny commit i checkpoint workera. "
+                       "Nie wyświetlam fikcyjnych wejść.")
         else:
-            st.caption("🧪 TEST: brak aktywnej pozycji. Ostatnia ocena: "+
-                       str(trial.get("last_reason","BRAK"))+
-                       " | ostatnia zamknięta M1 UTC "+
-                       str(trial.get("last_candle_utc","BRAK"))+
-                       ". Ostatni kandydat: "+
-                       str(trial.get("last_candidate","WAIT")))
-        st.caption("Próby z M1 momentum co najmniej 5/6, zgodnej obserwacji "
-                   "EMA od 2/3, M5 zgodny, M15 nieprzeciwny; "
-                   "SL/TP oparte na ATR, RR po spreadzie i poślizgu. "
-                   "Globalne bramki bezpieczeństwa pozostają. "
-                   "Zamknięte: trafność "+
-                   str(trial.get("win_rate_pct")
-                       if trial.get("win_rate_pct") is not None else "BRAK")+
-                   "% • unieważnione "+str(trial.get("invalidated",0))+
-                   " • luki M1 "+str(trial.get("gaps",0))+
-                   ". Test działa na workerze bez otwartej przeglądarki.")
-        st.caption("UWAGA: to **oddzielny eksperyment PAPER**, "
-                   "NIE zatwierdzony sygnał AUTO 3/3 i NIE prawdziwe "
-                   "zlecenie Capital.com. Głosy otwarcia/TP/SL "
-                   "głównego PAPER nie są dźwiękami tego testu.")
-        if trial.get("recent"):
-            with st.expander("🧪 Ostatnie rozliczone LONG/SHORT — wyłącznie PAPER TEST"):
-                st.dataframe(pd.DataFrame(trial["recent"]),
-                             hide_index=True,use_container_width=True)
+            ca,cb,cc,cd=st.columns(4)
+            ca.metric("TEST: zatwierdzone setupy",trial.get("started",0))
+            cb.metric("TEST: otwarcia OPEN",trial.get("opened",0))
+            cc.metric("TEST: zamknięte",trial.get("closed",0))
+            cd.metric("TEST: wynik po kosztach",
+                      str(trial.get("pnl_pts",0))+" pkt")
+            pos=trial.get("active")
+            if isinstance(pos,dict) and pos.get("status") in ("PENDING","OPEN"):
+                status=pos.get("status")
+                title=("TEST "+status+" "+str(pos.get("side","WAIT")))
+                details=(" • sygnał UTC "+str(pos.get("setup_utc"))+
+                         " • STOP "+str(pos.get("stop"))+
+                         " • CEL "+str(pos.get("target"))+
+                         " • M1 momentum "+str(pos.get("score"))+"/6"+
+                         " • EMA: "+str(pos.get("confirmation")))
+                if status=="OPEN":
+                    st.success("🧪 "+title+details)
+                else:
+                    st.info("🧪 "+title+details+
+                            ". PENDING = jeszcze nie otwarta pozycja TEST.")
+            else:
+                st.caption("🧪 TEST: brak aktywnej pozycji. Ostatnia ocena: "+
+                           str(trial.get("last_reason","BRAK"))+
+                           " | ostatnia zamknięta M1 UTC "+
+                           str(trial.get("last_candle_utc","BRAK"))+
+                           ". Ostatni kandydat: "+
+                           str(trial.get("last_candidate","WAIT")))
+            st.caption("Próby z M1 momentum co najmniej 5/6, zgodnej obserwacji "
+                       "EMA od 2/3, M5 zgodny, M15 nieprzeciwny; "
+                       "SL/TP oparte na ATR, RR po spreadzie i poślizgu. "
+                       "Globalne bramki bezpieczeństwa pozostają. "
+                       "Zamknięte: trafność "+
+                       str(trial.get("win_rate_pct")
+                           if trial.get("win_rate_pct") is not None else "BRAK")+
+                       "% • unieważnione "+str(trial.get("invalidated",0))+
+                       " • luki M1 "+str(trial.get("gaps",0))+
+                       ". Test działa na workerze bez otwartej przeglądarki.")
+            st.caption("UWAGA: to **oddzielny eksperyment PAPER**, "
+                       "NIE zatwierdzony sygnał AUTO 3/3 i NIE prawdziwe "
+                       "zlecenie Capital.com. Głosy otwarcia/TP/SL "
+                       "głównego PAPER nie są dźwiękami tego testu.")
+            if trial.get("recent"):
+                with st.expander("🧪 Ostatnie rozliczone LONG/SHORT — wyłącznie PAPER TEST"):
+                    st.dataframe(pd.DataFrame(trial["recent"]),
+                                 hide_index=True,use_container_width=True)
     st.markdown("##### 📡 RADAR 6 STRATEGII — DLACZEGO LONG / SHORT / WAIT?")
     radar=worker_signal_radar(payload)
     if not radar["current"]:
