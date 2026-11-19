@@ -1,5 +1,9 @@
 name: FOKU$ WATCHDOG - remote PAPER checkpoint health (read-only)
 on:
+  # Independently check the durable checkpoint on each production update.
+  # This action is read-only; it never deploys or places orders.
+  push:
+    branches: [main]
   # Best effort. Schedules are delayed or skipped on busy GitHub runners.
   schedule:
     - cron: '2-57/5 * * * *'

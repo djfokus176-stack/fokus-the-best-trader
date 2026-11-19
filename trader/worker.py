@@ -42,6 +42,7 @@ from .cloud_scalp_quotes import Quote5sSampler, idle_quote_pulses
 from .cloud_quote_pump import build_quote_pump
 from .paper_method_labels import decision_attribution, method_attribution
 from .fokus_3f_forward import advance_3f_forward, forward_3f_scorecard
+from .worker_scan_health import advance_scan_quality
 
 
 def scan_once(client,epic,tf,strategy,max_spread,db, *,
@@ -242,6 +243,8 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
     job that crashes after sending but before checkpointing).
     """
     version,payload=remote.fetch()
+    old_meta=payload.get("meta")
+    old_quality=(old_meta.get("scan_quality") if isinstance(old_meta,dict) else None)
     browser_clock_override=(clock_confirmed_open is not None)
     if clock_confirmed_open is None:
         # Existing CLI/GitHub path keeps its original gate and metadata.
@@ -602,6 +605,7 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             quote_health=quote_health()
         payload["meta"]={
             "last_scan_utc":datetime.now(timezone.utc).isoformat(),
+            "scan_quality":advance_scan_quality(status,old_quality),
             "last_scan_summary":status[:350],
             "source":"Capital.com DEMO REST",
             "timeframe":tf,"epic":epic,
