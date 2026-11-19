@@ -152,7 +152,7 @@ def test_warsaw_midnight_trade_in_right_day_and_ranking_week_and_month():
 def test_finite_metrics_drawdown_pf_and_min30_are_descriptive_not_proven():
     rows=[]
     for i in range(32):
-        stamp=datetime(2026,11,19,11,1,tzinfo=timezone.utc)
+        stamp=datetime(2026,11,19,12,1,tzinfo=timezone.utc)
         close=(stamp+__import__("datetime").timedelta(minutes=i)).isoformat()
         p=paper(str(i),pts=2 if i%2==0 else -1,close=close)
         rows.append(p)
