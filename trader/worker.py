@@ -133,6 +133,10 @@ def scan_once(client,epic,tf,strategy,max_spread,db, *,
             diagnostics.append(f"{resolution}:FETCH_ERROR:{str(errors[resolution])[:100]}")
         elif resolution in snapshots and not snapshots[resolution].good:
             diagnostics.append(f"{resolution}:BAD_SNAPSHOT:{str(snapshots[resolution].reason)[:100]}")
+        elif (resolution in snapshots and
+              "RECHECK_CLEAN_TAIL=96_AFTER_CORRUPT_HISTORY"
+              in str(snapshots[resolution].reason)):
+            diagnostics.append(f"{resolution}:CLEAN_TAIL_RECHECK=VERIFIED_96")
     if not enable_setups:
         reasons.append("SETUPS_DISABLED")
     if status!="TRADEABLE":
