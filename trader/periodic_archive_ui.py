@@ -15,6 +15,7 @@ from .periodic_archive_audit import (
     LANES, WARSAW, period_comparison, archive_day_trades,
     _utc, _metrics, _start, _next, _at_midnight,
 )
+from .strategy_ranking_ui import render_strategy_ranking
 
 
 POLISH={"day":"DZIEŃ","week":"TYDZIEŃ","month":"MIESIĄC"}
@@ -72,6 +73,10 @@ def render_periodic_archive_ui(payload, *, widget_scope="terminal"):
                "dzisiaj z całym wczorajszym dniem. "+
                "Wcześniejszy okres musi być objęty archiwum, "+
                "inaczej różnica jest oznaczona BRAK DANYCH.")
+    # Descriptive strategy rankings from the SAME CLOSED archive, refreshed
+    # on every worker audit save. Never changes AUTO selection or orders.
+    render_strategy_ranking(archive,selected,
+                            widget_scope=widget_scope,now=now)
 
     rows=[]
     for kind in ("day","week","month"):
@@ -150,6 +155,10 @@ def render_periodic_archive_ui(payload, *, widget_scope="terminal"):
                      expanded=False):
         day_rows=archive_day_trades(archive,selected)
         if day_rows:
+            st.caption("OPEN modelowe to start następnej świecy wg modelu, "+
+                       "potwierdzenie OPEN to zamknięcie świecy, a godzina "+
+                       "wykrycia przez worker pochodzi z osobnego "
+                       "znacznika. Brak historycznego pola = BRAK ZAPISU.")
             table=pd.DataFrame(day_rows)
             st.dataframe(table,hide_index=True,use_container_width=True)
             st.download_button(
