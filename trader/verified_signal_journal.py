@@ -51,7 +51,10 @@ def verified_signal_rows(payload,*,limit=30):
     }
     records=[]
     seen=set()
-    for ev in events[-MAX_EVENTS:]:
+    # Worker dumps paper_events_v3 newest-first; slicing [-80:] would
+    # silently hide NEW signals once history grows. Inspect all already
+    # bounded checkpoint rows, then sort by immutable event time.
+    for ev in events:
         if not isinstance(ev,dict) or ev.get("kind") not in EVENT_KINDS:
             continue
         uid=ev.get("event_id")
