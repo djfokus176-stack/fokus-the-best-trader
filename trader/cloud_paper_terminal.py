@@ -38,6 +38,7 @@ from .manual_paper_chart import annotate_manual_test
 from .manual_paper_status_ui import manual_status_panel
 from .cloud_chart_visual import candle_price_window, candle_plot_style
 from .periodic_archive_ui import render_periodic_archive_ui
+from .auto_sim_journal_ui import render_auto_sim_journal
 
 
 def _parse_utc(value):
@@ -439,6 +440,9 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
     y.metric("Zapisane "+choice,str(audit["bars"]))
     z.metric("Wiek checkpointu",str(audit["age_minutes"])+" min"
              if audit["age_minutes"] is not None else "BRAK")
+    # Main owner view: actual durable AUTO simulated OPEN/CLOSE, before
+    # the separate optional research test lanes and technical diagnostics.
+    render_auto_sim_journal(payload)
     # Show status of the independent PAPER TEST near the very TOP of TERMINAL.
     # A browser user no longer has to scroll past charts and brokerage DEMO
     # instructions to learn whether the worker has actually opened anything.
