@@ -95,3 +95,32 @@ def test_no_trade_or_broker_posts_in_watchdog_module():
     assert "remote.save(" not in source
     watchdog=Path("trader/worker_watchdog.py").read_text("utf-8")
     assert "redacted_archive_log_line(payload)" in watchdog
+
+
+def test_public_watchdog_distinguishes_wait_from_daily_brake():
+    payload=pkt([])
+    payload["meta"].update({
+        "auto_virtual_daily_brake_enabled":False,
+        "last_scan_summary":(
+            "2026-11-20T13:00:00+00:00 / WAIT / "
+            "CANDIDATE_METHOD=WAIT / QUEUE=NO / ACTIVE=NONE / GATES=OK / "
+            "no verified setup"),
+    })
+    d=read_only_archive_counts(payload,now=NOW)
+    assert d["auto_daily_brake"]=="OFF"
+    assert d["last_decision"]=="WAIT"
+    assert d["last_queued"]=="NO"
+    assert d["last_gates"]=="OK"
+    log=redacted_archive_log_line(payload,now=NOW)
+    assert "AUTO_DAILY_BRAKE=OFF" in log
+    assert "LAST_DECISION=WAIT" in log
+    assert "LAST_GATES=OK" in log
+
+    payload["meta"]["auto_virtual_daily_brake_enabled"]=True
+    payload["meta"]["last_scan_summary"]=(
+        "2026-11-20T13:01:00+00:00 / SHORT / "
+        "QUEUE=NO / ACTIVE=NONE / GATES=PAPER_DAILY_DRAWDOWN_LIMIT")
+    d=read_only_archive_counts(payload,now=NOW)
+    assert d["auto_daily_brake"]=="ON"
+    assert d["last_decision"]=="SHORT"
+    assert d["last_gates"]=="PAPER_DAILY_DRAWDOWN_LIMIT"
