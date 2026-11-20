@@ -124,3 +124,29 @@ def test_public_watchdog_distinguishes_wait_from_daily_brake():
     assert d["auto_daily_brake"]=="ON"
     assert d["last_decision"]=="SHORT"
     assert d["last_gates"]=="PAPER_DAILY_DRAWDOWN_LIMIT"
+
+
+def test_watchdog_classifies_transient_data_stale_without_exposing_provider_text():
+    examples={
+        "Bieżący spread: 3.20 > 2.00":"FORMING_SPREAD_TOO_WIDE",
+        "Spread zamkniętej świecy: 3.20 > 2.00":"CLOSED_SPREAD_TOO_WIDE",
+        "Dane przestarzałe (600 s)":"OLD_CANDLES",
+        "Wykryto duże luki w świecach":"HOLES_IN_OHLC",
+        "DANE_WADLIWE: odrzucono rekordy":"CORRUPT_OHLC",
+        "Za mało poprawnych świec":"INSUFFICIENT_OHLC",
+        "Świece z przyszłości":"CLOCK_MISMATCH",
+        "Puste OHLC":"EMPTY_OHLC",
+    }
+    for reason,expected in examples.items():
+        p=pkt([])
+        p["meta"]["last_scan_summary"]="WAIT / DATA_STALE / BROKER_STATUS=TRADEABLE / "+reason
+        d=read_only_archive_counts(p,now=NOW)
+        assert d["feed_issue"]==expected,reason
+        log=redacted_archive_log_line(p,now=NOW)
+        assert "FEED_ISSUE="+expected in log
+        assert reason not in log
+    p=pkt([])
+    p["meta"]["last_scan_summary"]="WAIT / GATES=OK"
+    assert read_only_archive_counts(p,now=NOW)["feed_issue"]=="NONE"
+    p["meta"]["last_scan_summary"]="WAIT / NO_FEED / BROKER_STATUS=TRADEABLE"
+    assert read_only_archive_counts(p,now=NOW)["feed_issue"]=="NO_M1_FEED"
