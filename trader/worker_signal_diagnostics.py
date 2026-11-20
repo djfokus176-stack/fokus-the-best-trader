@@ -22,6 +22,8 @@ def verified_auto_wait_diagnosis(payload, *, now=None):
         "stage_2": "UNKNOWN", "stage_3": "UNKNOWN",
         "mtf_ready": "UNKNOWN", "mtf_missing": "UNKNOWN",
         "raw_conflict": "UNKNOWN", "auto_wait_reason": "NO_CURRENT_VOTES",
+        "m1_trend":"UNKNOWN", "m5_trend":"UNKNOWN",
+        "m15_trend":"UNKNOWN", "h1_trend":"UNKNOWN",
     }
     radar=worker_signal_radar(payload,now=now)
     if not radar.get("current"):
@@ -52,7 +54,20 @@ def verified_auto_wait_diagnosis(payload, *, now=None):
     if decision not in EXPECTED or decision not in latest.split(" / ")[:2]:
         return empty
     queued=("QUEUE=YES" in latest)
-    if raw_l and raw_s:
+    # Prefer a protective gate over a heuristic no-signal explanation.
+    import re
+    gates=re.search(r"(?:^| / )GATES=([A-Z0-9_,]+)(?= /|$)",latest)
+    gate_clear=bool(gates and gates.group(1)=="OK")
+    trends={"MINUTE":"UNKNOWN","MINUTE_5":"UNKNOWN",
+            "MINUTE_15":"UNKNOWN","HOUR":"UNKNOWN"}
+    if isinstance(views,list):
+        for v in views:
+            if (isinstance(v,dict) and v.get("timeframe") in trends
+                    and v.get("trend") in ("UP","DOWN","NEUTRAL","UNKNOWN")):
+                trends[v["timeframe"]]=v["trend"]
+    if not gate_clear:
+        reason="PROTECTIVE_GATE_OR_UNKNOWN"
+    elif raw_l and raw_s:
         reason="RAW_LONG_SHORT_CONFLICT"
     elif decision=="WAIT":
         if raw_l+raw_s==0:
@@ -76,4 +91,6 @@ def verified_auto_wait_diagnosis(payload, *, now=None):
         "mtf_ready":ready,"mtf_missing":missing,
         "raw_conflict":"YES" if raw_l and raw_s else "NO",
         "auto_wait_reason":reason,
+        "m1_trend":trends["MINUTE"],"m5_trend":trends["MINUTE_5"],
+        "m15_trend":trends["MINUTE_15"],"h1_trend":trends["HOUR"],
     }

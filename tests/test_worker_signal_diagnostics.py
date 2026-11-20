@@ -104,3 +104,44 @@ def test_audit_is_read_only_and_never_leaks_trade_details_or_secrets():
     assert "queue_paper" not in source
     assert "remote.save" not in source
     assert "CapitalReadOnly" not in source
+
+
+def test_mtf_trends_explain_why_ready_data_can_still_veto():
+    votes={ALL_STRATEGIES[0]:("LONG","WAIT")}
+    p=packet(votes)
+    rows=p["last_vote_audit"]["mtf"]
+    rows[1]["trend"]="DOWN"
+    rows[2]["trend"]="DOWN"
+    rows[3]["trend"]="NEUTRAL"
+    d=verified_auto_wait_diagnosis(p,now=NOW)
+    assert d["mtf_ready"]==4
+    assert d["auto_wait_reason"]=="MTF_REJECTED_RAW"
+    assert (d["m5_trend"],d["m15_trend"],d["h1_trend"])==(
+        "DOWN","DOWN","NEUTRAL")
+
+
+def test_protective_gate_not_mislabeled_as_missing_raw_setup():
+    p=packet({},gates="MACRO_BLACKOUT")
+    d=verified_auto_wait_diagnosis(p,now=NOW)
+    assert d["vote_audit"]=="CURRENT"
+    assert d["raw_long"]==0
+    assert d["auto_wait_reason"]=="PROTECTIVE_GATE_OR_UNKNOWN"
+    assert "AUTO_WAIT_REASON=PROTECTIVE_GATE_OR_UNKNOWN" in (
+        redacted_archive_log_line(p,now=NOW))
+
+
+def test_raw_opened_does_not_imply_closed_when_feed_missing():
+    p=packet({})
+    p["raw_m1_forward_paper_report"]={
+        "started":32,"opened":28,"closed":4,"closed_total":4,
+        "invalidated_after_open":16,"invalidated_before_open":3,
+        "unreconciled_historical_open":8,"active_open_now":0,"gaps":19
+    }
+    d=read_only_archive_counts(p,now=NOW)
+    assert d["raw_opened"]==28 and d["raw_closed"]==4
+    assert d["raw_invalidated_after_open"]==16
+    assert d["raw_unreconciled_historical_open"]==8
+    assert d["raw_active_open_now"]==0
+    assert d["raw_gaps"]==19
+    assert "RAW_UNRECONCILED_HISTORICAL_OPEN=8" in (
+        redacted_archive_log_line(p,now=NOW))
