@@ -13,6 +13,7 @@ import argparse
 from datetime import datetime, timezone
 
 from .remote_checkpoint import RemoteCheckpoint, RemoteError
+from .worker_trade_audit import redacted_archive_log_line
 
 DEFAULT_MAX_AGE_MINUTES=8
 ALLOWED_FUTURE_SECONDS=120
@@ -114,6 +115,12 @@ def main(argv=None):
           " / FAULT_STREAK="+str(result["consecutive_fault_scans"])+
           " / MARKET_DATA_VALIDATED=false / PAPER_ENTRIES_AUTHORIZED=false",
           flush=True)
+    # Observational counts of verified simulated trades are deliberately
+    # separate from the availability verdict. No broker calls or credentials.
+    try:
+        print(redacted_archive_log_line(payload),flush=True)
+    except (ValueError,TypeError,OverflowError,KeyError):
+        print("FOKUS_ARCHIVE / STATUS=UNAVAILABLE",flush=True)
     return 0 if result["healthy"] else 1
 
 
