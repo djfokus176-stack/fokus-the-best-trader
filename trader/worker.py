@@ -178,10 +178,16 @@ def scan_once(client,epic,tf,strategy,max_spread,db, *,
             diagnostics.append("BLS_CALENDAR:"+type(exc).__name__+
                                (":"+detail if detail else "")+
                                (f":HTTP{code}" if code else ""))
-    # PAPER-only daily circuit breaker, evaluated AFTER prior positions
-    # progressed on closed candles, but BEFORE any new PENDING setup.
-    # It is not a live broker order, an equity stop, or guaranteed loss cap.
-    if verdict.action in ("LONG","SHORT"):
+    # AUTO is an owner-observed VIRTUAL simulation with no broker orders.
+    # Do not throttle research after a modeled 20-point loss by default:
+    # the legacy PAPER daily brake is opt-in for AUTO only. Keep ALL actual
+    # MTF, feed freshness, spread, market and macro gates unchanged.
+    # An explicit opt-in re-enables the original loss brake.
+    auto_virtual_brake_enabled=(os.getenv(
+        "FOKUS_AUTO_VIRTUAL_DAILY_BRAKE_ENABLED","false").strip().lower()
+        in ("true","1","yes","on"))
+    if verdict.action in ("LONG","SHORT") and (
+            strategy!=AUTO_MODE or auto_virtual_brake_enabled):
         try:
             daily_limit=float(os.getenv("FOKUS_PAPER_DAILY_STOP_PTS",
                                         str(DEFAULT_DAILY_STOP_PTS)))
@@ -628,6 +634,10 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             # terminal; the worker alone decides whether entries are paused.
             "paper_daily_stop_pts":os.getenv(
                 "FOKUS_PAPER_DAILY_STOP_PTS",str(DEFAULT_DAILY_STOP_PTS)),
+            "auto_virtual_daily_brake_enabled":(
+                os.getenv("FOKUS_AUTO_VIRTUAL_DAILY_BRAKE_ENABLED",
+                          "false").strip().lower() in
+                ("true","1","yes","on")),
             "shadow_leader":latest_shadow_report.get("leader"),
             "clock_confirmed_open":bool(clock_confirmed_open),
             "setups_enabled":bool(enable_setups),
