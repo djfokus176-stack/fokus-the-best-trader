@@ -111,6 +111,16 @@ def read_only_archive_counts(payload, *, now=None):
             result[key+"_started"]="UNKNOWN"
             result[key+"_opened"]="UNKNOWN"
             result[key+"_closed"]="UNKNOWN"
+    # RAW is a separate experimental ledger: an OPEN can be subsequently
+    # invalidated after a missing M1 candle. Never imply that every OPEN
+    # has a CLOSED P&L, or that those research positions were AUTO trades.
+    raw_report=payload.get("raw_m1_forward_paper_report")
+    for field in ("closed_total","invalidated_after_open",
+                  "invalidated_before_open","unreconciled_historical_open",
+                  "active_open_now","gaps"):
+        value=raw_report.get(field) if isinstance(raw_report,dict) else None
+        checked=_int(value)
+        result["raw_"+field]=(checked if checked is not None else "UNKNOWN")
     report=payload.get("periodic_audit_report")
     if isinstance(report,dict):
         result["periodic_archive_status"]=str(report.get("status","UNKNOWN"))[:48]
