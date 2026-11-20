@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 
 from .auto_sim_journal import auto_sim_journal, _utc
 from .paper_method_labels import method_attribution
+from .worker_signal_diagnostics import verified_auto_wait_diagnosis
 
 COMPLETE = ("CLOSED_TP", "CLOSED_SL", "CLOSED_TIMEOUT")
 
@@ -134,6 +135,9 @@ def read_only_archive_counts(payload, *, now=None):
     # Only known self-generated codes, not arbitrary provider messages.
     result["last_gates"]=(gates.group(1) if gates and
                           len(gates.group(1))<=48 else "UNKNOWN")
+    # The six-strategy diagnostic is valid only when it belongs to this
+    # exact fresh, timestamp-matched scan (never reuse yesterday's votes).
+    result.update(verified_auto_wait_diagnosis(payload,now=current))
     return result
 
 
