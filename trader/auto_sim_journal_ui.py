@@ -19,8 +19,7 @@ def render_auto_sim_journal(payload):
         "Bot sam wybiera LONG lub SHORT, symuluje wejście, pilnuje SL/TP "
         "i zamyka pozycję albo po upływie limitu czasu. "
         "Wszystko zapisuje w archiwum. Bez wpłat, kwot i zleceń brokera. "
-        "Techniczna nazwa tego trybu w silniku to PAPER — "
-        "nie jest to żaden dodatkowy rachunek."
+        "To własny dziennik symulacji, a nie konto ani zlecenie brokera."
     )
     data=auto_sim_journal(payload)
     if not data["known"]:
@@ -28,6 +27,18 @@ def render_auto_sim_journal(payload):
                    "w checkpointcie. Nie pokazuję fikcyjnych wejść.")
         return
     meta=payload.get("meta") or {}
+    if "auto_virtual_daily_brake_enabled" in meta:
+        if meta["auto_virtual_daily_brake_enabled"]:
+            st.warning("W symulacji AUTO jest włączony dodatkowy limit "
+                       "dziennego obsunięcia. Może wstrzymywać nowe wejścia.")
+        else:
+            st.caption("✅ Dzienny hamulec strat w symulacji AUTO: WYŁĄCZONY. "
+                       "Nie zatrzyma nowych wirtualnych wejść po serii strat. "
+                       "Sprawdzenie świeżości danych, MTF i pozostałe "
+                       "warunki wejścia nadal obowiązują.")
+    else:
+        st.caption("Status dziennego hamulca strat nie został jeszcze "
+                   "potwierdzony w nowym checkpointcie workera.")
     last=_utc(meta.get("last_scan_utc"))
     age=(datetime.now(timezone.utc)-last).total_seconds() if last else None
     if age is None or age<0 or age>600:
