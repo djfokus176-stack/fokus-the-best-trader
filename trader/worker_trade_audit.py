@@ -25,6 +25,31 @@ def _time(value):
     return t.isoformat(timespec="seconds") if t is not None else "NONE"
 
 
+def _safe_feed_issue(meta):
+    """Whitelist a cause from the last worker message; never log provider text."""
+    summary=str(meta.get("last_scan_summary") or "")[:350]
+    if " / DATA_STALE / " not in summary:
+        if " / NO_FEED / " in summary:
+            return "NO_M1_FEED"
+        return "NONE"
+    reasons=(
+        ("Bieżący spread:", "FORMING_SPREAD_TOO_WIDE"),
+        ("Spread zamkniętej świecy:", "CLOSED_SPREAD_TOO_WIDE"),
+        ("Dane przestarzałe", "OLD_CANDLES"),
+        ("WYGASŁY ODCZYT", "OLD_CANDLES"),
+        ("Wykryto duże luki", "HOLES_IN_OHLC"),
+        ("DANE_WADLIWE", "CORRUPT_OHLC"),
+        ("Za mało poprawnych świec", "INSUFFICIENT_OHLC"),
+        ("Świece z przyszłości", "CLOCK_MISMATCH"),
+        ("Brak świecy następującej", "MISSING_FOLLOWING_CANDLE"),
+        ("Puste OHLC", "EMPTY_OHLC"),
+    )
+    for needle,code in reasons:
+        if needle in summary:
+            return code
+    return "STALE_OTHER_OR_TRUNCATED"
+
+
 def read_only_archive_counts(payload, *, now=None):
     """Return counts only, never expose prices, IDs, funds, or private keys."""
     current=now if now is not None else datetime.now(timezone.utc)
@@ -136,6 +161,7 @@ def read_only_archive_counts(payload, *, now=None):
     flag=meta.get("auto_virtual_daily_brake_enabled")
     result["auto_daily_brake"]=(
         "ON" if flag is True else "OFF" if flag is False else "UNKNOWN")
+    result["feed_issue"]=_safe_feed_issue(meta)
     summary=str(meta.get("last_scan_summary") or "")[:350]
     match=re.search(r"(?:^| / )(LONG|SHORT|WAIT)(?= /|$)",summary)
     result["last_decision"]=match.group(1) if match else "UNKNOWN"
