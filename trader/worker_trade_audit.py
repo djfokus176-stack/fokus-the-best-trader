@@ -118,6 +118,22 @@ def read_only_archive_counts(payload, *, now=None):
     else:
         result["periodic_archive_status"]="UNKNOWN"
         result["periodic_archive_stored"]="UNKNOWN"
+    # Display only safe enums from the last actual scan. A healthy worker
+    # heartbeat (OK) is not proof that the strategy approved an entry.
+    import re
+    meta=payload.get("meta") if isinstance(payload.get("meta"),dict) else {}
+    flag=meta.get("auto_virtual_daily_brake_enabled")
+    result["auto_daily_brake"]=(
+        "ON" if flag is True else "OFF" if flag is False else "UNKNOWN")
+    summary=str(meta.get("last_scan_summary") or "")[:350]
+    match=re.search(r"(?:^| / )(LONG|SHORT|WAIT)(?= /|$)",summary)
+    result["last_decision"]=match.group(1) if match else "UNKNOWN"
+    queued=re.search(r"(?:^| / )QUEUE=(YES|NO)(?= /|$)",summary)
+    result["last_queued"]=queued.group(1) if queued else "UNKNOWN"
+    gates=re.search(r"(?:^| / )GATES=([A-Z0-9_,]+)(?= /|$)",summary)
+    # Only known self-generated codes, not arbitrary provider messages.
+    result["last_gates"]=(gates.group(1) if gates and
+                          len(gates.group(1))<=48 else "UNKNOWN")
     return result
 
 
