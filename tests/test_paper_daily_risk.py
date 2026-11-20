@@ -155,3 +155,62 @@ def test_worker_blocks_new_paper_only_and_keeps_ledger_unchanged(monkeypatch):
                                2,db,strict_macro=False)
     assert "QUEUE=YES" in unblocked
     assert len(recent_positions(db))==2
+
+
+def test_auto_virtual_simulation_not_stopped_by_legacy_daily_loss(monkeypatch):
+    """Owner AUTO collects new virtual samples after modeled loss; not LIVE."""
+    db=db_fixture()
+    at=pd.Timestamp("2026-11-20T12:00:00Z")
+    closed(db,"previous-sim-loss",(at-pd.Timedelta(minutes=11)).isoformat(),-25.)
+    idx=pd.date_range(end=at,periods=155,freq="min",tz="UTC")
+    data=pd.DataFrame({
+        "Open":np.full(155,100.),"High":np.full(155,101.),
+        "Low":np.full(155,99.),"Close":np.full(155,100.),
+        "Spread":np.full(155,.6)},index=idx)
+    snap=Snapshot(data,SRC,"US500","MINUTE",.6,
+                  at.to_pydatetime(),90,True,"synthetic",quote_spread=.6)
+    class Demo:
+        environment="DEMO"
+        def market_state(self,epic): return "TRADEABLE"
+    monkeypatch.setattr(worker,"fetch_all_timeframes",
+                        lambda *a,**kw:({"MINUTE":snap},{}))
+    monkeypatch.setattr(worker,"archive_candles",lambda *a,**kw:0)
+    monkeypatch.setattr(worker,"current_feed_status",lambda *a:(True,"OK",0))
+    monkeypatch.setattr(worker,"decide_any",
+                        lambda *a,**kw:Decision("LONG","EMA TREND",
+                                                 "synthetic",100,98,104,1.6))
+    ready=SimpleNamespace(ready=True,reason="OK",timeframe="MINUTE")
+    monkeypatch.setattr(worker,"filter_mtf_decision",
+                        lambda *a,**kw:(Decision("LONG","EMA TREND",
+                            "synthetic",100,98,104,1.6),[ready]*4))
+    monkeypatch.setattr(worker,"evaluate_auto",
+                        lambda *a,**kw:(Decision("LONG","EMA TREND",
+                            "AUTO PAPER (eksperyment 1 sygnału): synthetic",
+                            100,98,104,1.6),[]))
+    monkeypatch.setenv("FOKUS_PAPER_DAILY_STOP_PTS","20")
+    monkeypatch.delenv("FOKUS_AUTO_VIRTUAL_DAILY_BRAKE_ENABLED",raising=False)
+    report=worker.scan_once(Demo(),"US500","MINUTE",worker.AUTO_MODE,
+                            2,db,strict_macro=False)
+    assert "QUEUE=YES" in report
+    assert "PAPER_DAILY_DRAWDOWN_LIMIT" not in report
+    assert len(recent_positions(db))==2
+    assert any(p["status"]=="PENDING" for p in recent_positions(db))
+
+    # This remains an explicit opt-in, useful for comparing safer simulations.
+    with db_fixture() as db2:
+        closed(db2,"previous-sim-loss",(
+            at-pd.Timedelta(minutes=11)).isoformat(),-25.)
+        monkeypatch.setenv("FOKUS_AUTO_VIRTUAL_DAILY_BRAKE_ENABLED","true")
+        paused=worker.scan_once(Demo(),"US500","MINUTE",worker.AUTO_MODE,
+                                2,db2,strict_macro=False)
+        assert "PAPER_DAILY_DRAWDOWN_LIMIT" in paused
+        assert "QUEUE=NO" in paused
+
+
+def test_auto_virtual_brake_switch_never_changes_strategies_or_broker_safety():
+    from pathlib import Path
+    src=Path("trader/worker.py").read_text("utf8")
+    assert 'FOKUS_AUTO_VIRTUAL_DAILY_BRAKE_ENABLED","false"' in src
+    assert 'strategy!=AUTO_MODE or auto_virtual_brake_enabled' in src
+    assert 'if not reasons and verdict.action in ("LONG","SHORT"):' in src
+    assert 'if client.environment!="DEMO"' in src
