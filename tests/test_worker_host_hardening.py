@@ -95,11 +95,15 @@ def test_running_source_fingerprint_is_stable_nonsecret_12_hex():
 
 
 def test_watchdog_filters_malformed_source_digests(monkeypatch):
-    from trader.worker_trade_audit import read_only_archive_counts
-    # Audit of the digest alone: use a minimal valid ledger with no
-    # virtual trades; no broker/API secrets enter public logs.
+    from trader import worker_trade_audit as audit
+    monkeypatch.setattr(audit,"auto_sim_journal",lambda payload:{
+        "known":True,"opened":0,"closed":0,"pending":None,
+        "active":None,"invalidated":0,"incomplete":0})
     payload={"schema":1,"tables":{"paper_positions_v3":[]},
              "meta":{"worker_source_fingerprint":"bad-token-with-secret"}}
-    report=read_only_archive_counts(payload)
-    if report.get("status")=="VERIFIED_LEDGER":
-        assert report["worker_code"]=="UNKNOWN"
+    report=audit.read_only_archive_counts(payload)
+    assert report["worker_code"]=="UNKNOWN"
+    payload["meta"]["worker_source_fingerprint"]=worker.source_fingerprint()
+    report=audit.read_only_archive_counts(payload)
+    assert report["worker_code"]==worker.source_fingerprint()
+    assert "WORKER_CODE="+worker.source_fingerprint() in audit.redacted_archive_log_line(payload)
