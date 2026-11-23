@@ -45,6 +45,28 @@ from .fokus_3f_forward import advance_3f_forward, forward_3f_scorecard
 from .worker_scan_health import advance_scan_quality
 
 
+def source_fingerprint():
+    """Public, non-secret fingerprint of worker/MTF/market source in this host.
+
+    GitHub build SUCCESS does not prove which code a running Northflank
+    container loaded. Emit a 12-hex digest in each durable checkpoint so
+    the read-only watchdog can verify an actual running code transition.
+    """
+    from hashlib import sha256
+    from pathlib import Path
+    from . import market, mtf
+    digest=sha256()
+    try:
+        for label,path in (("worker",__file__),
+                           ("market",market.__file__),
+                           ("mtf",mtf.__file__)):
+            digest.update(label.encode("ascii")+b":")
+            digest.update(Path(path).read_bytes())
+    except (OSError,TypeError,ValueError):
+        return "UNAVAILABLE"
+    return digest.hexdigest()[:12]
+
+
 # RAW uses its own verified M1 OHLC. The directional/availability MTF gate
 # belongs to AUTO; all other broker/macro/risk blockers still apply to RAW.
 def raw_research_blockers(blockers):
@@ -675,6 +697,7 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             "auto_gpt_configured":bool(os.getenv("OPENAI_API_KEY","")),
             "auto_gpt_last_status":auto_state.get("status","NOT_YET_EXECUTED") if isinstance(auto_state,dict) else "NOT_YET_EXECUTED",
             "worker":"GitHub Actions or foreground process",
+            "worker_source_fingerprint":source_fingerprint(),
             # Nonsecret, non-trading diagnostics for the independent
             # same-login quote pump, retained in the existing checkpoint.
             "quote_pump":(
