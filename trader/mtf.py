@@ -151,7 +151,7 @@ def _validated_h1_forming_spread_with_m1(snapshots, max_spread: float):
     if not (isinstance(h1,Snapshot) and isinstance(m1,Snapshot)
             and not h1.good and m1.good):
         return h1
-    match=re.fullmatch(r"Bieżący spread: ([0-9]+(?:\\.[0-9]+)?) > ([0-9]+(?:\\.[0-9]+)?)",
+    match=re.fullmatch(r"Bieżący spread: ([0-9]+(?:\.[0-9]+)?) > ([0-9]+(?:\.[0-9]+)?)",
                        str(h1.reason))
     if not match:
         return h1
