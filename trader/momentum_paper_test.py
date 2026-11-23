@@ -55,7 +55,10 @@ def _finite(num):
     return n if isfinite(n) else None
 
 
-def _valid_frame(frame):
+def _valid_frame(frame, *, allow_gaps=False):
+    """allow_gaps=True lets a caller that handles missing minutes itself
+    (RAW gap recovery) accept a frame whose recent window has holes. Any
+    caller computing indicators on a series must keep the strict default."""
     if (not isinstance(frame, pd.DataFrame) or len(frame) < 85
             or not isinstance(frame.index, pd.DatetimeIndex)
             or frame.index.tz is None or not frame.index.is_monotonic_increasing
@@ -63,8 +66,8 @@ def _valid_frame(frame):
             or not {"Open", "High", "Low", "Close"}.issubset(frame.columns)):
         return False
     recent = frame.iloc[-10:]
-    if any((recent.index[i] - recent.index[i-1]).total_seconds() != 60
-           for i in range(1, len(recent))):
+    if not allow_gaps and any((recent.index[i] - recent.index[i-1]).total_seconds() != 60
+                              for i in range(1, len(recent))):
         return False
     for col in ("Open", "High", "Low", "Close"):
         if not all(isfinite(float(v)) for v in recent[col]):

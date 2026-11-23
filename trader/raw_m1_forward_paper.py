@@ -23,6 +23,7 @@ MAX_DAILY = 12
 MAX_HISTORY = 120
 MAX_DAILY_LOSS = 20.0
 MIN_GAP_BARS = 2
+MAX_RECOVER_BARS = 120  # 2 h of M1; longer outages stay unverifiable
 SUPPORTED = frozenset((
     "DRUGA FALA", "EMA TREND", "LIQUIDITY SWEEP",
     "BREAKOUT RETEST", "EMA PULLBACK", "VOLATILITY BREAKOUT",
@@ -75,6 +76,103 @@ def _invalidate(data, active, stamp, reason):
     key=("invalidated_after_open_total" if prior_status=="OPEN"
          else "invalidated_before_open_total")
     data[key]=int(data.get(key) or 0)+1
+
+
+def _is_gap_jump(previous, frame):
+    """True only when the newest bar jumps over at least one missing minute.
+
+    Holes are tolerated ONLY in this case, because the gap handler verifies
+    every missed minute before replay. Normal one-minute steps keep the strict
+    contiguity check, so indicators are never computed on a broken series.
+    """
+    prior = _time(previous.get("last_candle_utc"))
+    if prior is None or not isinstance(frame, pd.DataFrame) or frame.empty:
+        return False
+    try:
+        stamp = pd.Timestamp(frame.index[-1]).tz_convert("UTC")
+    except (TypeError, ValueError, AttributeError):
+        return False
+    return stamp > prior and stamp - prior != pd.Timedelta(minutes=1)
+
+
+def _handle_gap(data, previous, frame, prior, stamp):
+    """A jump in closed M1 bars happened (a scan overran a minute).
+
+    If the snapshot already contains EVERY missed real minute, those closed
+    bars are replayed in order (see _recover_missed_bars). Otherwise the
+    hole is real and the active path is invalidated, never closed at an
+    invented price.
+    """
+    data["gaps"]=int(data.get("gaps",0))+1
+    expected=pd.date_range(prior+pd.Timedelta(minutes=1), stamp,
+                           freq="1min", tz="UTC")
+    bars=frame.copy()
+    bars.index=bars.index.tz_convert("UTC")
+    recoverable=(0 < len(expected) <= MAX_RECOVER_BARS
+                 and bool(expected.isin(bars.index).all()))
+    active=previous.get("active")
+    if recoverable:
+        return _recover_missed_bars(data, active, bars, expected)
+    if isinstance(active,dict) and active.get("status") in ("PENDING","OPEN"):
+        _invalidate(data,active,stamp,"MISSING_M1_BAR")
+        data["invalidated"]=int(data.get("invalidated",0))+1
+        data["last_close_utc"]=stamp.isoformat()
+    data["active"]=None
+    _reason(data,"LUKA_SWIEC_RAW_BEZ_FILL")
+    return data
+
+
+def _recover_missed_bars(data, active, bars, expected):
+    """Replay REAL closed M1 bars that a skipped scan left behind.
+
+    Bars come only from the broker snapshot already fetched, are applied in
+    chronological order through the same PENDING->OPEN->SL/TP/TIMEOUT rules
+    as live operation, and never interpolate or synthesize a candle.
+    No NEW setup is created from a recovered tick: MTF, spread and macro
+    context of those past minutes is not available, so no hindsight entry.
+    """
+    position = active if (isinstance(active,dict) and
+                          active.get("status") in ("PENDING","OPEN")) else None
+    processed = 0
+    for ts in expected:
+        if position is None:
+            processed = len(expected)
+            break
+        candle = bars.loc[ts]
+        was_pending = position.get("status") == "PENDING"
+        updated, outcome = _progress_position(position, candle, ts)
+        processed += 1
+        if was_pending:
+            entry_open = (ts - pd.Timedelta(minutes=1)).isoformat()
+            for part in (updated, outcome):
+                if isinstance(part, dict):
+                    part["entry_bar_open_utc"] = entry_open
+        if outcome == "INVALID":
+            _invalidate(data, position, ts, "INVALID_FILL_OR_CANDLE")
+            data["invalidated"] = int(data.get("invalidated",0))+1
+            data["last_close_utc"] = ts.isoformat()
+            _reason(data, "RAW_FILL_INVALIDATED")
+            position = None
+            break
+        if isinstance(outcome, dict):
+            if was_pending:
+                data["opened"] = int(data.get("opened",0))+1
+            old_closed = list(data.get("closed") or [])
+            data["closed"] = (old_closed+[outcome])[-MAX_HISTORY:]
+            data["closed_total"] = int(data.get("closed_total",
+                                                len(old_closed)))+1
+            data["last_close_utc"] = ts.isoformat()
+            _reason(data, outcome["status"]+"_RAW")
+            position = None
+            break
+        if was_pending and updated.get("status") == "OPEN":
+            data["opened"] = int(data.get("opened",0))+1
+        position = updated
+    data["active"] = position
+    data["gaps_recovered"] = int(data.get("gaps_recovered",0))+1
+    data["recovered_bars"] = int(data.get("recovered_bars",0))+processed
+    _reason(data, f"LUKA_M1_ODZYSKANA_Z_ZAMKNIETYCH_SWIEC={processed}")
+    return data
 
 
 def _candidate(frame, votes, spread):
@@ -141,7 +239,8 @@ def advance_raw_paper(state, frame, votes, blockers=(), *, spread,
     if not enabled:
         data["last_reason"]="RAW_TEST_WYLACZONY"
         return data
-    if source!=SOURCE or epic!="US500" or not _valid_frame(frame):
+    if source!=SOURCE or epic!="US500" or not _valid_frame(
+            frame, allow_gaps=_is_gap_jump(previous, frame)):
         _reason(data,"NIEWIARYGODNE_ZAMKNIETE_M1_RAW")
         return data
     cost_spread=_finite(spread)
@@ -154,14 +253,7 @@ def advance_raw_paper(state, frame, votes, blockers=(), *, spread,
         return data
     data["last_candle_utc"]=stamp.isoformat()
     if prior is not None and stamp-prior!=pd.Timedelta(minutes=1):
-        data["gaps"]=int(data.get("gaps",0))+1
-        if data.get("active"):
-            _invalidate(data,data["active"],stamp,"MISSING_M1_BAR")
-            data["invalidated"]=int(data.get("invalidated",0))+1
-            data["last_close_utc"]=stamp.isoformat()
-        data["active"]=None
-        _reason(data,"LUKA_SWIEC_RAW_BEZ_FILL")
-        return data
+        return _handle_gap(data, previous, frame, prior, stamp)
 
     active=previous.get("active")
     if isinstance(active,dict):
@@ -287,6 +379,8 @@ def raw_paper_report(state):
         "last_side":data.get("last_side"),
         "last_setup_utc":data.get("last_setup_utc"),
         "gaps":int(data.get("gaps",0)),
+        "gaps_recovered":int(data.get("gaps_recovered",0)),
+        "recovered_bars":int(data.get("recovered_bars",0)),
         "invalidated":int(data.get("invalidated",0)),
         "active":{k:active.get(k) for k in fields} if active else None,
         "recent":[{k:p.get(k) for k in fields} for p in closed[-80:]],
