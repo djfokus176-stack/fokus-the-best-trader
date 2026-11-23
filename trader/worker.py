@@ -65,7 +65,7 @@ def retryable_host_error_action(exc, *, once, failures):
         return "EXIT"
     if isinstance(exc, RemoteError):
         label=str(exc)
-        if re.search(r"(?:HTTP\\s*)?(?:401|403)(?![0-9])",label):
+        if re.search(r"(?:HTTP\s*)?(?:401|403)(?![0-9])",label):
             return "EXIT"
     return "EXIT" if failures>=MAX_CONSECUTIVE_WORKER_ERRORS else "RETRY_NEXT_MINUTE"
 
