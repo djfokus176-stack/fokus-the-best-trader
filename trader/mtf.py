@@ -134,6 +134,78 @@ def timeframe_refresh_needed(snapshot, timeframe: str, *, elapsed: float,
     return not current_feed_status(snapshot,snapshot.source)[0]
 
 
+def _validated_h1_forming_spread_with_m1(snapshots, max_spread: float):
+    """Only reconcile an H1 *forming-quote* discrepancy against verified M1.
+
+    H1 CLOSED bid/ask spread, OHLC structure, age, source and MTF alignment
+    remain mandatory. Never substitute M1 bars for H1 indicators, never
+    relax the live M1 spread gate, and never repair any broker data.
+    """
+    from dataclasses import replace
+    import math
+    import re
+    from .market import Snapshot, _unexpected_recent_gap
+
+    h1=snapshots.get("HOUR")
+    m1=snapshots.get("MINUTE")
+    if not (isinstance(h1,Snapshot) and isinstance(m1,Snapshot)
+            and not h1.good and m1.good):
+        return h1
+    match=re.fullmatch(r"Bieżący spread: ([0-9]+(?:\\.[0-9]+)?) > ([0-9]+(?:\\.[0-9]+)?)",
+                       str(h1.reason))
+    if not match:
+        return h1
+    if (h1.epic!="US500" or m1.epic!=h1.epic
+            or h1.source!="Capital.com DEMO REST" or m1.source!=h1.source
+            or h1.resolution!="HOUR" or m1.resolution!="MINUTE"):
+        return h1
+    try:
+        if not all(math.isfinite(float(x)) for x in (
+                max_spread,h1.quote_spread,h1.spread,
+                m1.quote_spread,m1.spread,h1.age_seconds,m1.age_seconds)):
+            return h1
+        if (float(max_spread)<=0
+                or abs(float(match.group(1))-float(h1.quote_spread))>0.011
+                or abs(float(match.group(2))-float(max_spread))>0.011
+                or not (float(h1.quote_spread)>max_spread
+                        and 0<=float(h1.spread)<=max_spread
+                        and 0<=float(m1.quote_spread)<=max_spread
+                        and 0<=float(m1.spread)<=max_spread)):
+            return h1
+        # The original snapshot stops at the forming-quote check, so redo
+        # the downstream stale/OHLC/recent-gap checks before accepting it.
+        if not (-PERIOD["MINUTE"] <= m1.age_seconds
+                <= 3*PERIOD["MINUTE"]+60
+                and -PERIOD["HOUR"] <= h1.age_seconds
+                <= 3*PERIOD["HOUR"]+60):
+            return h1
+        if h1.confirmed_utc is None or m1.confirmed_utc is None:
+            return h1
+        lag=(pd.Timestamp(m1.confirmed_utc)
+             -pd.Timestamp(h1.confirmed_utc)).total_seconds()
+        if not (0<=lag<PERIOD["HOUR"]):
+            return h1
+        frame=h1.frame
+        if (not isinstance(frame,pd.DataFrame) or len(frame)<70
+                or frame.index.tz is None
+                or not frame.index.is_monotonic_increasing
+                or frame.index.has_duplicates
+                or _unexpected_recent_gap(frame.index,"HOUR")):
+            return h1
+        tail=frame[["Open","High","Low","Close"]].tail(25)
+        for values in tail.itertuples(index=False,name=None):
+            o,high,low,close=map(float,values)
+            if (not all(math.isfinite(v) for v in (o,high,low,close))
+                    or low<=0 or high<max(o,close,low)
+                    or low>min(o,close,high)):
+                return h1
+    except (TypeError,ValueError,AttributeError,KeyError,OverflowError):
+        return h1
+    return replace(h1,good=True,reason=(
+        "OK: H1_CLOSED_OHLC_VALID; H1_FORMING_QUOTE_SPREAD_DISCREPANCY; "
+        "M1_CURRENT_SPREAD_VERIFIED; NO_OHLC_REPAIR"))
+
+
 def fetch_all_timeframes(client, epic: str, max_spread: float=2.0, count: int=250):
     """Fetch four broker TFs; re-check old corrupt history without bypassing QC.
 
@@ -176,4 +248,10 @@ def fetch_all_timeframes(client, epic: str, max_spread: float=2.0, count: int=25
                 clean.reason += " RECHECK_CLEAN_TAIL=96_AFTER_CORRUPT_HISTORY"
                 snapshot = clean
         snapshots[tf] = snapshot
+    # The provider's forming H1 Close bid/ask may disagree with the currently
+    # validated M1 quote. Never let that *single* non-signal field veto clean
+    # H1 closed OHLC if strict M1 + H1 cross-checks above all pass.
+    checked=_validated_h1_forming_spread_with_m1(snapshots,max_spread)
+    if checked is not None:
+        snapshots["HOUR"]=checked
     return snapshots, failures
