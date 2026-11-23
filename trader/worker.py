@@ -25,7 +25,7 @@ from .range_rejection import NAME as RANGE_NAME
 from .paper_lifecycle import ensure_tables,progress_paper,queue_paper,active_position
 from .telegram_alerts import dispatch_alerts,record_stale_event
 from .remote_checkpoint import (RemoteCheckpoint, configured, dump_state,
-                                restore_state, RemoteError)
+                                restore_state, RemoteError, RemoteConflict)
 from .strategy_progress import progress_for_votes
 from .obstacle_ab import obstacle_ab_snapshot
 from .shadow_learning import advance_shadow, shadow_scorecard
@@ -43,6 +43,53 @@ from .cloud_quote_pump import build_quote_pump
 from .paper_method_labels import decision_attribution, method_attribution
 from .fokus_3f_forward import advance_3f_forward, forward_3f_scorecard
 from .worker_scan_health import advance_scan_quality
+
+
+def source_fingerprint():
+    """Public, non-secret fingerprint of worker/MTF/market source in this host.
+
+    GitHub build SUCCESS does not prove which code a running Northflank
+    container loaded. Emit a 12-hex digest in each durable checkpoint so
+    the read-only watchdog can verify an actual running code transition.
+    """
+    from hashlib import sha256
+    from pathlib import Path
+    from . import market, mtf
+    digest=sha256()
+    try:
+        for label,path in (("worker",__file__),
+                           ("market",market.__file__),
+                           ("mtf",mtf.__file__)):
+            digest.update(label.encode("ascii")+b":")
+            digest.update(Path(path).read_bytes())
+    except (OSError,TypeError,ValueError):
+        return "UNAVAILABLE"
+    return digest.hexdigest()[:12]
+
+
+# RAW uses its own verified M1 OHLC. The directional/availability MTF gate
+# belongs to AUTO; all other broker/macro/risk blockers still apply to RAW.
+def raw_research_blockers(blockers):
+    return tuple(x for x in blockers if x != "INCOMPLETE_MTF")
+
+
+MAX_CONSECUTIVE_WORKER_ERRORS = 6
+
+
+def retryable_host_error_action(exc, *, once, failures):
+    """Select a safe action after a failed worker cycle, never retry a trade.
+
+    The next cycle fetches a NEW checkpoint and recomputes decisions. A CAS
+    writer conflict or credential denial must stop the service immediately.
+    No unchecked state from the failed cycle is reused.
+    """
+    if once or isinstance(exc, RemoteConflict):
+        return "EXIT"
+    if isinstance(exc, RemoteError):
+        label=str(exc)
+        if re.search(r"(?:HTTP\s*)?(?:401|403)(?![0-9])",label):
+            return "EXIT"
+    return "EXIT" if failures>=MAX_CONSECUTIVE_WORKER_ERRORS else "RETRY_NEXT_MINUTE"
 
 
 def scan_once(client,epic,tf,strategy,max_spread,db, *,
@@ -414,7 +461,8 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
                     raw_enabled=(os.getenv("FOKUS_RAW_M1_PAPER_TEST_ENABLED",
                         "true").strip().lower() in ("true","1","yes","on"))
                     raw_test_state=advance_raw_paper(
-                        raw_test_state,snapshot.frame,votes,blockers,
+                        raw_test_state,snapshot.frame,votes,
+                        raw_research_blockers(blockers),
                         spread=snapshot.spread,source=snapshot.source,
                         epic=epic,enabled=raw_enabled)
                 except (ValueError,TypeError,KeyError,OverflowError,
@@ -649,6 +697,7 @@ def remote_scan_once(remote,client,epic,tf,strategy,max_spread, *,
             "auto_gpt_configured":bool(os.getenv("OPENAI_API_KEY","")),
             "auto_gpt_last_status":auto_state.get("status","NOT_YET_EXECUTED") if isinstance(auto_state,dict) else "NOT_YET_EXECUTED",
             "worker":"GitHub Actions or foreground process",
+            "worker_source_fingerprint":source_fingerprint(),
             # Nonsecret, non-trading diagnostics for the independent
             # same-login quote pump, retained in the existing checkpoint.
             "quote_pump":(
@@ -788,6 +837,7 @@ def main(argv=None):
               flush=True)
     if not candle_time_ok:
         print("WAIT / CANDLE_TIME_UNVERIFIED: collecting DEMO candles, NEW PAPER SETUPS BLOCKED.",flush=True)
+    consecutive_errors=0
     while True:
         try:
             if use_remote:
@@ -804,17 +854,23 @@ def main(argv=None):
                     telegram_enabled=os.getenv("PAPER_TELEGRAM_ALERTS_ENABLED","").lower()
                         in ("true","1","yes"))
             print(datetime.now(timezone.utc).isoformat(),message,flush=True)
+            consecutive_errors=0
         except (FeedError,ValueError,OSError,RuntimeError) as exc:
-            # RemoteCheckpoint raises authored, redacted messages (HTTP status,
-            # invalid URL, missing main row, schema mismatch). In hosted runs,
-            # logging only "RemoteError" hid the cause and led to restart loops.
-            # Never print arbitrary exception details: Capital or other errors
-            # may include credentials, request URLs, or response bodies.
+            # A failed cycle NEVER writes an authorised PAPER entry. The next
+            # cycle reloads Supabase before taking any further decisions.
+            # In a persistent host, one transient HTTP 429/503 or failed
+            # Supabase request must not restart the process and drop M1 bars.
+            # Explicit --once jobs, CAS conflicts and repeated/auth failures
+            # still exit nonzero. Do not print arbitrary provider exceptions.
+            consecutive_errors+=1
             safe_detail=(" / "+str(exc)) if isinstance(exc, RemoteError) else ""
+            action=retryable_host_error_action(
+                exc,once=args.once,failures=consecutive_errors)
             print(datetime.now(timezone.utc).isoformat(),
-                "WAIT / WORKER ERROR:",type(exc).__name__+safe_detail,flush=True)
-            if use_remote:
-                # Fail the scheduled job, never claim successful durable progress.
+                "WAIT / WORKER ERROR:",type(exc).__name__+safe_detail,
+                " / FAILURE_STREAK="+str(consecutive_errors),
+                " / RECOVERY="+action,flush=True)
+            if action=="EXIT":
                 raise SystemExit(1) from None
         if args.once:
             break
