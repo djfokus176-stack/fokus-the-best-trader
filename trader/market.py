@@ -177,7 +177,19 @@ def capital_prices_as_close_times(raw: pd.DataFrame, resolution: str) -> pd.Data
     result.index=raw.index+pd.Timedelta(seconds=seconds)
     result.index.name="time"
     result.attrs["capital_clock_basis"]="close_shifted"
-    result.attrs["quarantined_candles"]=raw.attrs.get("quarantined_candles",())
+    # Parse_prices keeps vendor OPEN labels for rejected bars. The valid
+    # OHLC index has just moved to CLOSE labels, therefore normalize the
+    # quarantined timestamps too before any clean-tail comparison. Preserve
+    # original OPEN timestamps only for independent diagnostics.
+    quarantine=[]
+    for issue in raw.attrs.get("quarantined_candles",()):
+        item=dict(issue)
+        opened=pd.to_datetime(item.get("candle_utc"),utc=True,errors="coerce")
+        if not pd.isna(opened):
+            item["raw_open_utc"]=item.get("candle_utc")
+            item["candle_utc"]=(opened+pd.Timedelta(seconds=seconds)).isoformat()
+        quarantine.append(item)
+    result.attrs["quarantined_candles"]=tuple(quarantine)
     return result
 
 
@@ -256,17 +268,28 @@ def evaluate_snapshot(raw: pd.DataFrame, epic: str, resolution: str,
                             confirmed_time,age,False,failure+
                             ' Wadliwa najnowsza świeca.',quote_spread)
         # A clean segment must include the forming candle plus >=70 CLOSED.
-        # Gaps > one nominal interval must not be hidden inside M1/M5/M15;
-        # H1 tolerates a short scheduled trading break, not weekend gaps.
+        # Historical rejected bars are NEVER reintroduced. Walk backward
+        # through a clean tail; an independently recognized Friday ->
+        # Sunday/Monday H1 closure is permitted, matching the same weekend
+        # convention already used by _unexpected_recent_gap. Other holes
+        # stay fatal. We do not insert or interpolate any candles.
         maximum_gap=step*(3 if resolution=="HOUR" else 1)
         last=raw.index[-1]
         first_pos=len(raw)-1
         for idx in range(len(raw)-2,-1,-1):
-            delta=(last-raw.index[idx]).total_seconds()
-            if delta<=0 or delta>maximum_gap:
+            earlier=raw.index[idx]
+            delta=(last-earlier).total_seconds()
+            scheduled_h1_weekend=(resolution=="HOUR" and
+                _is_verified_h1_weekend_gap(earlier,last))
+            # Even if a 2h H1 gap is structurally tolerable, it cannot
+            # bridge a known quarantined broker candle. Start the verified
+            # clean tail AFTER that corrupt record instead.
+            corrupt_between=any(earlier<t<=last for t in timestamps)
+            if (delta<=0 or corrupt_between or
+                    (delta>maximum_gap and not scheduled_h1_weekend)):
                 break
             first_pos=idx
-            last=raw.index[idx]
+            last=earlier
         clean=raw.iloc[first_pos:]
         # Any skipped bad record at or after start of tail means an
         # untrusted gap, even if adjacent valid timestamps look continuous.

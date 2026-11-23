@@ -33,7 +33,9 @@ SUPPORTED = frozenset((
 def blank():
     return {"schema": SCHEMA, "last_candle_utc": None, "active": None,
             "closed": [], "started": 0, "opened": 0, "invalidated": 0,
-            "gaps": 0, "last_reason": "BRAK NOWEGO SKANU",
+            "gaps": 0, "scan_skips_recovered": 0,
+            "recovered_bars": 0, "recovered_bars_idle": 0,
+            "last_reason": "BRAK NOWEGO SKANU",
             "last_side": "BRAK", "last_setup_utc": None,
             "last_close_utc": None, "attempted_per_utc_day": {},
             "reasons": {}, "invalidated_rows": [],
@@ -103,7 +105,6 @@ def _handle_gap(data, previous, frame, prior, stamp):
     hole is real and the active path is invalidated, never closed at an
     invented price.
     """
-    data["gaps"]=int(data.get("gaps",0))+1
     expected=pd.date_range(prior+pd.Timedelta(minutes=1), stamp,
                            freq="1min", tz="UTC")
     bars=frame.copy()
@@ -112,7 +113,11 @@ def _handle_gap(data, previous, frame, prior, stamp):
                  and bool(expected.isin(bars.index).all()))
     active=previous.get("active")
     if recoverable:
+        data["scan_skips_recovered"]=int(data.get("scan_skips_recovered",0))+1
         return _recover_missed_bars(data, active, bars, expected)
+    # A skipped scan with absent actual broker bars is a data gap. A skipped
+    # scan recovered from every real broker bar is not one.
+    data["gaps"]=int(data.get("gaps",0))+1
     if isinstance(active,dict) and active.get("status") in ("PENDING","OPEN"):
         _invalidate(data,active,stamp,"MISSING_M1_BAR")
         data["invalidated"]=int(data.get("invalidated",0))+1
@@ -134,9 +139,36 @@ def _recover_missed_bars(data, active, bars, expected):
     position = active if (isinstance(active,dict) and
                           active.get("status") in ("PENDING","OPEN")) else None
     processed = 0
+    if position is None:
+        # Observed skip, but no virtual position to replay. Report it
+        # separately instead of claiming candles were processed for P&L.
+        data["recovered_bars_idle"]=int(data.get("recovered_bars_idle",0))+len(expected)
+    # Validate ALL broker candles intended for recovery (not only the last
+    # ten in _valid_frame) before replaying any transition. One corrupted
+    # historical candle must not produce an invented successful exit.
+    from math import isfinite as _isfinite
+    valid=True
+    for ts in expected:
+        bar=bars.loc[ts]
+        try:
+            o,h,l,c=(float(bar[k]) for k in ("Open","High","Low","Close"))
+            if (not all(_isfinite(v) for v in (o,h,l,c)) or
+                    not (l<=min(o,c)<=max(o,c)<=h)):
+                valid=False
+                break
+        except (ValueError,TypeError,KeyError,OverflowError):
+            valid=False
+            break
+    if not valid:
+        if position is not None:
+            _invalidate(data,position,expected[-1],"INVALID_FILL_OR_CANDLE")
+            data["invalidated"]=int(data.get("invalidated",0))+1
+            data["last_close_utc"]=expected[-1].isoformat()
+        data["active"]=None
+        _reason(data,"RAW_FILL_INVALIDATED")
+        return data
     for ts in expected:
         if position is None:
-            processed = len(expected)
             break
         candle = bars.loc[ts]
         was_pending = position.get("status") == "PENDING"
@@ -380,7 +412,9 @@ def raw_paper_report(state):
         "last_setup_utc":data.get("last_setup_utc"),
         "gaps":int(data.get("gaps",0)),
         "gaps_recovered":int(data.get("gaps_recovered",0)),
+        "scan_skips_recovered":int(data.get("scan_skips_recovered",0)),
         "recovered_bars":int(data.get("recovered_bars",0)),
+        "recovered_bars_idle":int(data.get("recovered_bars_idle",0)),
         "invalidated":int(data.get("invalidated",0)),
         "active":{k:active.get(k) for k in fields} if active else None,
         "recent":[{k:p.get(k) for k in fields} for p in closed[-80:]],

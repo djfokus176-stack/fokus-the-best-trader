@@ -12,6 +12,29 @@ EXPECTED = {"LONG", "SHORT", "WAIT"}
 ENABLED_STAGES = (0, 1, 2, 3)
 
 
+def _mtf_issue_code(reason):
+    """Map the recorded human status to a non-secret diagnostic enum."""
+    r=str(reason or "")[:220]
+    for needle,code in (
+        ("Brak współczesnej zamkniętej", "NO_CONTEMPORARY_CLOSED_BAR"),
+        ("Nie pobrano świec", "NOT_FETCHED"),
+        ("Za mało potwierdzonych", "INSUFFICIENT_CONFIRMED_BARS"),
+        ("Za mało poprawnych", "INSUFFICIENT_VALID_BARS"),
+        ("DANE_WADLIWE", "CORRUPT_OHLC"),
+        ("Brak wskaźników", "INDICATORS_UNKNOWN"),
+        ("Niezgodny instrument", "SOURCE_MISMATCH"),
+        ("Brak świec M1", "NO_M1_FEED"),
+        ("WYGASŁY ODCZYT", "CANDLES_STALE"),
+        ("Dane przestarzałe", "CANDLES_STALE"),
+        ("duże luki", "HOLES_IN_OHLC"),
+        ("Spread", "SPREAD_TOO_WIDE"),
+        ("spread", "SPREAD_TOO_WIDE"),
+    ):
+        if needle in r:
+            return code
+    return "OTHER_OR_UNKNOWN"
+
+
 def verified_auto_wait_diagnosis(payload, *, now=None):
     """Return safe counters and one bounded reason for the latest scan only."""
     empty={
@@ -24,6 +47,9 @@ def verified_auto_wait_diagnosis(payload, *, now=None):
         "raw_conflict": "UNKNOWN", "auto_wait_reason": "NO_CURRENT_VOTES",
         "m1_trend":"UNKNOWN", "m5_trend":"UNKNOWN",
         "m15_trend":"UNKNOWN", "h1_trend":"UNKNOWN",
+        "mtf_failed_tfs":"UNKNOWN", "mtf_issue_m1":"UNKNOWN",
+        "mtf_issue_m5":"UNKNOWN", "mtf_issue_m15":"UNKNOWN",
+        "mtf_issue_h1":"UNKNOWN",
     }
     radar=worker_signal_radar(payload,now=now)
     if not radar.get("current"):
@@ -48,6 +74,19 @@ def verified_auto_wait_diagnosis(payload, *, now=None):
     if isinstance(views,list) and len(views)==4:
         ready=sum(1 for v in views if isinstance(v,dict) and v.get("ready") is True)
         missing=4-ready
+    failed=[]
+    issues={"MINUTE":"UNKNOWN","MINUTE_5":"UNKNOWN",
+            "MINUTE_15":"UNKNOWN","HOUR":"UNKNOWN"}
+    if isinstance(views,list) and len(views)==4:
+        for view in views:
+            if not isinstance(view,dict) or view.get("timeframe") not in issues:
+                continue
+            tf=view["timeframe"]
+            if view.get("ready") is True:
+                issues[tf]="OK"
+            else:
+                failed.append(tf)
+                issues[tf]=_mtf_issue_code(view.get("reason"))
     meta=payload.get("meta") or {}
     latest=str(meta.get("last_scan_summary") or "")
     decision=str(audit.get("decision") or "")
@@ -93,4 +132,9 @@ def verified_auto_wait_diagnosis(payload, *, now=None):
         "auto_wait_reason":reason,
         "m1_trend":trends["MINUTE"],"m5_trend":trends["MINUTE_5"],
         "m15_trend":trends["MINUTE_15"],"h1_trend":trends["HOUR"],
+        "mtf_failed_tfs":",".join(failed) if failed else "NONE",
+        "mtf_issue_m1":issues["MINUTE"],
+        "mtf_issue_m5":issues["MINUTE_5"],
+        "mtf_issue_m15":issues["MINUTE_15"],
+        "mtf_issue_h1":issues["HOUR"],
     }
