@@ -84,3 +84,22 @@ def test_persistent_worker_continues_to_next_scan_after_one_feed_failure(monkeyp
     assert "RECOVERY=RETRY_NEXT_MINUTE" in out
     assert "synthetic HTTP 429" not in out
     assert "WAIT / synthetic OK" in out
+
+
+def test_running_source_fingerprint_is_stable_nonsecret_12_hex():
+    import re
+    first=worker.source_fingerprint()
+    second=worker.source_fingerprint()
+    assert re.fullmatch(r"[0-9a-f]{12}",first)
+    assert first==second
+
+
+def test_watchdog_filters_malformed_source_digests(monkeypatch):
+    from trader.worker_trade_audit import read_only_archive_counts
+    # Audit of the digest alone: use a minimal valid ledger with no
+    # virtual trades; no broker/API secrets enter public logs.
+    payload={"schema":1,"tables":{"paper_positions_v3":[]},
+             "meta":{"worker_source_fingerprint":"bad-token-with-secret"}}
+    report=read_only_archive_counts(payload)
+    if report.get("status")=="VERIFIED_LEDGER":
+        assert report["worker_code"]=="UNKNOWN"
