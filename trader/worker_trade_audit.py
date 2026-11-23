@@ -162,6 +162,11 @@ def read_only_archive_counts(payload, *, now=None):
     result["auto_daily_brake"]=(
         "ON" if flag is True else "OFF" if flag is False else "UNKNOWN")
     result["feed_issue"]=_safe_feed_issue(meta)
+    # A non-secret 12-hex source digest confirms which worker code produced
+    # the checkpoint. Do NOT expose environment, git auth or full file text.
+    fingerprint=meta.get("worker_source_fingerprint")
+    result["worker_code"]=(fingerprint if isinstance(fingerprint,str)
+        and re.fullmatch(r"[0-9a-f]{12}",fingerprint) else "UNKNOWN")
     summary=str(meta.get("last_scan_summary") or "")[:350]
     match=re.search(r"(?:^| / )(LONG|SHORT|WAIT)(?= /|$)",summary)
     result["last_decision"]=match.group(1) if match else "UNKNOWN"
