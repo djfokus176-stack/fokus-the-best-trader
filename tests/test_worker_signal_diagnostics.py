@@ -145,3 +145,26 @@ def test_raw_opened_does_not_imply_closed_when_feed_missing():
     assert d["raw_gaps"]==19
     assert "RAW_UNRECONCILED_HISTORICAL_OPEN=8" in (
         redacted_archive_log_line(p,now=NOW))
+
+
+def test_current_mtf_veto_names_exact_failed_tf_and_sanitized_issue():
+    p=packet({},gates="INCOMPLETE_MTF")
+    third=p["last_vote_audit"]["mtf"][2]
+    third["ready"]=False
+    third["reason"]="Brak współczesnej zamkniętej świecy M15: PRIVATE_TOKEN"
+    report=verified_auto_wait_diagnosis(p,now=NOW)
+    assert report["mtf_failed_tfs"]=="MINUTE_15"
+    assert report["mtf_issue_m15"]=="NO_CONTEMPORARY_CLOSED_BAR"
+    assert report["mtf_issue_h1"]=="OK"
+    log=redacted_archive_log_line(p,now=NOW)
+    assert "MTF_FAILED_TFS=MINUTE_15" in log
+    assert "MTF_ISSUE_M15=NO_CONTEMPORARY_CLOSED_BAR" in log
+    assert "PRIVATE_TOKEN" not in log
+
+
+def test_stale_vote_exposes_no_fake_specific_mtf_fault():
+    p=packet({},gates="INCOMPLETE_MTF")
+    p["last_vote_audit"]["candle_utc"]=(NOW-timedelta(minutes=20)).isoformat()
+    report=verified_auto_wait_diagnosis(p,now=NOW)
+    assert report["mtf_failed_tfs"]=="UNKNOWN"
+    assert report["mtf_issue_h1"]=="UNKNOWN"
