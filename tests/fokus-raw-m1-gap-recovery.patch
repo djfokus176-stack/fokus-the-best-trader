@@ -1,0 +1,379 @@
+diff -ruN -x __pycache__ -x .pytest_cache orig/tests/test_raw_m1_forward_paper.py fokus/fokus-the-best-trader-main/tests/test_raw_m1_forward_paper.py
+--- orig/tests/test_raw_m1_forward_paper.py	2026-11-23 13:45:33.297928588 +0000
++++ fokus/fokus-the-best-trader-main/tests/test_raw_m1_forward_paper.py	2026-11-23 13:46:12.344330151 +0000
+@@ -103,7 +103,8 @@
+ 
+ def test_data_gap_invalidates_pending_without_fake_fill_and_no_backfill():
+     first=advance_raw_paper({},candles(),votes(),spread=.4)
+-    jumped=advance_raw_paper(first,candles(97),votes(),spread=.4)
++    # Real hole: minute 95 is absent from the snapshot, so nothing to replay.
++    jumped=advance_raw_paper(first,candles(97).drop(candles(97).index[95]),votes(),spread=.4)
+     assert jumped["gaps"]==1
+     assert jumped["invalidated"]==1
+     assert jumped["active"] is None
+diff -ruN -x __pycache__ -x .pytest_cache orig/tests/test_raw_m1_gap_recovery.py fokus/fokus-the-best-trader-main/tests/test_raw_m1_gap_recovery.py
+--- orig/tests/test_raw_m1_gap_recovery.py	1970-01-01 00:00:00.000000000 +0000
++++ fokus/fokus-the-best-trader-main/tests/test_raw_m1_gap_recovery.py	2026-11-23 13:47:32.772320481 +0000
+@@ -0,0 +1,154 @@
++"""RAW M1 gap recovery: replay REAL closed bars a skipped scan left behind.
++
++Synthetic prices below are test fixtures only. Production never synthesizes
++candles; these tests check that the state machine uses bars that are present
++in the snapshot, in chronological order, and never invents a fill or an exit.
++"""
++import pandas as pd
++
++from trader.raw_m1_forward_paper import (
++    advance_raw_paper, raw_paper_report, MAX_RECOVER_BARS,
++)
++
++
++def candles(count=95, *, side="LONG"):
++    index = pd.date_range("2026-11-17T19:00:00Z", periods=count, freq="min")
++    prices = [7400 + (i * .10 if side == "LONG" else -i * .10) for i in range(count)]
++    return pd.DataFrame({
++        "Open": prices, "High": [v + 1.2 for v in prices],
++        "Low": [v - 1.2 for v in prices], "Close": prices,
++        "Spread": [.4] * count}, index=index)
++
++
++def votes(side="LONG"):
++    return [{"Strategia": "EMA TREND", "Setup OHLC": side,
++             "Po filtrze MTF": "WAIT", "Powód": "MTF veto"}]
++
++
++def opened_state():
++    """Setup at bar 94, filled at bar 95 (OPEN) without any gap."""
++    first = advance_raw_paper({}, candles(), votes(), spread=.4)
++    return advance_raw_paper(first, candles(96), votes(), spread=.4)
++
++
++def test_open_position_survives_skipped_scan_and_closes_on_real_sl_bar():
++    opened = opened_state()
++    assert opened["active"]["status"] == "OPEN"
++    snap = candles(110)
++    # Scanner skipped minutes 96..; the 350-bar snapshot still contains them.
++    snap.iloc[101, snap.columns.get_loc("Low")] = 7000.0  # real SL hit at bar 101
++    state = advance_raw_paper(opened, snap, votes(), spread=.4)
++    assert state["invalidated"] == 0
++    assert state["active"] is None
++    assert len(state["closed"]) == 1
++    closed = state["closed"][-1]
++    assert closed["status"] == "CLOSED_SL"
++    assert closed["closed_utc"] == snap.index[101].isoformat()
++    assert state["gaps_recovered"] == 1
++    assert state["recovered_bars"] == 6  # minutes 96..101 replayed up to the close
++    assert state["last_candle_utc"] == snap.index[-1].isoformat()
++
++
++def test_chronology_first_hit_wins_within_recovered_range():
++    opened = opened_state()
++    snap = candles(110)
++    snap.iloc[98, snap.columns.get_loc("High")] = 7500.0  # TP first (bar 98)
++    snap.iloc[101, snap.columns.get_loc("Low")] = 7000.0  # SL later (bar 101)
++    state = advance_raw_paper(opened, snap, votes(), spread=.4)
++    closed = state["closed"][-1]
++    assert closed["status"] == "CLOSED_TP"
++    assert closed["closed_utc"] == snap.index[98].isoformat()
++
++
++def test_pending_fill_bar_inside_gap_is_recovered_not_invalidated():
++    first = advance_raw_paper({}, candles(), votes(), spread=.4)
++    assert first["active"]["status"] == "PENDING"
++    snap = candles(97)  # minutes 95 and 96 both present, scanner skipped them
++    state = advance_raw_paper(first, snap, votes(), spread=.4)
++    assert state["invalidated"] == 0
++    assert state["opened"] == 1
++    assert state["active"]["status"] == "OPEN"
++    assert state["active"]["entry_bar_open_utc"] == snap.index[94].isoformat()
++    assert state["active"]["opened_utc"] == snap.index[95].isoformat()
++
++
++def test_real_hole_still_invalidates_and_never_invents_bars():
++    opened = opened_state()
++    snap = candles(110)
++    snap = snap.drop(snap.index[99])  # genuine missing minute
++    state = advance_raw_paper(opened, snap, votes(), spread=.4)
++    assert state["active"] is None
++    assert state["invalidated_after_open_total"] == 1
++    assert state["invalidated_rows"][-1]["invalidation_reason"] == "MISSING_M1_BAR"
++    assert state["closed"] == []
++    assert state.get("gaps_recovered", 0) == 0
++
++
++def test_outage_longer_than_limit_is_not_recovered():
++    opened = opened_state()
++    snap = candles(95 + MAX_RECOVER_BARS + 5)
++    state = advance_raw_paper(opened, snap, votes(), spread=.4)
++    assert state["active"] is None
++    assert state["invalidated_after_open_total"] == 1
++    assert state.get("gaps_recovered", 0) == 0
++
++
++def test_recovered_tick_never_opens_hindsight_setup():
++    first = advance_raw_paper({}, candles(), votes(), spread=.4)
++    first["active"] = None  # no open lane; only a gap to recover
++    state = advance_raw_paper(first, candles(99), votes(), spread=.4)
++    assert state["started"] == first["started"]
++    assert state["active"] is None
++    assert state["gaps_recovered"] == 1
++
++
++def test_corrupt_recovered_bar_invalidates_without_fake_exit():
++    opened = opened_state()
++    snap = candles(110)
++    snap.iloc[97, snap.columns.get_loc("Close")] = 1e5  # close outside H/L
++    state = advance_raw_paper(opened, snap, votes(), spread=.4)
++    assert state["active"] is None
++    assert state["invalidated_rows"][-1]["invalidation_reason"] == "INVALID_FILL_OR_CANDLE"
++    assert state["closed"] == []
++
++
++def test_replaying_same_snapshot_is_idempotent():
++    opened = opened_state()
++    snap = candles(110)
++    snap.iloc[101, snap.columns.get_loc("Low")] = 7000.0
++    once = advance_raw_paper(opened, snap, votes(), spread=.4)
++    twice = advance_raw_paper(once, snap, votes(), spread=.4)
++    assert once["closed"] == twice["closed"]
++    assert twice["closed_total"] == 1
++    assert twice["opened"] == once["opened"]
++
++
++def test_report_exposes_recovery_counters_and_no_pnl_for_invalidated():
++    opened = opened_state()
++    snap = candles(110).drop(candles(110).index[99])
++    report = raw_paper_report(advance_raw_paper(opened, snap, votes(), spread=.4))
++    assert report["gaps_recovered"] == 0
++    assert report["invalidated_after_open"] == 1
++    assert report["recovered_bars"] == 0
++
++
++def test_hole_inside_recent_window_invalidates_immediately_not_frozen():
++    """Regression: a hole in the last 10 bars used to freeze the position
++    (early return) until the hole left the window, unlike a real SL/TP."""
++    opened = opened_state()
++    snap = candles(110).drop(candles(110).index[107])  # hole in last 10 bars
++    state = advance_raw_paper(opened, snap, votes(), spread=.4)
++    assert state["active"] is None
++    assert state["invalidated_after_open_total"] == 1
++    assert state["last_candle_utc"] == snap.index[-1].isoformat()
++
++
++def test_hole_on_normal_step_still_blocks_indicator_computation():
++    """No gap jump -> strict contiguity: a broken recent window is refused."""
++    opened = opened_state()
++    snap = candles(96)  # prior bar 95 is the newest processed bar
++    snap = snap.drop(snap.index[93])  # hole before the newest bars
++    state = advance_raw_paper(opened, snap, votes(), spread=.4)
++    assert state["last_reason"] == "NIEWIARYGODNE_ZAMKNIETE_M1_RAW"
++    assert state["active"]["status"] == "OPEN"
++    assert state.get("gaps_recovered", 0) == 0
+diff -ruN -x __pycache__ -x .pytest_cache orig/tests/test_raw_paper_invalidation_ledger.py fokus/fokus-the-best-trader-main/tests/test_raw_paper_invalidation_ledger.py
+--- orig/tests/test_raw_paper_invalidation_ledger.py	2026-11-23 13:45:33.297937988 +0000
++++ fokus/fokus-the-best-trader-main/tests/test_raw_paper_invalidation_ledger.py	2026-11-23 13:46:12.344899462 +0000
+@@ -22,7 +22,8 @@
+ 
+ def test_pending_invalidated_by_missing_minute_logged_without_fake_open_or_result():
+     pending=advance_raw_paper({},candles(),votes(),spread=.4)
+-    missing=advance_raw_paper(pending,candles(97),votes(),spread=.4)
++    # Real hole: minute 95 is absent from the snapshot.
++    missing=advance_raw_paper(pending,candles(97).drop(candles(97).index[95]),votes(),spread=.4)
+     assert missing["opened"]==0
+     assert missing["invalidated_before_open_total"]==1
+     assert missing["invalidated_after_open_total"]==0
+@@ -42,7 +43,8 @@
+     first=advance_raw_paper({},candles(),votes(),spread=.4)
+     opened=advance_raw_paper(first,candles(96),votes(),spread=.4)
+     assert opened["opened"]==1 and opened["active"]["status"]=="OPEN"
+-    gap=advance_raw_paper(opened,candles(98),votes(),spread=.4)
++    # Real hole: minute 96 is absent from the snapshot.
++    gap=advance_raw_paper(opened,candles(98).drop(candles(98).index[96]),votes(),spread=.4)
+     assert gap["opened"]==1
+     assert gap["closed"]==[]
+     assert gap["active"] is None
+@@ -66,7 +68,7 @@
+     assert row["Wejście (pkt)"]==opened["active"]["entry_mid"]
+     assert row["Wyjście (pkt)"] is None
+     assert row["Zysk/strata netto (pkt)"] is None
+-    repeat=advance_raw_paper(gap,candles(98),votes(),spread=.4)
++    repeat=advance_raw_paper(gap,candles(98).drop(candles(98).index[96]),votes(),spread=.4)
+     assert repeat["invalidated_after_open_total"]==1
+     assert len(repeat["invalidated_rows"])==1
+ 
+diff -ruN -x __pycache__ -x .pytest_cache orig/trader/momentum_paper_test.py fokus/fokus-the-best-trader-main/trader/momentum_paper_test.py
+--- orig/trader/momentum_paper_test.py	2026-11-23 13:45:33.301927836 +0000
++++ fokus/fokus-the-best-trader-main/trader/momentum_paper_test.py	2026-11-23 13:46:38.497523464 +0000
+@@ -55,7 +55,10 @@
+     return n if isfinite(n) else None
+ 
+ 
+-def _valid_frame(frame):
++def _valid_frame(frame, *, allow_gaps=False):
++    """allow_gaps=True lets a caller that handles missing minutes itself
++    (RAW gap recovery) accept a frame whose recent window has holes. Any
++    caller computing indicators on a series must keep the strict default."""
+     if (not isinstance(frame, pd.DataFrame) or len(frame) < 85
+             or not isinstance(frame.index, pd.DatetimeIndex)
+             or frame.index.tz is None or not frame.index.is_monotonic_increasing
+@@ -63,8 +66,8 @@
+             or not {"Open", "High", "Low", "Close"}.issubset(frame.columns)):
+         return False
+     recent = frame.iloc[-10:]
+-    if any((recent.index[i] - recent.index[i-1]).total_seconds() != 60
+-           for i in range(1, len(recent))):
++    if not allow_gaps and any((recent.index[i] - recent.index[i-1]).total_seconds() != 60
++                              for i in range(1, len(recent))):
+         return False
+     for col in ("Open", "High", "Low", "Close"):
+         if not all(isfinite(float(v)) for v in recent[col]):
+diff -ruN -x __pycache__ -x .pytest_cache orig/trader/raw_m1_forward_paper.py fokus/fokus-the-best-trader-main/trader/raw_m1_forward_paper.py
+--- orig/trader/raw_m1_forward_paper.py	2026-11-23 13:45:33.302246051 +0000
++++ fokus/fokus-the-best-trader-main/trader/raw_m1_forward_paper.py	2026-11-23 13:46:38.498015748 +0000
+@@ -23,6 +23,7 @@
+ MAX_HISTORY = 120
+ MAX_DAILY_LOSS = 20.0
+ MIN_GAP_BARS = 2
++MAX_RECOVER_BARS = 120  # 2 h of M1; longer outages stay unverifiable
+ SUPPORTED = frozenset((
+     "DRUGA FALA", "EMA TREND", "LIQUIDITY SWEEP",
+     "BREAKOUT RETEST", "EMA PULLBACK", "VOLATILITY BREAKOUT",
+@@ -77,6 +78,103 @@
+     data[key]=int(data.get(key) or 0)+1
+ 
+ 
++def _is_gap_jump(previous, frame):
++    """True only when the newest bar jumps over at least one missing minute.
++
++    Holes are tolerated ONLY in this case, because the gap handler verifies
++    every missed minute before replay. Normal one-minute steps keep the strict
++    contiguity check, so indicators are never computed on a broken series.
++    """
++    prior = _time(previous.get("last_candle_utc"))
++    if prior is None or not isinstance(frame, pd.DataFrame) or frame.empty:
++        return False
++    try:
++        stamp = pd.Timestamp(frame.index[-1]).tz_convert("UTC")
++    except (TypeError, ValueError, AttributeError):
++        return False
++    return stamp > prior and stamp - prior != pd.Timedelta(minutes=1)
++
++
++def _handle_gap(data, previous, frame, prior, stamp):
++    """A jump in closed M1 bars happened (a scan overran a minute).
++
++    If the snapshot already contains EVERY missed real minute, those closed
++    bars are replayed in order (see _recover_missed_bars). Otherwise the
++    hole is real and the active path is invalidated, never closed at an
++    invented price.
++    """
++    data["gaps"]=int(data.get("gaps",0))+1
++    expected=pd.date_range(prior+pd.Timedelta(minutes=1), stamp,
++                           freq="1min", tz="UTC")
++    bars=frame.copy()
++    bars.index=bars.index.tz_convert("UTC")
++    recoverable=(0 < len(expected) <= MAX_RECOVER_BARS
++                 and bool(expected.isin(bars.index).all()))
++    active=previous.get("active")
++    if recoverable:
++        return _recover_missed_bars(data, active, bars, expected)
++    if isinstance(active,dict) and active.get("status") in ("PENDING","OPEN"):
++        _invalidate(data,active,stamp,"MISSING_M1_BAR")
++        data["invalidated"]=int(data.get("invalidated",0))+1
++        data["last_close_utc"]=stamp.isoformat()
++    data["active"]=None
++    _reason(data,"LUKA_SWIEC_RAW_BEZ_FILL")
++    return data
++
++
++def _recover_missed_bars(data, active, bars, expected):
++    """Replay REAL closed M1 bars that a skipped scan left behind.
++
++    Bars come only from the broker snapshot already fetched, are applied in
++    chronological order through the same PENDING->OPEN->SL/TP/TIMEOUT rules
++    as live operation, and never interpolate or synthesize a candle.
++    No NEW setup is created from a recovered tick: MTF, spread and macro
++    context of those past minutes is not available, so no hindsight entry.
++    """
++    position = active if (isinstance(active,dict) and
++                          active.get("status") in ("PENDING","OPEN")) else None
++    processed = 0
++    for ts in expected:
++        if position is None:
++            processed = len(expected)
++            break
++        candle = bars.loc[ts]
++        was_pending = position.get("status") == "PENDING"
++        updated, outcome = _progress_position(position, candle, ts)
++        processed += 1
++        if was_pending:
++            entry_open = (ts - pd.Timedelta(minutes=1)).isoformat()
++            for part in (updated, outcome):
++                if isinstance(part, dict):
++                    part["entry_bar_open_utc"] = entry_open
++        if outcome == "INVALID":
++            _invalidate(data, position, ts, "INVALID_FILL_OR_CANDLE")
++            data["invalidated"] = int(data.get("invalidated",0))+1
++            data["last_close_utc"] = ts.isoformat()
++            _reason(data, "RAW_FILL_INVALIDATED")
++            position = None
++            break
++        if isinstance(outcome, dict):
++            if was_pending:
++                data["opened"] = int(data.get("opened",0))+1
++            old_closed = list(data.get("closed") or [])
++            data["closed"] = (old_closed+[outcome])[-MAX_HISTORY:]
++            data["closed_total"] = int(data.get("closed_total",
++                                                len(old_closed)))+1
++            data["last_close_utc"] = ts.isoformat()
++            _reason(data, outcome["status"]+"_RAW")
++            position = None
++            break
++        if was_pending and updated.get("status") == "OPEN":
++            data["opened"] = int(data.get("opened",0))+1
++        position = updated
++    data["active"] = position
++    data["gaps_recovered"] = int(data.get("gaps_recovered",0))+1
++    data["recovered_bars"] = int(data.get("recovered_bars",0))+processed
++    _reason(data, f"LUKA_M1_ODZYSKANA_Z_ZAMKNIETYCH_SWIEC={processed}")
++    return data
++
++
+ def _candidate(frame, votes, spread):
+     if not isinstance(votes, list):
+         return None, "BRAK_GLOSOW_RAW"
+@@ -141,7 +239,8 @@
+     if not enabled:
+         data["last_reason"]="RAW_TEST_WYLACZONY"
+         return data
+-    if source!=SOURCE or epic!="US500" or not _valid_frame(frame):
++    if source!=SOURCE or epic!="US500" or not _valid_frame(
++            frame, allow_gaps=_is_gap_jump(previous, frame)):
+         _reason(data,"NIEWIARYGODNE_ZAMKNIETE_M1_RAW")
+         return data
+     cost_spread=_finite(spread)
+@@ -154,14 +253,7 @@
+         return data
+     data["last_candle_utc"]=stamp.isoformat()
+     if prior is not None and stamp-prior!=pd.Timedelta(minutes=1):
+-        data["gaps"]=int(data.get("gaps",0))+1
+-        if data.get("active"):
+-            _invalidate(data,data["active"],stamp,"MISSING_M1_BAR")
+-            data["invalidated"]=int(data.get("invalidated",0))+1
+-            data["last_close_utc"]=stamp.isoformat()
+-        data["active"]=None
+-        _reason(data,"LUKA_SWIEC_RAW_BEZ_FILL")
+-        return data
++        return _handle_gap(data, previous, frame, prior, stamp)
+ 
+     active=previous.get("active")
+     if isinstance(active,dict):
+@@ -287,6 +379,8 @@
+         "last_side":data.get("last_side"),
+         "last_setup_utc":data.get("last_setup_utc"),
+         "gaps":int(data.get("gaps",0)),
++        "gaps_recovered":int(data.get("gaps_recovered",0)),
++        "recovered_bars":int(data.get("recovered_bars",0)),
+         "invalidated":int(data.get("invalidated",0)),
+         "active":{k:active.get(k) for k in fields} if active else None,
+         "recent":[{k:p.get(k) for k in fields} for p in closed[-80:]],
