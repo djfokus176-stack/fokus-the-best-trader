@@ -103,7 +103,8 @@ def test_global_guards_remain_mandatory(blocker):
 
 def test_data_gap_invalidates_pending_without_fake_fill_and_no_backfill():
     first=advance_raw_paper({},candles(),votes(),spread=.4)
-    jumped=advance_raw_paper(first,candles(97),votes(),spread=.4)
+    # Real hole: minute 95 is absent from the snapshot, so nothing to replay.
+    jumped=advance_raw_paper(first,candles(97).drop(candles(97).index[95]),votes(),spread=.4)
     assert jumped["gaps"]==1
     assert jumped["invalidated"]==1
     assert jumped["active"] is None

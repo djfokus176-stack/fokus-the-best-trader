@@ -22,7 +22,8 @@ def votes(side="LONG"):
 
 def test_pending_invalidated_by_missing_minute_logged_without_fake_open_or_result():
     pending=advance_raw_paper({},candles(),votes(),spread=.4)
-    missing=advance_raw_paper(pending,candles(97),votes(),spread=.4)
+    # Real hole: minute 95 is absent from the snapshot.
+    missing=advance_raw_paper(pending,candles(97).drop(candles(97).index[95]),votes(),spread=.4)
     assert missing["opened"]==0
     assert missing["invalidated_before_open_total"]==1
     assert missing["invalidated_after_open_total"]==0
@@ -42,7 +43,8 @@ def test_open_invalidated_by_gap_is_logged_and_reconciled_without_pnl():
     first=advance_raw_paper({},candles(),votes(),spread=.4)
     opened=advance_raw_paper(first,candles(96),votes(),spread=.4)
     assert opened["opened"]==1 and opened["active"]["status"]=="OPEN"
-    gap=advance_raw_paper(opened,candles(98),votes(),spread=.4)
+    # Real hole: minute 96 is absent from the snapshot.
+    gap=advance_raw_paper(opened,candles(98).drop(candles(98).index[96]),votes(),spread=.4)
     assert gap["opened"]==1
     assert gap["closed"]==[]
     assert gap["active"] is None
@@ -66,7 +68,7 @@ def test_open_invalidated_by_gap_is_logged_and_reconciled_without_pnl():
     assert row["Wejście (pkt)"]==opened["active"]["entry_mid"]
     assert row["Wyjście (pkt)"] is None
     assert row["Zysk/strata netto (pkt)"] is None
-    repeat=advance_raw_paper(gap,candles(98),votes(),spread=.4)
+    repeat=advance_raw_paper(gap,candles(98).drop(candles(98).index[96]),votes(),spread=.4)
     assert repeat["invalidated_after_open_total"]==1
     assert len(repeat["invalidated_rows"])==1
 
