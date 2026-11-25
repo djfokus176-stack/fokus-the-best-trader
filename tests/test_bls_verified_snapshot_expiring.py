@@ -59,12 +59,12 @@ def test_both_official_sources_403_use_only_short_lived_backup():
 
 
 def test_legacy_backup_expires_but_checked_manual_fallback_is_separate():
-    for at in [datetime(2026,11,17,13,tzinfo=timezone.utc),datetime(2026,11,17,19,tzinfo=timezone.utc)]:
+    for at in [datetime(2026,11,25,14,tzinfo=timezone.utc),datetime(2026,11,26,14,tzinfo=timezone.utc)]:
         checked=fetch_bls_schedule(get=reject,now=at)
         assert checked.source=="BLS_VERIFIED_MANUAL_NOT_LIVE"
-        assert checked.expires_utc=="2026-11-24T12:45:00+00:00"
+        assert checked.expires_utc=="2026-11-28T13:35:00+00:00"
     with pytest.raises(ValueError,match="BLS_MANUAL_VERIFICATION_EXPIRED"):
-        fetch_bls_schedule(get=reject,now=datetime(2026,11,24,12,45,tzinfo=timezone.utc))
+        fetch_bls_schedule(get=reject,now=datetime(2026,11,28,13,35,tzinfo=timezone.utc))
 
 
 def test_no_backup_on_bls_500():
