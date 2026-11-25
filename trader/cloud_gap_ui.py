@@ -56,7 +56,7 @@ def render_cloud_gap_audit(remote_enabled, secret_fn):
         if not result:
             return
         st.markdown("**Pokrycie badanej próbki — nie całej bazy**")
-        st.dataframe(result["summary"],hide_index=True,use_container_width=True)
+        st.dataframe(result["summary"],hide_index=True,width="stretch")
         st.warning(
             "WEEKEND_OVERLAP oznacza tylko przerwę obejmującą weekend; "
             "DAILY_BREAK_CANDIDATE to hipoteza przerwy około 22:00 UTC. "
@@ -68,7 +68,7 @@ def render_cloud_gap_audit(remote_enabled, secret_fn):
                              key="fokus_gap_show_all")
         table=result["gaps"] if show_all else result["gaps"].loc[
             result["gaps"]["classification"]==REVIEW]
-        st.dataframe(table,hide_index=True,use_container_width=True)
+        st.dataframe(table,hide_index=True,width="stretch")
         st.download_button(
             "⬇️ EKSPORT AUDYTU LUK CSV",
             data=result["gaps"].to_csv(index=False).encode("utf-8-sig"),
