@@ -32,7 +32,7 @@ def ok(url, body):
 
 
 def test_nov_dec_verified_backup_recovers_after_both_official_403():
-    now = dt("2026-11-17T12:50:00+00:00")
+    now = dt("2026-11-25T13:50:00+00:00")
     found = []
     def blocked(url, **kw):
         found.append(url)
@@ -53,7 +53,7 @@ def test_nov_dec_verified_backup_recovers_after_both_official_403():
 
 
 def test_backup_expires_hard_and_never_opens_paper_after_expiry():
-    expired = dt("2026-11-24T12:45:01+00:00")
+    expired = dt("2026-11-28T13:35:01+00:00")
     with pytest.raises(ValueError, match="BLS_MANUAL_VERIFICATION_EXPIRED"):
         news_radar.fetch_bls_schedule(get=denied, now=expired)
     with pytest.raises(ValueError, match="BLS_MANUAL_VERIFICATION_EXPIRED"):
