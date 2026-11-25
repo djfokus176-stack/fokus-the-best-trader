@@ -170,7 +170,7 @@ def manual_status_panel(remote):
                         "Netto pkt":p.get("pnl_pts"),
                     })
                 st.dataframe(pd.DataFrame(rows),hide_index=True,
-                             use_container_width=True)
+                             width="stretch")
         invalid=report.get("invalidated_recent") or []
         if invalid:
             st.warning(str(len(invalid))+
