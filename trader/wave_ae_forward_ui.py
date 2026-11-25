@@ -38,7 +38,7 @@ def render_wave_ae_forward_status(state, report, meta):
             st.markdown("**Ranking A–E według kierunku (wyniki wyłącznie rozliczone)**")
             table=pd.DataFrame(report.get("rank") or [])
             if not table.empty:
-                st.dataframe(table,hide_index=True,use_container_width=True)
+                st.dataframe(table,hide_index=True,width="stretch")
                 st.download_button(
                     "⬇️ A–E FORWARD — ranking CSV",
                     data=table.to_csv(index=False).encode("utf-8-sig"),
@@ -61,7 +61,7 @@ def render_wave_ae_forward_status(state, report, meta):
             if records:
                 with st.expander("Rozliczenia poszczególnych A–E"):
                     st.dataframe(pd.DataFrame(records),hide_index=True,
-                                 use_container_width=True)
+                                 width="stretch")
         else:
             st.info("Brak nowych trzecich szczytów/dołków od uruchomienia. "
                     "To poprawny wynik, nie awaria.")
