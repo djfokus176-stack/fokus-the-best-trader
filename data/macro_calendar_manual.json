@@ -8,10 +8,10 @@
     "november": "2026-11-03",
     "december": "2026-02-18"
   },
-  "verified_at_utc": "2026-11-17T12:45:00+00:00",
-  "valid_until_utc": "2026-11-24T12:45:00+00:00",
+  "verified_at_utc": "2026-11-25T13:35:00+00:00",
+  "valid_until_utc": "2026-11-28T13:35:00+00:00",
   "timezone": "America/New_York",
-  "notes": "Human-verified against official November and December 2026 BLS monthly list pages on 2026-11-17. PAPER-only short-term backup, NOT live or automatically refreshed. Expires in seven days; never extend without checking official sources. Does not cover all macro releases.",
+  "notes": "Rechecked on 2026-11-25 against official BLS November/December 2026 monthly lists (www.bls.gov): selected future dates, Eastern-time conversions and historical entries compared. AI-assisted public-source check, NOT a live feed or guaranteed complete macro coverage. PAPER-only fallback ends after 72 hours; NEVER auto-renew or treat a missing calendar as a safe trading window.",
   "events": [
     {
       "data_utc": "2026-11-10T13:30:00+00:00",

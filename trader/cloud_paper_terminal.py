@@ -337,9 +337,10 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         key="cloud_price_chart_zoom_"+choice)
     chart_mode=st.selectbox(
         "🎯 CO POKAZAĆ NA WYKRESIE? (zapisane wejścia z historii)",
-        options=["BIEŻĄCE ŚWIECE","OSTATNIE OPEN RAW","OSTATNIE CLOSE RAW",
-                 "OSTATNIE OPEN PAPER v3","OSTATNIE OPEN RĘCZNE",
-                 "OSTATNIE CLOSE RĘCZNE"],
+        options=["BIEŻĄCE ŚWIECE","OSTATNIE CLOSE PAPER v3",
+                 "OSTATNIE OPEN PAPER v3",
+                 "OSTATNIE OPEN RAW","OSTATNIE CLOSE RAW",
+                 "OSTATNIE OPEN RĘCZNE","OSTATNIE CLOSE RĘCZNE"],
         key="cloud_price_chart_focus_"+choice,
         help="Wybierz historyczną transakcję, żeby wykres przesunął się na "
              "prawdziwą świecę otwarcia/zamknięcia. To nie tworzy zleceń.")
@@ -356,6 +357,10 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
             help="Ścieżka z zamknięć rzeczywistych świec OHLC. "
                  "Luki danych przerywają linię, nie odtwarzam ticków.")
     resolution=source_resolution(choice)
+    # Never download 5k candles during normal live preview. The extended
+    # historical read is strictly opt-in when the owner selects a saved
+    # entry/exit, and does not alter the strategy's live M1 window.
+    history_mode=(chart_mode!="BIEŻĄCE ŚWIECE")
     render_candle_clock(choice)
     st.caption(
         "Zamknięte świece wybranego interwału = zielone/czerwone. "
@@ -379,19 +384,27 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         if (not isinstance(cache,dict) or cache.get("url")!=url
                 or cache.get("resolution")!=resolution
                 or cache.get("choice")!=choice
+                or cache.get("history_mode")!=history_mode
                 or m15_cache_due(
-                    cache,ttl_seconds=35 if choice in ("M1","M2") else 60)):
+                    cache,ttl_seconds=(120 if history_mode
+                        else 35 if choice in ("M1","M2") else 60))):
             version,payload=remote.fetch()
             # 1500 closed M1 bars give context for overnight positions,
             # without requesting tick history or changing the worker.
             # More-than-300 chart zoom must have >300 REAL archived candles.
             candle_limit=1500 if resolution=="MINUTE" else 520
+            if history_mode and resolution=="MINUTE":
+                # Up to 5000 real saved M1 candles: recent close from
+                # yesterday stays selectable even if 1500 live bars passed.
+                # The UI draws at most the zoomed candle window below.
+                candle_limit=5000
             original=remote.fetch_candles("US500",resolution,limit=candle_limit)
             frame=closed_chart_frame(original,choice)
             audit=cloud_terminal_summary(version,payload,frame)
             # Per-BROWSER session cache only; never put credentials in it.
             st.session_state["_fokus_cloud_chart_cache_v3"]={
                 "url":url,"resolution":resolution,"choice":choice,
+                "history_mode":history_mode,
                 "version":version,"payload":payload,"frame":frame,
                 "fetched_utc":pd.Timestamp.now(tz="UTC").isoformat()}
         else:
@@ -945,6 +958,15 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         if known:
             latest=max(known,key=lambda r:_parse_utc(r["opened_utc"]))
             focus_utc=latest["opened_utc"]
+    elif chart_mode=="OSTATNIE CLOSE PAPER v3":
+        # Only ledger-backed CLOSED transitions, not pending or invalidated
+        # candidates. This is a chart-only focus, no trade or price inference.
+        known=[r for r in recent_paper
+               if r.get("status") in ("CLOSED_SL","CLOSED_TP","CLOSED_TIMEOUT")
+               and _parse_utc(r.get("closed_utc")) is not None]
+        if known:
+            latest=max(known,key=lambda r:_parse_utc(r["closed_utc"]))
+            focus_utc=latest["closed_utc"]
     elif chart_mode in ("OSTATNIE OPEN RĘCZNE","OSTATNIE CLOSE RĘCZNE"):
         rows=list(manual_trial.get("recent") or [])
         if isinstance(manual_trial.get("active"),dict):
@@ -984,6 +1006,11 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
                    str(counts["last_open_utc"] or "BRAK")+
                    " | CLOSE UTC: "+str(counts["last_close_utc"] or "BRAK")+
                    ". Wszystkie to symulacje bez zleceń brokera.")
+        if counts["visible_closed"]==0 and counts["total_closed"]>0:
+            st.info("W ostatnich świecach NIE MA zamknięcia AUTO. "
+                    "Wybierz powyżej „OSTATNIE CLOSE PAPER v3”, "
+                    "aby wyświetlić zapisane historyczne wejście, "
+                    "zamknięcie i wynik na prawdziwych świecach.")
         if counts["invalid_rows"]:
             st.warning("Nieprawidłowe wpisy PAPER: "+
                        str(counts["invalid_rows"])+
@@ -1147,7 +1174,8 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
     # Exact OPEN/CLOSE PAPER from the checkpoint, NEVER watch markers or
     # signals inferred from OHLC. M1 PAPER may appear on the M15 time axis.
     annotate_paper_history(candles,chart_paper,
-                           "US500","Capital.com DEMO REST",None)
+                           "US500","Capital.com DEMO REST",None,
+                           show_labels=True)
     # This additional lane NEVER creates entries from chart candles or
     # OBSERWUJ signals: markers are from the durable worker RAW ledger.
     annotate_raw_forward(candles,raw_trial,

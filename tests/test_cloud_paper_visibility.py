@@ -91,7 +91,8 @@ def test_ui_distinguishes_stage_two_watch_and_ledger_without_adding_trades():
     assert "cloud_paper_visibility(payload,viewport=viewport)" in source
     assert "ETAP 2/3 — WCZESNA OBSERWACJA (SHADOW)" in source
     assert 'st.select_slider(' in source
-    assert 'ttl_seconds=35 if choice in ("M1","M2") else 60' in source
+    assert 'cache.get("history_mode")!=history_mode' in source
+    assert 'ttl_seconds=(120 if history_mode' in source
     assert "queue_paper(" not in source
     assert "CapitalReadOnly(" not in source
 
