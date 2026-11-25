@@ -105,7 +105,7 @@ def render_strategy_ranking(archive,selected,*,widget_scope="terminal",now=None)
                         "i kierunku w tym okresie. Nie przypisuję "
                         "zerowej skuteczności bez danych.")
                 continue
-            st.dataframe(df,hide_index=True,use_container_width=True)
+            st.dataframe(df,hide_index=True,width="stretch")
             st.download_button(
                 "📥 Pobierz ranking "+LABELS[kind]+" (CSV)",
                 data=df.to_csv(index=False).encode("utf-8-sig"),
