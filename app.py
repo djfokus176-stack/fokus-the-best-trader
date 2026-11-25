@@ -287,7 +287,7 @@ def manual_ai_request(question, payload, effort=None):
 
 with st.sidebar:
     st.header('⚙️ NOWE USTAWIENIA')
-    if st.button('🔒 WYLOGUJ Z TERMINALU',use_container_width=True):
+    if st.button('🔒 WYLOGUJ Z TERMINALU',width="stretch"):
         for key in ('_owner_access_digest','_api_session_overrides',
                     '_capital_client','_capital_test','market_snap',
                     'ai_context','source_override','initial_scan_attempted'):
@@ -446,8 +446,8 @@ with st.sidebar:
                 entered_openai=st.text_input('OpenAI: API Key',type='password')
                 entered_telegram=st.text_input('Telegram: Bot Token',type='password')
                 entered_chat_id=st.text_input('Telegram: Chat ID (opcjonalny)')
-                save_session=st.form_submit_button('🔐 ZAPISZ W SESJI',use_container_width=True)
-                check_capital=st.form_submit_button('🧪 ZAPISZ I TESTUJ CAPITAL.COM',use_container_width=True)
+                save_session=st.form_submit_button('🔐 ZAPISZ W SESJI',width="stretch")
+                check_capital=st.form_submit_button('🧪 ZAPISZ I TESTUJ CAPITAL.COM',width="stretch")
             if save_session or check_capital:
                 mapping={'CAPITAL_API_KEY':entered_key,'CAPITAL_IDENTIFIER':entered_login,
                          'CAPITAL_PASSWORD':entered_password,'OPENAI_API_KEY':entered_openai,
@@ -488,13 +488,13 @@ with st.sidebar:
                     st.success(result['message'])
                 else:
                     st.error(result['message'])
-            if st.button('🧪 TEST OPENAI — DOSTĘP DO MODELU (bez generowania)',use_container_width=True):
+            if st.button('🧪 TEST OPENAI — DOSTĘP DO MODELU (bez generowania)',width="stretch"):
                 ok,msg=test_openai_model(openai_api_key,secret('OPENAI_MODEL','gpt-5.4'))
                 (st.success if ok else st.error)(msg)
-            if st.button('🧪 TEST TELEGRAM — TOKEN (bez wysyłania)',use_container_width=True):
+            if st.button('🧪 TEST TELEGRAM — TOKEN (bez wysyłania)',width="stretch"):
                 ok,msg=test_telegram_token(telegram_token)
                 (st.success if ok else st.error)(msg)
-            if st.button('🗑️ USUŃ TYMCZASOWE DANE SESJI',use_container_width=True):
+            if st.button('🗑️ USUŃ TYMCZASOWE DANE SESJI',width="stretch"):
                 for key in ('_api_session_overrides','_capital_client','_capital_test',
                             'market_snap','ai_context','source_override',
                             'initial_scan_attempted','last_feed_error','epic_matches'):
@@ -505,7 +505,7 @@ with st.sidebar:
         # This bypasses stale temporary overrides and authenticates from Secrets
         # without asking the owner to type or reveal any credentials.
         if st.button('🧪 TESTUJ ZAPISANE SECRETS (BEZ WPISYWANIA)',
-                     use_container_width=True,disabled=cloud_read_only_mode,
+                     width="stretch",disabled=cloud_read_only_mode,
                      help='W CLOUD tylko Northflank loguje się do Capital.com. '
                           'Test w przeglądarce może tworzyć drugą sesję.'):
             existing=st.session_state.get('_api_session_overrides',{})
@@ -549,7 +549,7 @@ with st.sidebar:
             else:
                 st.info('🔐 Dane Capital.com są dostępne, ale jeszcze NIEPOTWIERDZONE. '
                         'Kliknij „TESTUJ ZAPISANE SECRETS”, bez wpisywania hasła.')
-            if st.button(f'🔎 SPRAWDŹ EPIC NA KONCIE {capital_env}',use_container_width=True):
+            if st.button(f'🔎 SPRAWDŹ EPIC NA KONCIE {capital_env}',width="stretch"):
                 try:
                     if not capital_client_matches(st.session_state.get('_capital_client'),
                             cap_api_key,cap_identifier,cap_password,capital_env):
@@ -562,7 +562,7 @@ with st.sidebar:
                     st.error(str(ex))
             if st.session_state.get('epic_matches'):
                 st.caption('Wyniki z Capital.com — wpisz poprawny EPIC w polu wyżej.')
-                st.dataframe(st.session_state['epic_matches'],hide_index=True,use_container_width=True)
+                st.dataframe(st.session_state['epic_matches'],hide_index=True,width="stretch")
         else:
             st.warning('⚠️ Brak API Capital.com. Możesz analizować własny CSV.')
     else:
@@ -645,7 +645,7 @@ with market_tab:
                         'zapisujących ten sam checkpoint Supabase. '
                         'Nie wpisuj tutaj ponownie loginu Capital.com.')
             manual=st.button('▶ URUCHOM SKAN PAPER TERAZ (DEMO)',key='owner_one_cloud_scan',
-                             use_container_width=True,disabled=(
+                             width="stretch",disabled=(
                                  not allow_browser_paper or not has_cap
                                  or capital_env!='DEMO'))
             if manual:
@@ -708,7 +708,7 @@ with market_tab:
         csv=st.file_uploader('Opcjonalnie własne dane OHLC CSV (wyłącznie do nauki / replay)',type=['csv'])
         cloud_owner_display=remote_paper_view_enabled()
         load=st.button('🔄 SKANUJ ŚWIECE (TYLKO LOKALNIE)',type='primary',
-                       use_container_width=True,disabled=cloud_owner_display,
+                       width="stretch",disabled=cloud_owner_display,
                        help='W CLOUD skaner Northflank pracuje sam. '
                             'Ręczny lokalny skan powodował HTTP 401.')
         if cloud_owner_display:
@@ -946,7 +946,7 @@ with market_tab:
         st.metric('Próby pobrania w tej sesji',st.session_state.get('_scan_attempt_count',0))
         if st.session_state.get('_scan_log'):
             st.dataframe(pd.DataFrame(st.session_state['_scan_log'][::-1]),hide_index=True,
-                use_container_width=True)
+                width="stretch")
         else:
             st.info('Brak prób skanowania w tej sesji.')
     if snap is not None:
@@ -1121,7 +1121,7 @@ with market_tab:
                     for obstacle in health['blockers'][:10]:
                         st.write('• '+obstacle)
                 st.dataframe(pd.DataFrame(health['checks']),
-                    hide_index=True,use_container_width=True)
+                    hide_index=True,width="stretch")
                 if remote_is_on:
                     worker_summary=str(remote_health.get('last_scan_summary') or '')
                     if ' / NO_FEED / ' in worker_summary:
@@ -1191,7 +1191,7 @@ with market_tab:
                             'Przyczyna':str(error or v.reason),
                         })
                     st.dataframe(pd.DataFrame(mtf_rows),
-                        hide_index=True,use_container_width=True)
+                        hide_index=True,width="stretch")
                     st.caption('Brak danych na stronie nie oznacza automatycznie, '
                         'że ostatni zdalny skan workera miał błąd MTF.')
                     if st.button('🔄 POBIERZ PONOWNIE BRAKUJĄCE MTF (TYLKO DANE)',
@@ -1275,7 +1275,7 @@ with market_tab:
                                    if p['criteria'][2]['ok'] else '❌ Niepotwierdzone'),
                                'Dlaczego czeka':p['reason']} for p in progress]
                         st.dataframe(pd.DataFrame(rows),hide_index=True,
-                                     use_container_width=True)
+                                     width="stretch")
                         top=max(progress,key=lambda p:p['stage'])
                         if top['stage']>0:
                             st.info('👀 Najbliższy układ: **'+top['strategy']+' '
@@ -1294,7 +1294,7 @@ with market_tab:
                                  if candidate.action in ('LONG','SHORT') else 'NIE',
                             'Dlaczego':candidate.reason})
                     st.dataframe(pd.DataFrame(research_bars),hide_index=True,
-                                 use_container_width=True)
+                                 width="stretch")
                     st.caption('Nawet 3/3 nie upoważnia do otwarcia PAPER: '
                                'te hipotezy NIE są głosami sześciu AUTO. '
                                'NY OPEN TRAP dotyczy godzin otwarcia Nowego Jorku.')
@@ -1309,12 +1309,12 @@ with market_tab:
                         st.markdown('#### 🔎 RADAR KANDYDATÓW (PRZED WERYFIKACJĄ MTF)')
                         st.caption('To wykryte układy 6 strategii, NIE otwarte pozycje. '
                                    'Po filtrach MTF mogą być odrzucone; nie liczę ich do skuteczności.')
-                        st.dataframe(pd.DataFrame(raw_candidates),hide_index=True,use_container_width=True)
+                        st.dataframe(pd.DataFrame(raw_candidates),hide_index=True,width="stretch")
                     else:
                         st.info('🔎 Radar sześciu strategii: brak surowego LONG/SHORT '
                                 'na tej zamkniętej świecy — nie generuję fikcyjnego typu.')
                     with st.expander('📊 AUTO — WSZYSTKIE 6 STRATEGII I BLOKADY'):
-                        st.dataframe(pd.DataFrame(auto_audit),hide_index=True,use_container_width=True)
+                        st.dataframe(pd.DataFrame(auto_audit),hide_index=True,width="stretch")
                     shadow=decide_any(snap.frame,WAVE_NAME,spread=snap.spread)
                     mtf_shadow,_=filter_mtf_decision(
                         shadow,st.session_state.get('mtf_snapshots',{}),
@@ -1498,7 +1498,7 @@ with market_tab:
                                    'target_mid','exit_mid','pnl_pts',
                                    'close_reason','exit_policy']
                             st.dataframe(journal[focus].head(80),hide_index=True,
-                                         use_container_width=True)
+                                         width="stretch")
                             st.caption('entry_assumed_utc to hipotetyczna chwila '
                                        'wejścia; opened_utc to zamknięcie pierwszej '
                                        'świecy, po którym odtworzono cenę. '
@@ -1510,13 +1510,13 @@ with market_tab:
                                 mime='text/csv',
                                 file_name='FOKUS_PAPER_STRATEGIE_ID_WYNIKI.csv',
                                 key='paper_terminal_full_journal',
-                                use_container_width=True)
+                                width="stretch")
                             audit,totals=paper_strategy_audit(paper_rows)
                             if not audit.empty:
                                 st.markdown('**📉 ROZLICZENIA WEDŁUG STRATEGII '
                                             'I KIERUNKU — PAPER**')
                                 st.dataframe(audit,hide_index=True,
-                                             use_container_width=True)
+                                             width="stretch")
                                 st.caption(
                                     f"Zamknięte: {totals['n']}; "
                                     f"zyskowne: {totals['profitable']}; "
@@ -1600,7 +1600,7 @@ with market_tab:
                         ('OK' if calendar_is_current(st.session_state) else 'BRAK POTWIERDZENIA'))
                     if news_ctx['headlines']:
                         st.dataframe(pd.DataFrame(news_ctx['headlines'][:6]),
-                            hide_index=True,use_container_width=True)
+                            hide_index=True,width="stretch")
                     else:
                         st.warning('Brak świeżych nagłówków w ostatnich 30 min. '
                                    'Nie twierdzę, że nie ma informacji makro.')
@@ -1684,7 +1684,7 @@ with chat_tab:
             placeholder='Dlaczego WAIT? Jak wygląda trend, EMA, SL/TP? Jakie są ryzyka?',
             height=95,max_chars=800)
         sent=st.form_submit_button('🧠 WYŚLIJ PYTANIE DO GPT-5.4',
-            type='primary',use_container_width=True)
+            type='primary',width="stretch")
     if sent:
         question=user_query.strip()
         if not question:
@@ -1772,7 +1772,7 @@ with lab_tab:
                     cc1.metric('Win rate (mała próba!)',f'{(finished.status=="WIN").mean()*100:.1f}%')
                     cc2.metric('Suma punktów po kosztach',f'{finished.pnl_pts.sum():.2f}')
                     cc3.metric('Średnia pkt / trade',f'{finished.pnl_pts.mean():.2f}')
-                st.dataframe(trades,use_container_width=True,hide_index=True)
+                st.dataframe(trades,width="stretch",hide_index=True)
             st.caption('Konserwatywnie: gdy SL i TP naruszone w jednej świecy, SL wygrywa; wejście po następnej świecy, z kosztem spreadu i poślizgu.')
     st.markdown('#### Nauka bota — kontrola jakości')
     try:
@@ -1788,7 +1788,7 @@ with lab_tab:
         st.metric('Rozliczone forward PAPER (hipotetyczne)',len(active))
         if not active.empty:
             st.metric('Łączne pkt forward PAPER, po kosztach',f'{active.pnl_pts.sum():.2f}')
-        st.dataframe(resolved,use_container_width=True,hide_index=True)
+        st.dataframe(resolved,width="stretch",hide_index=True)
     else:st.info('Brak NOWYCH rozliczeń forward PAPER v2. Audyt ruszy przy kolejnych świecach.')
     if 'legacy_count' in locals() and legacy_count:
         st.warning(f'Stare rozliczenia PAPER (wersja 1): {legacy_count} — zachowane, ale WYŁĄCZONE z nowych statystyk. Nie przeliczam ich bez oryginalnych danych.')
@@ -1801,12 +1801,12 @@ with archive_tab:
     except (OSError, sqlite3.Error) as ex:
         st.warning('Nie udało się odczytać archiwum PAPER: '+type(ex).__name__)
         hist=[]
-    if hist:st.dataframe(pd.DataFrame(hist),use_container_width=True,hide_index=True)
+    if hist:st.dataframe(pd.DataFrame(hist),width="stretch",hide_index=True)
     else:st.info('Brak kandydatów LONG/SHORT PAPER.')
     with st.expander('🟡 Odrzucone sygnały / WAIT — osobny dziennik'):
         try:
             waits=recent_scan_decisions(connect(),100)
-            if waits:st.dataframe(pd.DataFrame(waits),use_container_width=True,hide_index=True)
+            if waits:st.dataframe(pd.DataFrame(waits),width="stretch",hide_index=True)
             else:st.info('Brak decyzji WAIT w odrębnym dzienniku.')
         except (OSError,sqlite3.Error) as ex:
             st.warning('Nie udało się odczytać dziennika WAIT: '+type(ex).__name__)
@@ -1904,7 +1904,7 @@ with mtf_tab:
                 'Status':'AKTUALNY' if row.ready else 'BRAK/WAIT',
                 'Zamknięta świeca UTC':str(row.candle_utc) if row.candle_utc else 'BRAK',
                 'Wyjaśnienie':row.reason})
-        st.dataframe(pd.DataFrame(table),hide_index=True,use_container_width=True)
+        st.dataframe(pd.DataFrame(table),hide_index=True,width="stretch")
         if consensus in ('UP','DOWN'):
             st.success(f'KONTEKST MTF: {consensus} (hipoteza, bez gwarancji kierunku)')
         else:
@@ -1946,7 +1946,7 @@ with strategies_tab:
                 'Po filtrze MTF / feed':filtered_action,
                 'Wejście MID':d.entry,'SL MID':d.stop,'TP MID':d.target,
                 'RR':d.rr,'Powód':d.reason if filtered_action==d.action else filtered.reason})
-        st.dataframe(pd.DataFrame(all_rows),hide_index=True,use_container_width=True)
+        st.dataframe(pd.DataFrame(all_rows),hide_index=True,width="stretch")
         st.info('Jednoczesne różne sygnały NIE oznaczają, że należy je sumować. Każda strategia wymaga oddzielnego, rozliczonego testu.')
 
         with st.expander('🧪 7. I 8. HIPOTEZA — NY OPEN TRAP + EMA PULLBACK / RETEST (TYLKO BADANIA)',expanded=True):
@@ -1967,7 +1967,7 @@ with strategies_tab:
                         'Warunek 3':bool(progress['checks'][2]),
                         'Gotowy układ (badanie)':d.action if d.action!='WAIT' else 'NIE',
                         'RR':d.rr,'Powód':d.reason})
-                st.dataframe(pd.DataFrame(experiment),hide_index=True,use_container_width=True)
+                st.dataframe(pd.DataFrame(experiment),hide_index=True,width="stretch")
                 st.caption('NY OPEN TRAP: kompletne świece 09:31–09:45 ET, wcześniejszy '
                            'fałszywy breakout i zamknięcie z powrotem w zakresie. '
                            'PULLBACK + RETEST: trend EMA, historyczny potwierdzony swing '
@@ -1986,7 +1986,7 @@ with strategies_tab:
                          'Surowy kierunek':old.action,'Powód':old.reason},
                         {'Strategia':name,'Wariant':'POTWIERDZONE SWINGI (badanie)',
                          'Surowy kierunek':swing.action,'Powód':swing.reason}])
-                st.dataframe(pd.DataFrame(guard_rows),hide_index=True,use_container_width=True)
+                st.dataframe(pd.DataFrame(guard_rows),hide_index=True,width="stretch")
                 st.warning('Więcej sygnałów po zmianie poziomów nie oznacza lepszego wyniku. '
                            'Żadnego z tych wariantów NIE wdrażamy do AUTO bez wyników '
                            'z zamkniętych pozycji i kosztów.')
@@ -2037,7 +2037,7 @@ with strategies_tab:
                          'RR':r['RR'],
                          'Wybór': 'WYBRANA' if chosen.strategy==r['Strategia'] else ''}
                         for r in candidates]),
-                        hide_index=True,use_container_width=True)
+                        hide_index=True,width="stretch")
         st.caption('Automatyczny wybór nie otwiera LONG/SHORT bez poprawnego '
                    'setupu. Ranking historycznych wyników pozostaje badawczy: '
                    'bez porównywalnych zakończonych transakcji nie nazywam '
@@ -2113,7 +2113,7 @@ with strategies_tab:
                                    'cen wykonania. Nie sumuj hipotetycznych '
                                    'sygnałów jako zysku.')
                         timeline=cache['timeline']
-                        st.dataframe(timeline.iloc[::-1],use_container_width=True,
+                        st.dataframe(timeline.iloc[::-1],width="stretch",
                                      hide_index=True)
                         details=cache['details']
                         if not details.empty:
@@ -2122,13 +2122,13 @@ with strategies_tab:
                                          .rename('Liczba świec').reset_index()
                                          .sort_values(['Strategia','Liczba świec'],
                                                       ascending=[True,False]),
-                                         use_container_width=True,hide_index=True)
+                                         width="stretch",hide_index=True)
                             detail_candle=st.selectbox(
                                 'Pełne 6 powodów dla konkretnej świecy',
                                 list(reversed(details['Świeca UTC'].unique().tolist())),
                                 key='signal_audit_detail_candle')
                             st.dataframe(details[details['Świeca UTC']==detail_candle],
-                                         use_container_width=True,hide_index=True)
+                                         width="stretch",hide_index=True)
                             st.download_button('⬇️ POBIERZ DOKŁADNE POWODY WAIT (CSV)',
                                 data=details.to_csv(index=False).encode('utf-8-sig'),
                                 file_name='FOKUS_audyt_6_strategii_M1.csv',
@@ -2176,7 +2176,7 @@ with strategies_tab:
                 'M5':old.m5_bias,
                 'RSI v7.1':round(old.rsi,1) if old.rsi is not None else None,
                 'Powód':filtered_old.reason if filtered_old.action!=old.action else old.reason
-            }]), hide_index=True, use_container_width=True)
+            }]), hide_index=True, width="stretch")
             if old.action in ('LONG','SHORT'):
                 st.warning('To KANDYDAT starej metody, nie zlecenie '
                            'i nie otwarta pozycja. AUTO pozostaje bez zmian.')
@@ -2195,7 +2195,7 @@ with strategies_tab:
                 {'Strategia':'EMA PULLBACK','Warunki':'Trend EMA, korekta do EMA21, następnie świeca potwierdzająca'},
                 {'Strategia':'VOLATILITY BREAKOUT','Warunki':'Wcześniejsza kompresja zakresu i silne wybicie z konsolidacji'},
                 {'Strategia':'RANGE REJECTION (SHADOW)','Warunki':'Odrzucenie granicy konsolidacji, RSI i miejsce do jej środka; tylko badanie'}
-            ]),hide_index=True,use_container_width=True)
+            ]),hide_index=True,width="stretch")
             st.caption('Każdy kandydat przechodzi koszty, RR, przeszkody oraz '
                        'MTF. AUTO PAPER może dopuścić jeden zatwierdzony sygnał po MTF, przy braku konfliktu. '
                        'To nie jest potwierdzona przewaga statystyczna.')
@@ -2237,11 +2237,11 @@ with news_tab:
         upcoming=[{'Data UTC':e['data_utc'].isoformat(),'Wydarzenie':e['wydarzenie']}
             for e in events if e['data_utc']>=datetime.now(timezone.utc)-pd.Timedelta(hours=2)]
         st.markdown('#### Kalendarz BLS — najbliższe wydarzenia')
-        st.dataframe(pd.DataFrame(upcoming[:20]),use_container_width=True,hide_index=True)
+        st.dataframe(pd.DataFrame(upcoming[:20]),width="stretch",hide_index=True)
     news=st.session_state.get('_headlines',[])
     if news:
         st.markdown('#### Najnowsze nagłówki')
-        st.dataframe(pd.DataFrame(news[:45]),use_container_width=True,hide_index=True,
+        st.dataframe(pd.DataFrame(news[:45]),width="stretch",hide_index=True,
             column_config={'url':st.column_config.LinkColumn('Oficjalny link')})
     else:
         st.info('Nie pobrano oficjalnych wiadomości. Sprawdź AUTO RADAR '
@@ -2356,7 +2356,7 @@ with reports_tab:
                                               'Oczekujące':val.get('pending_conditions',0)}
                                              for key,val in sorted(cohorts.items())]
                                 st.dataframe(pd.DataFrame(cohort_rows),
-                                             use_container_width=True,hide_index=True)
+                                             width="stretch",hide_index=True)
                         st.warning('To badanie, NIE niezależnie skalibrowane '
                                    'prawdopodobieństwo ani nowe decyzje AUTO. '
                                    'Początkowy BACKFILL pozostaje odróżniony '
@@ -2385,7 +2385,7 @@ with reports_tab:
                                 'Id':e.get('event_id'),
                             } for e in observations]
                             st.dataframe(pd.DataFrame(audit_rows[-80:]),
-                                         use_container_width=True,hide_index=True)
+                                         width="stretch",hide_index=True)
                             st.download_button('⬇️ WAVE SHADOW — ARCHIWUM CSV',
                                 data=pd.DataFrame(audit_rows).to_csv(
                                     index=False).encode('utf-8-sig'),
@@ -2397,7 +2397,7 @@ with reports_tab:
                             group_rows=[{'Konfiguracja':key,**val}
                                         for key,val in groups.items()]
                             st.dataframe(pd.DataFrame(group_rows),
-                                         use_container_width=True,hide_index=True)
+                                         width="stretch",hide_index=True)
                 candidates=st.session_state.get('_paper_remote_candidates') or []
                 worker_news=st.session_state.get('_paper_remote_news') or {}
                 with st.expander('📰 NEWS RADAR WORKERA (BEZ PRZEGLĄDARKI)'):
@@ -2409,7 +2409,7 @@ with reports_tab:
                              worker_news.get('last_fetch_utc','BRAK'))
                     if worker_news.get('headlines'):
                         st.dataframe(pd.DataFrame(worker_news['headlines'][:15]),
-                            hide_index=True,use_container_width=True)
+                            hide_index=True,width="stretch")
                     if worker_news.get('errors'):
                         st.json(worker_news['errors'])
                 with st.expander('📅 OFICJALNY KALENDARZ FED + BEA (WATCH, NIE PEŁNA OCHRONA)',expanded=True):
@@ -2424,7 +2424,7 @@ with reports_tab:
                         st.json(macro['sources'])
                     if macro.get('events'):
                         st.dataframe(pd.DataFrame(macro['events'][:30]),
-                                     hide_index=True,use_container_width=True)
+                                     hide_index=True,width="stretch")
                     else:
                         st.info('Brak zweryfikowanych dat FED/BEA — źródło może być niedostępne.')
                     if macro.get('errors'):
@@ -2446,7 +2446,7 @@ with reports_tab:
                         st.dataframe(pd.DataFrame(audit['rows']).rename(columns={
                             'strategy':'Strategia','raw':'Sygnał OHLC',
                             'after_mtf':'Po filtrze MTF','reason':'Powód'}),
-                            hide_index=True,use_container_width=True)
+                            hide_index=True,width="stretch")
                         stage_rows=audit.get('progress') or []
                         if stage_rows:
                             st.markdown('**Przesłanki workera: strategia + 0/3–3/3**')
@@ -2458,13 +2458,13 @@ with reports_tab:
                                 'Warunek 2':p.get('criteria',[{},{}])[1].get('ok'),
                                 'Zatwierdzone':p.get('criteria',[{},{},{}])[2].get('ok'),
                                 'Powód':p.get('reason','')} for p in stage_rows]),
-                                hide_index=True,use_container_width=True)
+                                hide_index=True,width="stretch")
                         if audit.get('mtf'):
                             st.dataframe(pd.DataFrame(audit['mtf']).rename(columns={
                                 'timeframe':'Interwał','trend':'Trend',
                                 'ready':'Gotowy','reason':'Wyjaśnienie',
                                 'candle_utc':'Świeca UTC'}),
-                                hide_index=True,use_container_width=True)
+                                hide_index=True,width="stretch")
                         watch=audit.get('watch') or {}
                         if watch.get('side') in ('LONG','SHORT'):
                             st.info('👀 Ostatni WORKER: **OBSERWUJ '+
@@ -2498,7 +2498,7 @@ with reports_tab:
                             'lower95_r_holdout':'Dolny 95% R',
                             'eligible':'Może być użyta',
                             'invalidated':'Unieważnione'}),
-                            hide_index=True,use_container_width=True)
+                            hide_index=True,width="stretch")
                         if learned.get('leader'):
                             st.info('Lider badania SHADOW: '+str(learned['leader'])+
                                 ' — wynik eksperymentalny, nie obietnica zysku.')
@@ -2540,7 +2540,7 @@ with reports_tab:
                                    str(frequency['gated_decision_scans'])+
                                    '. Kandydat bez blokady nie oznacza PAPER OPEN.')
                         st.dataframe(pd.DataFrame(frequency['by_strategy']),
-                                     hide_index=True,use_container_width=True)
+                                     hide_index=True,width="stretch")
                         if frequency['global_gate_reasons']:
                             st.caption('Najczęstsze blokady GLOBALNE (liczba skanów): '+
                                        ', '.join(f"{k}: {v}" for k,v in
@@ -2599,7 +2599,7 @@ with reports_tab:
                                 'sum_pts':'Suma pkt','mean_pts':'Średnio pkt',
                                 'mean_r':'Średnio R'}).drop(
                                     columns=['research_only'],errors='ignore'),
-                                use_container_width=True,hide_index=True)
+                                width="stretch",hide_index=True)
                         st.warning('UWAGA: kohorty PASSED i VETOED nie są '
                                    'losowo dobrane; różnice mogą wynikać z '
                                    'warunków rynku, nie tylko działania MTF. '
@@ -2628,7 +2628,7 @@ with reports_tab:
                             'swing_unlocked_raw':'SWING odblokował surowy',
                             'swing_after_mtf':'SWING przeszedł MTF',
                             'swing_with_all_gates':'SWING bez globalnych blokad'}),
-                            hide_index=True,use_container_width=True)
+                            hide_index=True,width="stretch")
                         st.warning('Wszystkie te sygnały są tylko BADANIEM. '
                                    'Sygnał, który przeszedł MTF i globalne '
                                    'bramki, NIE jest jeszcze dowodem '
@@ -2649,7 +2649,7 @@ with reports_tab:
                                     v.get('direction','')+' '+v.get('strategy','') for v in votes) or 'BRAK',
                                 'Blokady':', '.join(item.get('blockers') or []) or 'BRAK',
                             })
-                        st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True)
+                        st.dataframe(pd.DataFrame(rows),hide_index=True,width="stretch")
                     else:
                         st.info('Brak zapisanej historii kandydatów — worker uzupełni ją przy następnym poprawnym skanie.')
                 auto_ai=st.session_state.get('_paper_remote_auto_ai') or {}
@@ -2699,7 +2699,7 @@ with reports_tab:
                             'Holdout średnio pkt':row['holdout']['mean_pts'],
                             'Dolna granica trafień 95%':row['holdout']['win_rate_lower95_pct'],
                             'Ocena':row['shadow_priority']})
-                    st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True)
+                    st.dataframe(pd.DataFrame(rows),hide_index=True,width="stretch")
                     if ranking['closed_positions']<100:
                         st.warning('Wciąż mała próba. Do wstępnej selekcji potrzebujemy '
                                    'co najmniej 100 zamkniętych PAPER na strategię/politykę.')
@@ -2740,7 +2740,7 @@ with reports_tab:
             policy_stats=performance_by_policy(paper_db,epic=instrument)
             if policy_stats:
                 st.markdown('**📊 WYNIKI WEDŁUG POLITYKI WYJŚCIA — FIXED / ADAPTIVE**')
-                st.dataframe(pd.DataFrame(policy_stats),hide_index=True,use_container_width=True)
+                st.dataframe(pd.DataFrame(policy_stats),hide_index=True,width="stretch")
                 st.caption('To odrębne zbiory transakcji; bez testu na identycznych '
                            'sygnałach nie porównuj ich jako dowodu przewagi ADAPTIVE.')
             st.download_button('💾 POBIERZ PEŁNY BACKUP PAPER v3 (JSON, bez sekretów)',
@@ -2751,7 +2751,7 @@ with reports_tab:
                 help='Obejmuje pełne pozycje i zdarzenia z aktualnego źródła: remote albo lokalne. To kopia wrażliwej historii inwestycyjnej — przechowuj prywatnie.')
             if all_positions:
                 st.markdown('**Pozycje PENDING / OPEN / CLOSED / INVALIDATED**')
-                st.dataframe(pd.DataFrame(all_positions),hide_index=True,use_container_width=True)
+                st.dataframe(pd.DataFrame(all_positions),hide_index=True,width="stretch")
                 st.download_button('⬇️ Zapis pozycji PAPER v3 CSV',
                     data=pd.DataFrame(all_positions).to_csv(index=False).encode('utf-8-sig'),
                     file_name='FOKUS_PAPER_V3_POZYCJE.csv',mime='text/csv',key='paper_v3_export')
@@ -2766,20 +2766,20 @@ with reports_tab:
             if rejected:
                 with st.expander('⛔ Odrzucone setupy / WAIT — powody i godziny'):
                     st.dataframe(pd.DataFrame(rejected),hide_index=True,
-                        use_container_width=True)
+                        width="stretch")
             all_events=[e for e in recent_events(paper_db,200)
                 if any(p['trade_id']==e['trade_id'] for p in all_positions)]
             if all_events:
                 with st.expander('📑 Dziennik zdarzeń OPEN / SL / TP / TIMEOUT / INVALIDATED'):
-                    st.dataframe(pd.DataFrame(all_events),hide_index=True,use_container_width=True)
+                    st.dataframe(pd.DataFrame(all_events),hide_index=True,width="stretch")
             left,right=st.columns(2)
             with left:
                 st.markdown('**Raport dzienny (czas Polska)**')
-                if not days.empty:st.dataframe(days,hide_index=True,use_container_width=True)
+                if not days.empty:st.dataframe(days,hide_index=True,width="stretch")
                 else:st.caption('Brak zakończonych transakcji.')
             with right:
                 st.markdown('**Raport tygodniowy (czas Polska)**')
-                if not weeks.empty:st.dataframe(weeks,hide_index=True,use_container_width=True)
+                if not weeks.empty:st.dataframe(weeks,hide_index=True,width="stretch")
                 else:st.caption('Brak zakończonych transakcji.')
         except (OSError,sqlite3.Error,ValueError,TypeError,RemoteError) as ex:
             st.error('Nie można wyświetlić raportu PAPER v3 / cloud: '+type(ex).__name__)
@@ -2796,7 +2796,7 @@ with reports_tab:
                        'które worker już archiwizował. Nie uruchamia skanera, '
                        'nie tworzy pozycji, nie eksportuje haseł ani kluczy.')
             if st.button('📥 ODCZYTAJ DO 5000 M1 Z SUPABASE',
-                         key='owner_export_mtf_m1',use_container_width=True):
+                         key='owner_export_mtf_m1',width="stretch"):
                 try:
                     cloud=RemoteCheckpoint(secret('FOKUS_SUPABASE_URL'),
                         secret('FOKUS_SUPABASE_SECRET_KEY'))
@@ -2828,7 +2828,7 @@ with reports_tab:
                                '(maks. 6 przedziałów; 1000 w API na zapytanie). '
                                'Ręczny odczyt do badań, nie drugi worker.')
                     if st.button('📚 UZUPEŁNIJ STARSZE M1 Z CAPITAL.COM DEMO (TYLKO ODCZYT)',
-                                 key='owner_backfill_research_m1',use_container_width=True):
+                                 key='owner_backfill_research_m1',width="stretch"):
                         try:
                             cloud=RemoteCheckpoint(secret('FOKUS_SUPABASE_URL'),
                                 secret('FOKUS_SUPABASE_SECRET_KEY'))
@@ -2865,7 +2865,7 @@ with reports_tab:
                 st.download_button('⬇️ POBIERZ CSV M1 UTC CLOSE (TYLKO OHLC + SPREAD)',
                     data=export['csv'],mime='text/csv',
                     file_name='FOKUS_SUPABASE_M1_DEMO_CLOSED.csv',
-                    key='owner_download_mtf_m1',use_container_width=True)
+                    key='owner_download_mtf_m1',width="stretch")
                 if export['preflight_mtf']:
                     st.success('Spełnione wstępne warunki długości/70 H1. '
                                'Pobierz CSV i załaduj poniżej do pełnego testu.')
@@ -2898,7 +2898,7 @@ with reports_tab:
                    'i wyjściu na SL/TP, a przy TIMEOUT — spreadu świecy zamknięcia. '
                    'To nadal przybliżenie, nie dane tickowe, rzeczywisty fill ani zysk.')
         if st.button('🔬 TEST OFFLINE: BEZ MTF vs Z MTF — 6 STRATEGII',
-                     key='offline_mtf_start',type='primary',use_container_width=True):
+                     key='offline_mtf_start',type='primary',width="stretch"):
             if offline_csv is None:
                 st.warning('Wybierz CSV M1 z danymi historycznymi.')
             else:
@@ -2958,7 +2958,7 @@ with reports_tab:
                                'To NIE jest dowód, że sama strategia nie działa. '
                                'Przy bardzo krótkim okresie po 70 H1 '
                                'nie wyłączaj zabezpieczenia bez większej próby.')
-            st.dataframe(comp,use_container_width=True,hide_index=True)
+            st.dataframe(comp,width="stretch",hide_index=True)
             st.download_button('⬇️ CSV: PORÓWNANIE 6 STRATEGII',
                 data=comp.to_csv(index=False).encode('utf-8-sig'),
                 mime='text/csv',file_name='FOKUS_CSV_MTF_POROWNANIE.csv',
@@ -2991,7 +2991,7 @@ with reports_tab:
         research_mtf=st.checkbox('Zastosuj historyczny MTF (70 pełnych H1 wymagane)',
                                  value=False,key='research_compare_mtf')
         if st.button('🏆 PRZELICZ RANKING I ROZLICZENIA (BADANIE)',
-                     key='run_research_compare',use_container_width=True):
+                     key='run_research_compare',width="stretch"):
             if not research_bytes:
                 st.warning('Wczytaj CSV M1 albo pobierz zamknięte M1 z Supabase '
                            'przyciskiem w sekcji powyżej.')
@@ -3030,7 +3030,7 @@ with reports_tab:
                 later=ranking[ranking.okres=='POZNIEJSZE 30%']
                 st.subheader('Późniejszy okres 30% — ranking TYLKO warunkowy')
                 st.dataframe(later.sort_values(['kwalifikuje_ranking','sum_pts'],
-                    ascending=[False,False]),use_container_width=True,hide_index=True)
+                    ascending=[False,False]),width="stretch",hide_index=True)
                 leader=research_result['meta']['leader']
                 if leader:
                     st.success('Lider według predefiniowanego kryterium: '+str(leader)+
@@ -3044,7 +3044,7 @@ with reports_tab:
                            '. Próby zależne od ceny i zmiennego spreadu; historyczny '
                            'feed nie odtwarza dokładnych ticków ani kalendarza makro.')
                 with st.expander('Pełny raport 70/30 oraz rozliczenia badań'):
-                    st.dataframe(ranking,hide_index=True,use_container_width=True)
+                    st.dataframe(ranking,hide_index=True,width="stretch")
                     st.download_button('⬇️ RANKING BADAWCZY CSV',
                         data=ranking.to_csv(index=False).encode('utf-8-sig'),
                         file_name='FOKUS_RANKING_NY_EMA_SWING.csv',
@@ -3077,7 +3077,7 @@ with reports_tab:
             st.info('Najpierw wgraj CSV M1 powyżej albo pobierz historię M1 '
                     'z Supabase. Test nie otwiera nowych pozycji PAPER.')
         if st.button('⚖️ TESTUJ 9 WYJŚĆ NA TYCH SAMYCH WEJŚCIACH',
-                     key='exit_grid_run',use_container_width=True):
+                     key='exit_grid_run',width="stretch"):
             if not exit_source:
                 st.warning('Brak danych CSV M1. Nie wymyślam wyników.')
             else:
@@ -3121,7 +3121,7 @@ with reports_tab:
                     'granicy późniejszego okresu. M1 to nie M15 Dukascopy.')
                 st.markdown('**📊 Porównanie TP/SL/TIMEOUT po kosztach**')
                 st.dataframe(exit_cached['table'],hide_index=True,
-                             use_container_width=True)
+                             width="stretch")
                 holdout=exit_cached['table'][
                     exit_cached['table'].okres=='POZNIEJSZE 30%']
                 if holdout.empty or holdout.proby.max()<30:
@@ -3154,7 +3154,7 @@ with reports_tab:
                                  koszty_pkt=('koszty_pkt','sum'))
                             .reset_index())
                         st.dataframe(grouped,hide_index=True,
-                                     use_container_width=True)
+                                     width="stretch")
                 st.caption('Kolumna Spread M1 jest obserwowana na zamknięciu '
                            'świecy, NIE daje ticków BID/ASK ani realnych '
                            'warunków wykonania. Warianty nie odtwarzają '
@@ -3236,14 +3236,14 @@ with reports_tab:
                 'profitable_trades':'Zyskowne P&L',
                 'pnl_win_rate_pct':'Zyskowne P&L %',
                 'timeouts':'TIMEOUT','positive_timeouts':'Dodatni TIMEOUT'})
-            st.dataframe(visible,use_container_width=True,hide_index=True)
+            st.dataframe(visible,width="stretch",hide_index=True)
             st.download_button('⬇️ EKSPORT RAPORTU CSV',data=table.to_csv(index=False).encode('utf-8-sig'),
                 file_name='FOKUS_RESEARCH_HOLDOUT.csv',mime='text/csv')
             if int(table.n.sum())<30:
                 st.warning('Łącznie mniej niż 30 rozstrzygniętych transakcji w raportowanych sekcjach. To ZA MAŁO, by mówić o przewadze.')
             if st.button('🔁 KROCZĄCE OKNA OOS — WYBRANA STRATEGIA',key='rolling_run'):
                 folds=rolling_oos(research_frame,('DRUGA FALA' if strategy==AUTO_MODE else strategy),spread=research_spread,slippage=research_slip)
-                st.dataframe(folds,hide_index=True,use_container_width=True)
+                st.dataframe(folds,hide_index=True,width="stretch")
         else:
             st.info('Kliknij PRZELICZ. Wyniki nie są generowane automatycznie na każdej świecy.')
     st.markdown('#### 📁 LOKALNY ARCHIWUM PAPER v2 — odrębne od Northflank')
@@ -3263,7 +3263,7 @@ with reports_tab:
                 grp=resolved.groupby(['strategy','timeframe'],as_index=False).agg(
                     liczba=('pnl_pts','size'),suma_pkt=('pnl_pts','sum'),
                     srednia_pkt=('pnl_pts','mean'))
-                st.dataframe(grp,hide_index=True,use_container_width=True)
+                st.dataframe(grp,hide_index=True,width="stretch")
             else:
                 st.info('Jeszcze brak pełnych wyników v2 do statystyki.')
         else:
