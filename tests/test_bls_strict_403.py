@@ -16,7 +16,7 @@ def test_bls_calendar_request_identifies_client_and_only_uses_official_url():
     def fetch(url,**kwargs):
         seen.append((url,kwargs))
         return Response()
-    events=fetch_bls_schedule(get=fetch,now=datetime(2026,11,17,13,0,tzinfo=timezone.utc))
+    events=fetch_bls_schedule(get=fetch,now=datetime(2026,11,25,14,0,tzinfo=timezone.utc))
     assert seen[0][0]==BLS_ICS
     assert "github.com/djfokus176-stack/fokus-the-best-trader" in seen[0][1]["headers"]["User-Agent"]
     assert "text/calendar" in seen[0][1]["headers"]["Accept"]
@@ -32,9 +32,9 @@ def test_bls_403_is_not_reinterpreted_as_empty_safe_calendar():
         def raise_for_status(self):
             raise requests.HTTPError("403 Forbidden",response=response)
     checked=fetch_bls_schedule(get=lambda *a,**kw:Rejected(),
-        now=datetime(2026,11,17,13,0,tzinfo=timezone.utc))
+        now=datetime(2026,11,25,14,0,tzinfo=timezone.utc))
     assert checked.source=="BLS_VERIFIED_MANUAL_NOT_LIVE"
     assert len(checked)>10
     with pytest.raises(ValueError,match="BLS_MANUAL_VERIFICATION_EXPIRED"):
         fetch_bls_schedule(get=lambda *a,**kw:Rejected(),
-            now=datetime(2026,11,24,12,45,tzinfo=timezone.utc))
+            now=datetime(2026,11,28,13,35,tzinfo=timezone.utc))
