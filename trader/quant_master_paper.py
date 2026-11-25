@@ -17,6 +17,7 @@ from statistics import mean
 from zoneinfo import ZoneInfo
 
 from .auto_sim_journal import SOURCE
+from .auto_strategy import AUTO_MODE
 from .paper_method_labels import method_attribution
 
 CLOSED = frozenset(("CLOSED_SL", "CLOSED_TP", "CLOSED_TIMEOUT"))
@@ -66,7 +67,7 @@ def verified_auto_closed(payload_rows, *, epic="US500", source=SOURCE):
         if record.get("source") != source or record.get("epic") != epic:
             # The report is explicitly for one instrument and feed.
             continue
-        if method_attribution(record)["mode"] != "AUTO":
+        if method_attribution(record)["mode"] != AUTO_MODE:
             diagnostics["not_auto"] += 1
             continue
         if record.get("status") not in CLOSED or record.get("side") not in ("LONG", "SHORT"):
