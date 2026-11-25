@@ -6,7 +6,7 @@ NOT proof of a new broker quote, trade or closed candle.
 """
 from __future__ import annotations
 
-import streamlit.components.v1 as components
+import streamlit as st
 
 SECONDS={"M1":60,"M2":120,"M5":300,"M15":900,"H1":3600}
 
@@ -48,4 +48,4 @@ body{margin:0;background:transparent;color:#dceaff;font:600 13px system-ui,sans-
  update();setInterval(update,500);
 })();
 </script></body></html>""".replace("__SECONDS__",str(duration))
-    components.html(html,height=49,scrolling=False)
+    st.iframe(html,height=49)
