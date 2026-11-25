@@ -7,7 +7,7 @@ paths locally on Python 3.14 without broker or Supabase credentials.
 import os
 import sys
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, expect
 
 
 def main():
@@ -47,9 +47,8 @@ def main():
                 page.wait_for_timeout(300)
             assert player is not None, "No direct-click browser MP3 player"
             player.locator("#fokus-voice-play").click(timeout=15000)
-            player.locator("#fokus-voice-status").get_by_text(
-                "Odtwarzanie rozpoczęte",exact=False).wait_for(
-                state="visible",timeout=20000)
+            expect(player.locator("#fokus-voice-status")).to_contain_text(
+                "Odtwarzanie rozpoczęte",timeout=20000)
             print("BROWSER_VOICE=OK / MP3_BUTTON_CLICK_PLAYED / PYTHON="+
                   sys.version.split()[0],flush=True)
             print("BROWSER_SMOKE=OK / PYTHON="+sys.version.split()[0]+
