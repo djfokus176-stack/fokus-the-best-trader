@@ -69,10 +69,10 @@ def render_fokus_3f_research(remote_enabled,secret_fn):
                         " | nowe sygnały: "+str(len(state.get("events") or [])))
                     if state.get("events"):
                         st.dataframe(pd.DataFrame(state["events"][-20:]),
-                                     hide_index=True,use_container_width=True)
+                                     hide_index=True,width="stretch")
                         st.dataframe(pd.DataFrame(report.get("rank") or
                             research_scorecard(state["events"])),
-                            hide_index=True,use_container_width=True)
+                            hide_index=True,width="stretch")
                     else:
                         st.info("SHADOW zapisuje wyłącznie NOWE sygnały po "
                                 "pierwszym uruchomieniu. Brak archiwum to "
@@ -149,11 +149,11 @@ def render_fokus_3f_research(remote_enabled,secret_fn):
                         "Nie oznacza to ani zysku, ani straty.")
             else:
                 st.dataframe(pd.DataFrame(research_scorecard(log)),
-                             hide_index=True,use_container_width=True)
+                             hide_index=True,width="stretch")
                 st.dataframe(_performance_by_period(log),
-                             hide_index=True,use_container_width=True)
+                             hide_index=True,width="stretch")
                 st.dataframe(log.tail(100),hide_index=True,
-                             use_container_width=True)
+                             width="stretch")
                 st.download_button("⬇️ FOKU$ 3F — RAPORT ZDARZEŃ CSV",
                                    log.to_csv(index=False).encode("utf-8-sig"),
                                    file_name="FOKUS_3F_RESEARCH_EVENTS.csv",
