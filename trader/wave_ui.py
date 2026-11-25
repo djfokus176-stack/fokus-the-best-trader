@@ -66,7 +66,7 @@ def render_wave_reversal_research():
             "zewnętrznym kalendarzem świąt NYSE.")
         if st.button(
             "🌊 URUCHOM WAVE REVERSAL: RANKING RAW vs BOS / 2021–2026",
-            key="wave_m15_run",use_container_width=True):
+            key="wave_m15_run",width="stretch"):
             if upload is None:
                 st.error("Brak pliku M15 — nie pokazuję fikcyjnych wyników.")
             elif not checked:
@@ -165,7 +165,7 @@ def render_wave_reversal_research():
                  "net_avg_pts","profit_factor","max_drawdown_pts","status"]
         st.dataframe(
             view.sort_values(["n","lift_pp"],ascending=[False,False])
-                [columns],hide_index=True,use_container_width=True)
+                [columns],hide_index=True,width="stretch")
         st.caption(
             "Losowy punkt odniesienia = kierunek 50/50 przy tej SAMEJ godzinie; "
             "nie stanowi portfela losowych wejść. Wybrane sygnały są "
@@ -182,7 +182,7 @@ def render_wave_reversal_research():
                 st.info("Brak rocznych rozliczeń o kompletnym horyzoncie.")
             else:
                 st.dataframe(result["years"],hide_index=True,
-                             use_container_width=True)
+                             width="stretch")
             st.download_button(
                 "⬇️ PEŁNY RANKING WAVE CSV",
                 data=rank.to_csv(index=False).encode("utf-8-sig"),

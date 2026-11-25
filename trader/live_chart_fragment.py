@@ -182,7 +182,7 @@ def render_independent_live_chart(base_fig, closed_bars, instrument, timeframe,
     show_quote_preview(fig,forming,bars=closed_bars,
         visible_bars=visible_bars,auto_zoom=auto_zoom)
     fig.update_layout(uirevision=f"fokus-live-{instrument}-{timeframe}")
-    st.plotly_chart(fig,use_container_width=True,key="fokus-live-market-chart")
+    st.plotly_chart(fig,width="stretch",key="fokus-live-market-chart")
     if enabled:
         last=st.session_state.get("_live_chart_last_attempt_utc","BRAK")
         success=st.session_state.get("_live_chart_success_utc","BRAK")
@@ -212,7 +212,7 @@ def render_independent_live_chart(base_fig, closed_bars, instrument, timeframe,
                 paper_bgcolor="#111a2d",plot_bgcolor="#111a2d",
                 xaxis={"showticklabels":False},
                 yaxis={"tickformat":".2f","side":"right"})
-            st.plotly_chart(line,use_container_width=True,
+            st.plotly_chart(line,width="stretch",
                             key="fokus-live-price-microchart")
         if st.session_state.get("_live_chart_last_vendor_quote_utc"):
             st.caption("Bieżący timestamp notowania /markets: "+

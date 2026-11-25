@@ -490,10 +490,10 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         one,two=st.columns(2)
         click_long=one.button(
             "🟢 TESTUJ LONG — OTWÓRZ WIRTUALNIE",type="primary",
-            key="owner_force_paper_long_v1",use_container_width=True)
+            key="owner_force_paper_long_v1",width="stretch")
         click_short=two.button(
             "🔴 TESTUJ SHORT — OTWÓRZ WIRTUALNIE",
-            key="owner_force_paper_short_v1",use_container_width=True)
+            key="owner_force_paper_short_v1",width="stretch")
         clicked_side="LONG" if click_long else "SHORT" if click_short else None
         if clicked_side:
             try:
@@ -522,7 +522,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         manual_status_panel(remote)
         if st.button("🔄 ODŚWIEŻ CAŁY WYKRES I STATUS TESTU",
                      key="manual_paper_refresh_full_chart_v1",
-                     use_container_width=True):
+                     width="stretch"):
             st.session_state.pop("_fokus_cloud_chart_cache_v3",None)
             st.rerun()
         raw_trial=payload.get("raw_m1_forward_paper_report") or {}
@@ -846,7 +846,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
             if trial.get("recent"):
                 with st.expander("🧪 Ostatnie rozliczone LONG/SHORT — wyłącznie PAPER TEST"):
                     st.dataframe(pd.DataFrame(trial["recent"]),
-                                 hide_index=True,use_container_width=True)
+                                 hide_index=True,width="stretch")
     st.markdown("##### 📡 RADAR 6 STRATEGII — DLACZEGO LONG / SHORT / WAIT?")
     radar=worker_signal_radar(payload)
     if not radar["current"]:
@@ -892,7 +892,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
                        "z jednostronnym kierunkiem. "
                        "Próg PAPER pozostaje 3/3.")
         st.dataframe(pd.DataFrame(radar["rows"]),
-                     hide_index=True,use_container_width=True)
+                     hide_index=True,width="stretch")
         st.caption("Kolumna Brakuje oznacza pierwszy niezrealizowany etap. "
                    "Nawet zatwierdzony setup wymaga GATES=OK, "
                    "QUEUE=YES i późniejszego faktycznego PAPER OPEN. "
@@ -922,7 +922,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
                 })
             if records:
                 st.dataframe(pd.DataFrame(records),hide_index=True,
-                             use_container_width=True)
+                             width="stretch")
             unlocked=[v for v in ab.get("rows",[])
                       if isinstance(v,dict) and v.get("swing_unlocked") is True]
             if unlocked:
@@ -1061,7 +1061,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
             "Wynik pkt":p.get("pnl_pts"),
             "ID":str(p.get("trade_id","BRAK"))[:12],
         } for p in recent_paper[:12]]),
-        hide_index=True,use_container_width=True)
+        hide_index=True,width="stretch")
         st.caption("AUTO oznaczam tylko wtedy, gdy pochodzi z powodu sygnału "
                    "zapisanym przy tej pozycji. Starszy wpis bez dowodu "
                    "pozostaje jako NIEUSTALONY / POJEDYNCZY.")
@@ -1244,7 +1244,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
                 st.caption("🧵 W tym oknie czasowym nie ma zapisanej pozycji "
                            "do prześledzenia. Wybierz „OSTATNIE OPEN RAW” "
                            "lub „OSTATNIE CLOSE RAW”, aby obejrzeć historię.")
-        st.plotly_chart(candles,use_container_width=True,
+        st.plotly_chart(candles,width="stretch",
                         config={"scrollZoom":True,"displayModeBar":True,
                                 "modeBarButtonsToRemove":["lasso2d","select2d"],
                                 "displaylogo":False},
@@ -1254,7 +1254,7 @@ def render_cloud_terminal(secret_fn,default_tf="MINUTE"):
         history=rows_for_journal(raw_trial,limit=60)
         if history:
             st.dataframe(pd.DataFrame(history),hide_index=True,
-                         use_container_width=True)
+                         width="stretch")
             st.caption("Czasy w tabeli: Europe/Warsaw. "+
                        "Unieważnienie po OPEN oznacza przerwę w zweryfikowanych "+
                        "świecach, a nie wynik 0 pkt. "+

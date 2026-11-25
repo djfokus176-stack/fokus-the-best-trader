@@ -11,13 +11,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.11', '3.12']
+        python-version: ['3.11', '3.12', '3.14']
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
-      - run: python -m pip install -r requirements.txt pytest
+      - run: python -m pip install -r requirements.txt
+      - run: python -m pip install pytest
       - run: python -m pip freeze | grep -E '^(streamlit|pandas|numpy|plotly|requests|openai)=='
       - run: PYTHONPATH=. pytest -q
       - run: python -m compileall -q trader app.py healthcheck.py tests
@@ -34,3 +35,37 @@ jobs:
       - run: python -m pip install -r requirements-worker.txt
       - name: Worker loads without Streamlit or browser (OpenAI optional)
         run: python -m trader.worker --help
+
+
+  browser-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      APP_AUTH_MODE: password
+      APP_ACCESS_PASSWORD: isolated-test-streamlit-browser-password
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - name: Install exact UI requirements and headless Chromium
+        run: |
+          python -m pip install -r requirements.txt playwright
+          python -m playwright install chromium --with-deps
+      - name: Launch local Streamlit server with synthetic owner password
+        run: |
+          python -m streamlit run app.py --server.headless true --server.address 127.0.0.1 --server.port 8501 >/tmp/fokus-streamlit-smoke.log 2>&1 &
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:8501/_stcore/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          tail -n 100 /tmp/fokus-streamlit-smoke.log
+          exit 1
+      - name: Verify actual browser login and owner dashboard
+        run: python tests/browser_cloud_smoke.py
+      - name: Print redacted UI server logs when smoke fails
+        if: failure()
+        run: |
+          tail -n 120 /tmp/fokus-streamlit-smoke.log || true

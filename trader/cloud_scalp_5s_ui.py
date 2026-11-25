@@ -146,7 +146,7 @@ def render_cloud_scalp_5s(secret_fn):
             height=235,template="plotly_dark",
             paper_bgcolor="#111a2d",plot_bgcolor="#111a2d",
             margin={"l":10,"r":10,"t":12,"b":8})
-        st.plotly_chart(chart,use_container_width=True,
+        st.plotly_chart(chart,width="stretch",
                         key="fokus_cloud_5s_chart")
         st.caption("Ostatnie maksymalnie 24 rzeczywiste obserwacje. "
                    "WebSocket może dostarczać je znacznie częściej niż "
