@@ -49,7 +49,7 @@ def render_quant_master_research(db: sqlite3.Connection, *, epic="US500"):
             f'{report["diagnostics"]["not_auto"]} wpisów innej ścieżki '
             "(nie włączono do statystyk); "
             f'{report["diagnostics"]["excluded"]} wadliwych wpisów; '
-            f'{report["diagnostics"]["duplicates"]} duplikatów.")
+            f'{report["diagnostics"]["duplicates"]} duplikatów.')
         if not overall["n"]:
             st.info("Brak poprawnie zamkniętych pozycji AUTO. Nie liczę EV "
                     "z samych sygnałów, RAW ani historycznych backtestów.")
