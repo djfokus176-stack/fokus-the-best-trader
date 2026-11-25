@@ -28,7 +28,7 @@ def render_cloud_wave_ae_replay(remote_enabled,secret_fn):
                     "podgląd Supabase w Streamlit Secrets.")
             return
         if st.button("🔬 URUCHOM BADANIE A–E NA CAPITAL DEMO M15",
-                     key="fokus_capital_ae_run",use_container_width=True):
+                     key="fokus_capital_ae_run",width="stretch"):
             try:
                 remote=RemoteCheckpoint(
                     secret_fn("FOKUS_SUPABASE_URL"),
@@ -62,7 +62,7 @@ def render_cloud_wave_ae_replay(remote_enabled,secret_fn):
               "profit_factor","expectancy_pts","max_drawdown_pts","status")
         safe=summary.loc[:,[c for c in cols if c in summary.columns]].copy()
         st.markdown("**Wyniki A–E według tego samego silnika badawczego**")
-        st.dataframe(safe,hide_index=True,use_container_width=True)
+        st.dataframe(safe,hide_index=True,width="stretch")
         st.download_button(
             "⬇️ CAPITAL M15 A–E — podsumowanie CSV",
             data=safe.to_csv(index=False).encode("utf-8-sig"),
