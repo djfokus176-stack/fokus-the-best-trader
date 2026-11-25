@@ -8,8 +8,9 @@ from trader.news_radar import macro_blackout
 from trader.paper_health import worker_calendar_health
 
 
-VERIFIED = datetime(2026, 11, 17, 12, 45, tzinfo=timezone.utc)
-EXPIRES = datetime(2026, 11, 24, 12, 45, tzinfo=timezone.utc)
+_snapshot = json.loads(DEFAULT_CALENDAR_FILE.read_text(encoding="utf-8"))
+VERIFIED = datetime.fromisoformat(_snapshot["verified_at_utc"])
+EXPIRES = datetime.fromisoformat(_snapshot["valid_until_utc"])
 
 
 def test_official_manual_has_real_utc_schedule_and_blackout():
