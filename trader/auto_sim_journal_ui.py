@@ -82,7 +82,7 @@ def render_auto_sim_journal(payload):
                 "Zamknięcie (Polska)","Wejście (pkt)","Wyjście (pkt)",
                 "SL (pkt)","TP (pkt)","Wynik (pkt)","ID")
         st.dataframe(pd.DataFrame(displayed,columns=fields),
-                     hide_index=True,use_container_width=True)
+                     hide_index=True,width="stretch")
     else:
         st.caption("Brak potwierdzonych automatycznych wejść. "
                    "Nie dodaję do archiwum samych prognoz LONG/SHORT.")
