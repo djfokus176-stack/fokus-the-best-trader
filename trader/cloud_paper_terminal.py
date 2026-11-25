@@ -28,6 +28,7 @@ from .cloud_ws_prices import assess_streaming_candle
 from .cloud_signal_radar import worker_signal_radar
 from .cloud_paper_audio import cloud_paper_audio_events, advance_cloud_audio
 from .paper_sounds import alert_audio, SOUND_EVENTS
+from .browser_voice_player import render_voice_player
 from .cloud_candle_clock import render_candle_clock
 from .cloud_paper_visibility import cloud_paper_visibility, cloud_chart_gaps
 from .cloud_paper_test_status import status_for_owner
@@ -258,13 +259,24 @@ def render_cloud_paper_voice(remote, *, url):
             attempt=playback_attempt_record(audio_event,used)
             st.session_state["_fokus_voice_attempts_v1"]=recent_playback_attempts(
                 st.session_state.get("_fokus_voice_attempts_v1") or [],attempt)
-        st.audio(content,format=mime,autoplay=audio_event is not None)
+        # First try autoplay for NEW verified events only. Chrome may
+        # refuse it; the in-iframe ▶ button is a DIRECT gesture that works
+        # independently of Streamlit Python reruns.
+        render_voice_player(
+            content,mime,kind=last["kind"],side=last["side"],
+            event_id=(audio_event["event_id"]
+                      if audio_event is not None else None),
+            autostart=audio_event is not None)
+        # Native player is an accessible manual fallback if browser scripts
+        # are disabled or the embedded iframe cannot be loaded.
+        st.audio(content,format=mime,autoplay=False)
         if used!="VOICE" and voice:
             st.caption("Brak odpowiedniego nagrania MP3: odtwarzam ton zastępczy.")
-        st.caption("Jeśli nic nie słychać, kliknij ▶ w odtwarzaczu powyżej "
-                   "i zezwól Chrome na dźwięk tej witryny. "
-                   "Alert jest jednorazowy; przy kolejnych odświeżeniach "
-                   "można go odtworzyć ręcznie.")
+        st.caption("Automatyczne odtwarzanie może zostać zablokowane przez "
+                   "Chrome. Kliknij ▶ ODTWÓRZ GŁOS w ramce, "
+                   "aby zezwolić na dźwięk i odsłuchać ostatni alert. "
+                   "Poniżej dostępny też standardowy odtwarzacz. "
+                   "Nie nadaję powtórek przy odświeżeniach wykresu.")
     elif cursor=="__EMPTY__":
         st.caption("Nasłuch uzbrojony. Czekam na pierwsze NOWE "
                    "zdarzenie PAPER (nie odtwarzam historii).")
