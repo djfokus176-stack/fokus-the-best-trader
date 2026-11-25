@@ -69,7 +69,7 @@ def render_wave_intelligence2():
             "Porównaj także pełną siatkę 4R × 6 czasów na tych samych wejściach",
             value=False,key="wave2_grid")
         if st.button("🔬 ZBADAJ TRZECIE SZCZYTY I DOŁKI — A/B/C/D/E",
-                     key="wave2_run",use_container_width=True):
+                     key="wave2_run",width="stretch"):
             if not file:
                 st.error("Nie ma surowych świec M15. Plik z 1000 gotowych "
                          "zdarzeń nie wystarcza do porównania A/B/C/D.")
@@ -121,26 +121,26 @@ def render_wave_intelligence2():
             f"{meta.get('oos_cutoff','—')}. "
             "Nie wykryto potwierdzonej przewagi; status AUTO: NIEZMIENIONY.")
         st.markdown("#### 🏆 WAVE PATTERN RANKING — wynik po kosztach")
-        st.dataframe(result["ranking"],hide_index=True,use_container_width=True)
+        st.dataframe(result["ranking"],hide_index=True,width="stretch")
         st.caption("Wszystkie warianty mają status WAIT/BRAK DANYCH do czasu "
                    "weryfikacji na naprawdę nowych danych. E_WAIT nigdy "
                    "nie jest sztucznie liczone jako zyskowna transakcja.")
         st.markdown("#### 📊 LONG, SHORT, OBA RUCHY i KONSOLIDACJA")
-        st.dataframe(result["prob"],hide_index=True,use_container_width=True)
+        st.dataframe(result["prob"],hide_index=True,width="stretch")
         st.caption("UP i DOWN mogą zajść w tym samym horyzoncie; BOTH nie jest "
                    "błędem. FLAT oznacza, że ani jeden próg nie został dotknięty. "
                    "Zdarzenia bez pełnych świec są pomijane, nie przegrane.")
         with st.expander("🔬 Dlaczego niektóre fale działały? — cechy i godziny"):
-            st.dataframe(result["features"],hide_index=True,use_container_width=True)
-            st.dataframe(result["hours"],hide_index=True,use_container_width=True)
+            st.dataframe(result["features"],hide_index=True,width="stretch")
+            st.dataframe(result["hours"],hide_index=True,width="stretch")
         with st.expander("📅 Lata, dane wejściowe i pełne dzienniki"):
             yearly=result["summary"][result["summary"].year.notna()]
-            st.dataframe(yearly,hide_index=True,use_container_width=True)
-            st.dataframe(result["trades"],hide_index=True,use_container_width=True)
-            st.dataframe(timeframe_coverage(),hide_index=True,use_container_width=True)
+            st.dataframe(yearly,hide_index=True,width="stretch")
+            st.dataframe(result["trades"],hide_index=True,width="stretch")
+            st.dataframe(timeframe_coverage(),hide_index=True,width="stretch")
         if full_grid:
             st.markdown("#### 🧪 Ta sama grupa wejść — 1R/1,5R/2R/3R i 6 czasów")
-            st.dataframe(result["grid"],hide_index=True,use_container_width=True)
+            st.dataframe(result["grid"],hide_index=True,width="stretch")
             st.caption("10 i 20 minut: BRAK DANYCH M15. Wyniki innych kombinacji "
                        "nie są automatycznie promowane do AUTO.")
         for label,key,filename in (
