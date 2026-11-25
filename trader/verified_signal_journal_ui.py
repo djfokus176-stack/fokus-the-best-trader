@@ -44,7 +44,7 @@ def render_signal_journal(payload,*,attempts=None):
             "Wynik netto pkt":signal["net_pts"],
             "ID":signal["trade_id"][:14],
         })
-    st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True)
+    st.dataframe(pd.DataFrame(rows),hide_index=True,width="stretch")
     st.caption(
         "Godziny są w strefie Europe/Warsaw. Brak próby w tej sesji nie "
         "dowodzi, że alert nie pojawił się w innej przeglądarce lub sesji. "
