@@ -42,7 +42,7 @@ def render_wave_forward_comparison(state):
             "invalidated":"Unieważnione","pending":"Oczekujące",
             "bad":"Błędne","up_only":"Tylko UP",
             "down_only":"Tylko DOWN","both":"BOTH","flat":"FLAT"})
-        st.dataframe(show,hide_index=True,use_container_width=True)
+        st.dataframe(show,hide_index=True,width="stretch")
         st.download_button("⬇️ FORWARD — audyt warunków CSV",
                            data=show.to_csv(index=False).encode("utf-8-sig"),
                            file_name="FOKUS_WAVE_FORWARD_CONDITIONS.csv",
@@ -63,7 +63,7 @@ def render_wave_forward_comparison(state):
         "PF_OOS":"Profit Factor",
         "EXPECTANCY_OOS":"Expectancy, pkt",
         "STATUS":"Status badania"})
-    st.dataframe(ref,hide_index=True,use_container_width=True)
+    st.dataframe(ref,hide_index=True,width="stretch")
     st.caption(
         "Ranking pochodzi z zapisanego wyniku badania Dukascopy; "
         "późniejszy odcinek 30% NIE jest już niezależnym dziewiczym OOS. "
