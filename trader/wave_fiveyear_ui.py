@@ -59,7 +59,7 @@ def render_wave_fiveyear_report():
         st.markdown("**Historyczny WAVE PATTERN RANKING — po modelowanych kosztach**")
         st.dataframe(view.sort_values(["PROBY_OOS","FORMACJA"],
                          ascending=[False,True]),
-                     hide_index=True,use_container_width=True)
+                     hide_index=True,width="stretch")
         st.caption(
             "TRAIN i OOS liczone oddzielnie. E_WAIT oznacza brak "
             "transakcji i nie dostaje fikcyjnego zysku. "
@@ -123,7 +123,7 @@ def render_wave_fiveyear_report():
             if table is None or table.empty:
                 continue
             with st.expander(heading,expanded=False):
-                st.dataframe(table,hide_index=True,use_container_width=True)
+                st.dataframe(table,hide_index=True,width="stretch")
                 st.download_button(
                     "⬇️ "+name,data=table.to_csv(index=False).encode("utf-8-sig"),
                     file_name=name,mime="text/csv",
