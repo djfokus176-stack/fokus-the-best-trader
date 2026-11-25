@@ -7,7 +7,7 @@ paths locally on Python 3.14 without broker or Supabase credentials.
 import os
 import sys
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, expect
 
 
 def main():
@@ -31,6 +31,26 @@ def main():
                 state="visible",timeout=60000)
             tabs=page.get_by_role("tab").count()
             assert tabs>=10, f"Expected 10 owner tabs, got {tabs}"
+            # Verify the REAL browser can start the bundled Polish MP3
+            # with one click, rather than just passing Python/unit tests.
+            player=None
+            for _ in range(35):
+                for frame in page.frames:
+                    try:
+                        if frame.locator("#fokus-voice-play").count():
+                            player=frame
+                            break
+                    except Exception:
+                        pass  # Streamlit might replace a frame mid-rerun.
+                if player is not None:
+                    break
+                page.wait_for_timeout(300)
+            assert player is not None, "No direct-click browser MP3 player"
+            player.locator("#fokus-voice-play").click(timeout=15000)
+            expect(player.locator("#fokus-voice-status")).to_contain_text(
+                "Odtwarzanie rozpoczęte",timeout=20000)
+            print("BROWSER_VOICE=OK / MP3_BUTTON_CLICK_PLAYED / PYTHON="+
+                  sys.version.split()[0],flush=True)
             print("BROWSER_SMOKE=OK / PYTHON="+sys.version.split()[0]+
                   " / STREAMLIT_OWNER_TABS="+str(tabs),flush=True)
             if failures:

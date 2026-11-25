@@ -126,6 +126,7 @@ def test_cloud_view_has_voice_without_modifying_worker_or_chart_data():
     text=Path("trader/cloud_paper_terminal.py").read_text(encoding="utf8")
     assert "render_cloud_paper_voice(remote,url=url)" in text
     assert "advance_cloud_audio(" in text
-    assert "st.audio(content,format=mime,autoplay=audio_event is not None)" in text
+    assert "render_voice_player(" in text
+    assert "st.audio(content,format=mime,autoplay=False)" in text
     assert "queue_paper(" not in text
     assert "CapitalReadOnly(" not in text

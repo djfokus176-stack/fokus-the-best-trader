@@ -58,6 +58,7 @@ from trader.paper_lifecycle import (
     active_position, recent_positions, recent_events)
 from trader.paper_display import annotate_open_paper,annotate_paper_history
 from trader.paper_sounds import new_paper_events,wav_notice,SOUND_EVENTS,alert_audio
+from trader.browser_voice_player import render_voice_player
 from trader.paper_reporting import daily_weekly,performance_by_policy
 from trader.paper_audit import paper_labeled_export_table, paper_strategy_audit
 from trader.paper_method_labels import (RESEARCH_DISPLAY_ORDER, display_choice,
@@ -417,14 +418,19 @@ with st.sidebar:
         'Wydłużenie TP':('PAPER_EXTEND_TP',None),
     }
     test_choice=st.selectbox('🎧 Sprawdź nagranie',tuple(sound_preview),key='paper_sound_preview')
-    if st.button('🔊 PRZETESTUJ DŹWIĘK (bez pozycji)',key='test_paper_sound'):
-        sound_kind,sound_side=sound_preview[test_choice]
-        audio,mime,used=alert_audio(sound_kind,sound_side,
-            voice_enabled=st.session_state.get('paper_audio_mode')=='Głos ElevenLabs (nagrania MP3)')
-        st.caption('Test '+('GŁOSU ELEVENLABS' if used=='VOICE' else 'TONU')+
-                   ', NIE otwiera PAPER ani zlecenia. '
-                   'Jeśli nie ma pliku MP3, odtwarzam ton zastępczy.')
-        st.audio(audio,format=mime,autoplay=True)
+    # Browser autoplay is often blocked even after Streamlit widget clicks:
+    # use an embedded, direct click on the audio element for the preview.
+    # The preview is always accessible, even without a new PAPER trade.
+    sound_kind,sound_side=sound_preview[test_choice]
+    audio,mime,used=alert_audio(sound_kind,sound_side,
+        voice_enabled=st.session_state.get('paper_audio_mode')=='Głos ElevenLabs (nagrania MP3)')
+    st.caption('🎧 TEST GŁOSU — kliknij ▶ ODTWÓRZ GŁOS w ramce poniżej. '
+               'Tryb: '+('nagranie MP3' if used=='VOICE' else 'ton zastępczy')+
+               '. To tylko test głośnika, bez transakcji PAPER.')
+    render_voice_player(audio,mime,kind=sound_kind,side=sound_side)
+    st.caption('Alerty automatyczne wymagają WŁĄCZONEGO przełącznika MÓW '
+               'oraz NOWEGO potwierdzonego PAPER_OPEN lub PAPER_CLOSE. '
+               'Gdy bot czeka WAIT, nie wymyślam głosu LONG/SHORT.')
     st.caption('AUTO-SKAN nie wykonuje zleceń. Płatne AI jest ręczne w CZAT AI; osobny worker może opcjonalnie uruchamiać limitowane komentarze GPT po włączeniu w GitHub.')
     st.markdown('---')
     # Northflank keeps broker credentials on the worker. The owner CLOUD
