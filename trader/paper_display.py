@@ -22,7 +22,8 @@ def annotate_open_paper(fig, position):
 
 
 
-def annotate_paper_history(fig, positions, epic, source, timeframe, max_rows=80):
+def annotate_paper_history(fig, positions, epic, source, timeframe, max_rows=80,
+                           show_labels=False):
     """Compact ledger-backed PAPER events: max five grouped legend entries.
 
     Plot *only* actual v3 OPEN and completed CLOSED positions in the
@@ -48,7 +49,7 @@ def annotate_paper_history(fig, positions, epic, source, timeframe, max_rows=80)
         "CLOSED_FLAT":{"name":"PAPER: zamknięcie 0 / brak wyniku",
                        "symbol":"square","color":"#a8b3c6"},
     }
-    events={key:{"x":[],"y":[],"text":[]} for key in groups}
+    events={key:{"x":[],"y":[],"text":[],"labels":[]} for key in groups}
     for pos in list(positions or [])[:max_rows]:
         # timeframe=None is used ONLY by the read-only CLOUD M15 overview:
         # it marks actual M1/M5/M15/H1 PAPER positions on a M15 time axis.
@@ -73,6 +74,7 @@ def annotate_paper_history(fig, positions, epic, source, timeframe, max_rows=80)
                 group=events["OPEN_"+side]
                 group["x"].append(when)
                 group["y"].append(price)
+                group["labels"].append(side)
                 times=open_time_details(pos)
                 group["text"].append(
                     f"OTWARCIE {side} — SYMULACJA"
@@ -104,6 +106,7 @@ def annotate_paper_history(fig, positions, epic, source, timeframe, max_rows=80)
         group["x"].append(when)
         group["y"].append(price)
         result=(f"{pnl:+.2f} pkt" if pnl is not None else "BRAK P&L")
+        group["labels"].append(result)
         group["text"].append(
             f"ZAMKNIĘCIE {side} — SYMULACJA"
             f"<br>Strategia: {strategy}"
@@ -118,11 +121,17 @@ def annotate_paper_history(fig, positions, epic, source, timeframe, max_rows=80)
         if not e["x"]:
             continue
         fig.add_trace(go.Scatter(
-            x=e["x"],y=e["y"],text=e["text"],mode="markers",
+            x=e["x"],y=e["y"],
+            text=(e["labels"] if show_labels else e["text"]),
+            mode=("markers+text" if show_labels else "markers"),
+            customdata=(e["text"] if show_labels else None),
+            textposition="top center",
+            textfont={"size":11,"color":"#ffffff"},
             name=style["name"],showlegend=True,
             marker={"symbol":style["symbol"],"size":14,
                     "color":style["color"],
                     "line":{"width":1.5,"color":"#ffffff"}},
-            hovertemplate="%{text}<extra></extra>",
+            hovertemplate=("%{customdata}<extra></extra>"
+                           if show_labels else "%{text}<extra></extra>"),
         ))
     return fig
