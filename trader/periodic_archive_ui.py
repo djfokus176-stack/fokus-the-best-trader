@@ -102,7 +102,7 @@ def render_periodic_archive_ui(payload, *, widget_scope="terminal"):
                 "Ocena":("PORÓWNYWALNE" if comparable else
                          "NIEPEŁNA HISTORIA — BEZ PORÓWNANIA"),
             })
-    st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True)
+    st.dataframe(pd.DataFrame(rows),hide_index=True,width="stretch")
     st.caption("PAPER v3 ≠ MOMENTUM TEST ≠ RAW M1 TEST. "+
                "Wszystkie wyniki to symulacyjne punkty netto po kosztach "+
                "modelu, nie PLN ani udowodniony zysk. "+
@@ -149,7 +149,7 @@ def render_periodic_archive_ui(payload, *, widget_scope="terminal"):
         st.markdown("**Które strategie zarobiły/straciły punkty?**")
         st.dataframe(pd.DataFrame(sorted(method_data,
                  key=lambda r:r["Wynik netto pkt"],reverse=True)),
-                 hide_index=True,use_container_width=True)
+                 hide_index=True,width="stretch")
 
     with st.expander("📂 Archiwum konkretnego dnia — wszystkie rozliczone pozycje",
                      expanded=False):
@@ -160,7 +160,7 @@ def render_periodic_archive_ui(payload, *, widget_scope="terminal"):
                        "wykrycia przez worker pochodzi z osobnego "
                        "znacznika. Brak historycznego pola = BRAK ZAPISU.")
             table=pd.DataFrame(day_rows)
-            st.dataframe(table,hide_index=True,use_container_width=True)
+            st.dataframe(table,hide_index=True,width="stretch")
             st.download_button(
                 "Pobierz CSV rozliczeń tego dnia",
                 data=table.to_csv(index=False).encode("utf-8-sig"),
@@ -194,6 +194,6 @@ def render_periodic_archive_ui(payload, *, widget_scope="terminal"):
                     cursor=cursor-timedelta(days=7)
                 else:
                     cursor=cursor.replace(month=cursor.month-1) if cursor.month>1 else cursor.replace(year=cursor.year-1,month=12)
-        st.dataframe(pd.DataFrame(summary),hide_index=True,use_container_width=True)
+        st.dataframe(pd.DataFrame(summary),hide_index=True,width="stretch")
         st.caption("Lista pokazuje wyłącznie zachowane rozliczenia "+
                    "i może obejmować okresy przed początkiem pełnego audytu.")
