@@ -133,7 +133,8 @@ def test_ui_is_read_only_and_preserves_existing_live_voice_mechanism():
     engine=Path("trader/verified_signal_journal.py").read_text("utf8")
     assert "render_signal_journal(" in terminal
     assert "playback_attempt_record(audio_event,used)" in terminal
-    assert 'st.audio(content,format=mime,autoplay=audio_event is not None)' in terminal
+    assert "render_voice_player(" in terminal
+    assert 'st.audio(content,format=mime,autoplay=False)' in terminal
     assert "DZIENNIK SYGNAŁÓW LONG/SHORT" in ui
     assert "Sygnał workera (PL)" in ui
     assert "BRAK UDOKUMENTOWANEJ PRÓBY W TEJ SESJI" in ui
