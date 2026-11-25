@@ -67,6 +67,7 @@ from trader.fokus_3f import NAME as THREEF_NAME
 from trader.fokus_3f_ui import render_fokus_3f_research
 from trader.paper_daily_risk import paper_daily_risk, DEFAULT_DAILY_STOP_PTS
 from trader.paper_learning import strategy_scorecard
+from trader.quant_master_ui import render_quant_master_research
 from trader.forecast_audit import forecast_metrics
 from trader.remote_checkpoint import RemoteCheckpoint,remote_view_db,RemoteError,dump_state
 from trader.browser_paper_scan import run_browser_paper_scan
@@ -2711,6 +2712,10 @@ with reports_tab:
                                    'co najmniej 100 zamkniętych PAPER na strategię/politykę.')
                 else:
                     st.info('Brak zakończonych PAPER v3 — bot nie ma z czego się uczyć.')
+            # PDF Quant Master (26.11.2026): independent, READ-ONLY
+            # report from existing closed AUTO v3 ledger. It never alters
+            # broker orders, signals, worker gates, original chart or PAPER.
+            render_quant_master_research(paper_db, epic=instrument)
             if remote_paper_view_enabled():
                 with st.expander('🔮 PROGNOZA CENY NASTĘPNEJ ŚWIECY — KONTROLA BŁĘDÓW (SHADOW)',expanded=True):
                     forecasts=st.session_state.get('_paper_remote_forecasts') or {}
